@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+@theme {
+  /* Royal Blue scale */
+  --color-royal-50: #e8eaf6;
+  --color-royal-100: #c5cae9;
+  --color-royal-200: #9fa8da;
+  --color-royal-300: #7986cb;
+  --color-royal-400: #5c6bc0;
+  --color-royal-500: #3f51b5;
+  --color-royal-600: #303f9f;
+  --color-royal-700: #283593;
+  --color-royal-800: #1a237e;
+  --color-royal-900: #0d1257;
+
+  /* Gold accents */
+  --color-gold-300: #ffe082;
+  --color-gold-400: #ffd54f;
+  --color-gold-500: #ffc107;
+  --color-gold-600: #ffab00;
+
+  /* Pine Green secondary */
+  --color-pine-400: #43a047;
+  --color-pine-500: #2e7d32;
+  --color-pine-600: #1b5e20;
+
+  /* Surface colors (deep space) */
+  --color-surface: #0a0e27;
+  --color-surface-elevated: #111638;
+  --color-surface-card: #161b42;
+
+  /* Text */
+  --color-text-primary: #e8eaf6;
+  --color-text-muted: #9fa8da;
+  --color-text-dim: #5c6bc0;
+
+  /* Fonts */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Space Grotesk", var(--font-sans);
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* Font declarations */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/inter-var.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-var.woff2") format("woff2");
+}
+
+/* Base styles */
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  line-height: 1.7;
+  overflow-x: hidden;
+}
+
+/* Focus styles for accessibility */
+:focus-visible {
+  outline: 2px solid var(--color-gold-400);
+  outline-offset: 2px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Selection */
+::selection {
+  background-color: var(--color-royal-600);
+  color: var(--color-gold-300);
+}
+
+/* Scrollbar (subtle) */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-royal-700);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-royal-600);
+}

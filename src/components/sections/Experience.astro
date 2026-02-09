@@ -1,0 +1,28 @@
+---
+import SectionHeading from "@/components/ui/SectionHeading.astro";
+import TimelineItem from "@/components/ui/TimelineItem.astro";
+import { experiences } from "@/content/experience";
+---
+
+<section id="experience" class="px-6 py-24" aria-label="Work experience">
+  <div class="mx-auto max-w-4xl">
+    <SectionHeading
+      title="Experience"
+      subtitle="Building fintech risk infrastructure in production"
+    />
+
+    <div class="mt-8">
+      {
+        experiences.map((exp) => (
+          <TimelineItem
+            role={exp.role}
+            company={exp.company}
+            period={exp.period}
+            location={exp.location}
+            bullets={exp.bullets}
+          />
+        ))
+      }
+    </div>
+  </div>
+</section>

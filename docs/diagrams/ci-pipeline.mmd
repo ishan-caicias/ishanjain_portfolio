@@ -1,0 +1,25 @@
+---
+title: CI Pipeline (GitHub Actions)
+---
+graph LR
+    A[Push / PR] --> B[Lint & Format]
+    A --> C[Type Check]
+    A --> D[Unit Tests]
+
+    B --> E[Build]
+    C --> E
+    D --> E
+
+    E --> F[E2E Tests]
+
+    B -.- B1[ESLint]
+    B -.- B2[Prettier]
+    C -.- C1[astro check]
+    D -.- D1[Vitest]
+    E -.- E1[astro build]
+    F -.- F1[Playwright]
+    F -.- F2[Chromium]
+
+    style A fill:#303f9f,stroke:#5c6bc0,color:#e8eaf6
+    style E fill:#1b5e20,stroke:#43a047,color:#e8eaf6
+    style F fill:#1a237e,stroke:#ffd54f,color:#e8eaf6

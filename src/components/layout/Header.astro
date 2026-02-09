@@ -1,0 +1,113 @@
+---
+import type { NavItem } from "@/types";
+
+const navItems: NavItem[] = [
+  { label: "About", href: "#about" },
+  { label: "Experience", href: "#experience" },
+  { label: "Projects", href: "#projects" },
+  { label: "Skills", href: "#skills" },
+  { label: "Contact", href: "#contact" },
+];
+---
+
+<header
+  id="site-header"
+  class="fixed top-0 right-0 left-0 z-50 transition-all duration-300"
+>
+  <nav
+    class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4"
+    aria-label="Main navigation"
+  >
+    <!-- Logo -->
+    <a
+      href="#hero"
+      class="font-heading text-2xl font-bold text-gold-400 transition-colors hover:text-gold-300"
+      aria-label="Ishan Jain — back to top"
+    >
+      IJ<span class="text-royal-300">.</span>
+    </a>
+
+    <!-- Desktop nav -->
+    <ul class="hidden items-center gap-8 md:flex" role="list">
+      {
+        navItems.map((item) => (
+          <li>
+            <a
+              href={item.href}
+              class="text-sm font-medium text-text-muted transition-colors hover:text-gold-400"
+            >
+              {item.label}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+
+    <!-- Mobile menu toggle -->
+    <input
+      type="checkbox"
+      id="mobile-menu-toggle"
+      class="peer hidden"
+      aria-hidden="true"
+    />
+    <label
+      for="mobile-menu-toggle"
+      class="flex cursor-pointer flex-col gap-1.5 md:hidden"
+      aria-label="Toggle mobile menu"
+    >
+      <span
+        class="block h-0.5 w-6 bg-text-primary transition-transform peer-checked:translate-y-2 peer-checked:rotate-45"
+      ></span>
+      <span
+        class="block h-0.5 w-6 bg-text-primary transition-opacity peer-checked:opacity-0"
+      ></span>
+      <span
+        class="block h-0.5 w-6 bg-text-primary transition-transform peer-checked:-translate-y-2 peer-checked:-rotate-45"
+      ></span>
+    </label>
+
+    <!-- Mobile menu -->
+    <div
+      class="pointer-events-none fixed inset-x-0 top-16 max-h-0 overflow-hidden bg-surface/95 opacity-0 backdrop-blur-md transition-all duration-300 peer-checked:pointer-events-auto peer-checked:max-h-screen peer-checked:opacity-100 md:hidden"
+    >
+      <ul class="flex flex-col items-center gap-6 py-8" role="list">
+        {
+          navItems.map((item) => (
+            <li>
+              <a
+                href={item.href}
+                class="text-lg font-medium text-text-muted transition-colors hover:text-gold-400"
+                onclick="document.getElementById('mobile-menu-toggle').checked = false"
+              >
+                {item.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </nav>
+</header>
+
+<script>
+  const header = document.getElementById("site-header");
+
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (!header) return;
+      const currentScroll = window.scrollY;
+
+      if (currentScroll > 80) {
+        header.classList.add("bg-surface/90", "backdrop-blur-md", "shadow-lg");
+      } else {
+        header.classList.remove(
+          "bg-surface/90",
+          "backdrop-blur-md",
+          "shadow-lg",
+        );
+      }
+    },
+    { passive: true },
+  );
+</script>

@@ -1,0 +1,56 @@
+[
+  {
+    "id": "pillars-of-creation",
+    "title": "Pillars of Creation",
+    "date": "2014-06-01",
+    "description": "Towering columns of cool interstellar gas and dust in the Eagle Nebula (M16), roughly 6,500 light-years away. These pillars are nurseries for newborn stars, sculpted by intense ultraviolet light from nearby hot stars.",
+    "imagePath": "/hubble/images/pillars-of-creation.webp",
+    "credit": "NASA, ESA, Hubble Heritage Team (STScI/AURA)",
+    "sourceUrl": "https://hubblesite.org/contents/media/images/2015/01/3471-Image.html"
+  },
+  {
+    "id": "carina-nebula",
+    "title": "Carina Nebula",
+    "date": "2007-04-24",
+    "description": "A dynamic, star-forming region about 7,500 light-years away. The nebula contains at least a dozen brilliant stars that are 50 to 100 times the mass of our Sun, including the famous Eta Carinae binary system.",
+    "imagePath": "/hubble/images/carina-nebula.webp",
+    "credit": "NASA, ESA, N. Smith (UC Berkeley)",
+    "sourceUrl": "https://hubblesite.org/contents/media/images/2007/16/2112-Image.html"
+  },
+  {
+    "id": "deep-field",
+    "title": "Hubble Ultra Deep Field",
+    "date": "2004-03-09",
+    "description": "One of the most profound images ever taken. This tiny patch of sky in the constellation Fornax reveals approximately 10,000 galaxies, stretching back to within a few hundred million years of the Big Bang.",
+    "imagePath": "/hubble/images/deep-field.webp",
+    "credit": "NASA, ESA, S. Beckwith (STScI), HUDF Team",
+    "sourceUrl": "https://hubblesite.org/contents/media/images/2004/07/1457-Image.html"
+  },
+  {
+    "id": "orion-nebula",
+    "title": "Orion Nebula",
+    "date": "2006-01-11",
+    "description": "The nearest stellar nursery to Earth at roughly 1,344 light-years away. This mosaic reveals over 3,000 stars in various stages of formation within a turbulent cloud of gas and dust spanning 12 light-years.",
+    "imagePath": "/hubble/images/orion-nebula.webp",
+    "credit": "NASA, ESA, M. Robberto (STScI/ESA)",
+    "sourceUrl": "https://hubblesite.org/contents/media/images/2006/01/1826-Image.html"
+  },
+  {
+    "id": "whirlpool-galaxy",
+    "title": "Whirlpool Galaxy",
+    "date": "2005-04-25",
+    "description": "The grand spiral galaxy M51, located 31 million light-years away, locked in a gravitational embrace with its smaller companion NGC 5195. The sharp spiral arms are sites of star formation compressed by the interaction.",
+    "imagePath": "/hubble/images/whirlpool-galaxy.webp",
+    "credit": "NASA, ESA, S. Beckwith (STScI), Hubble Heritage Team",
+    "sourceUrl": "https://hubblesite.org/contents/media/images/2005/12/1672-Image.html"
+  },
+  {
+    "id": "eagle-nebula",
+    "title": "Eagle Nebula (Stellar Spire)",
+    "date": "2005-04-25",
+    "description": "A towering column of gas and dust in the Eagle Nebula, standing 9.5 light-years tall — about twice the distance from our Sun to the nearest star. Stars are being born at its tip within dense pockets called EGGs.",
+    "imagePath": "/hubble/images/eagle-nebula.webp",
+    "credit": "NASA, ESA, Hubble Heritage Team (STScI/AURA)",
+    "sourceUrl": "https://hubblesite.org/contents/media/images/2005/12/1673-Image.html"
+  }
+]

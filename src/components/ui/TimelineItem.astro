@@ -1,0 +1,49 @@
+---
+interface Props {
+  role: string;
+  company: string;
+  period: string;
+  location: string;
+  bullets: string[];
+}
+
+const { role, company, period, location, bullets } = Astro.props;
+---
+
+<div class="relative pl-8 pb-12 last:pb-0">
+  <!-- Timeline line -->
+  <div
+    class="absolute top-2 left-0 h-full w-px bg-gradient-to-b from-royal-500 to-royal-800"
+    aria-hidden="true"
+  >
+  </div>
+
+  <!-- Timeline dot -->
+  <div
+    class="absolute top-2 -left-1.5 h-3 w-3 rounded-full border-2 border-gold-500 bg-surface"
+    aria-hidden="true"
+  >
+  </div>
+
+  <!-- Content -->
+  <div>
+    <h3 class="font-heading text-xl font-bold text-text-primary">{role}</h3>
+    <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-text-muted">
+      <span class="text-gold-400">{company}</span>
+      <span aria-hidden="true">&middot;</span>
+      <span>{period}</span>
+      <span aria-hidden="true">&middot;</span>
+      <span>{location}</span>
+    </div>
+    <ul class="mt-4 space-y-2" role="list">
+      {
+        bullets.map((bullet) => (
+          <li class="flex gap-3 text-sm leading-relaxed text-text-muted">
+            <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-royal-400" aria-hidden="true" />
+            <span>{bullet}</span>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</div>

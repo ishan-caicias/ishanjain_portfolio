@@ -1,0 +1,61 @@
+---
+import SectionHeading from "@/components/ui/SectionHeading.astro";
+import Card from "@/components/ui/Card.astro";
+
+const credibilityItems = [
+  {
+    title: ".NET Microservices",
+    description:
+      "Event-driven services processing real-time financial decisions at scale.",
+  },
+  {
+    title: "AWS Cloud Infrastructure",
+    description:
+      "Production workloads on ECS, SQS, S3, and CloudWatch with operational excellence.",
+  },
+  {
+    title: "PostgreSQL & Data",
+    description:
+      "Complex query optimization, safe migrations, and data integrity guarantees.",
+  },
+  {
+    title: "Production Ownership",
+    description:
+      "On-call responsibility, incident response, and deployment pipeline stewardship.",
+  },
+  {
+    title: "Testing & Observability",
+    description:
+      "Comprehensive test suites, structured logging, metrics, and alerting.",
+  },
+  {
+    title: "CI/CD Pipelines",
+    description:
+      "Automated build, test, and deploy workflows across microservices.",
+  },
+];
+---
+
+<section id="about" class="px-6 py-24" aria-label="Core competencies">
+  <div class="mx-auto max-w-6xl">
+    <SectionHeading
+      title="What I Do"
+      subtitle="Core engineering competencies built through production experience"
+    />
+
+    <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      {
+        credibilityItems.map((item) => (
+          <Card>
+            <h3 class="font-heading text-lg font-semibold text-gold-400">
+              {item.title}
+            </h3>
+            <p class="mt-2 text-sm leading-relaxed text-text-muted">
+              {item.description}
+            </p>
+          </Card>
+        ))
+      }
+    </div>
+  </div>
+</section>
