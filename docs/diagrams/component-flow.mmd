@@ -1,0 +1,37 @@
+---
+title: Component Interaction Flow
+---
+sequenceDiagram
+    participant User
+    participant Starfield as Starfield (Canvas)
+    participant Window as Window Events
+    participant StarModal as Star Modal
+    participant HubbleData as /hubble/data.json
+
+    Note over Starfield: Renders ~200 stars<br/>6 are "special" (gold)
+
+    User->>Starfield: Click on golden star
+    Starfield->>Starfield: Hit detection (20px radius)
+    Starfield->>Window: dispatchEvent("starclick", {hubbleIndex})
+
+    Note over StarModal: Loaded on page idle
+
+    StarModal->>HubbleData: fetch("/hubble/data.json")
+    HubbleData-->>StarModal: HubbleEntry[]
+
+    Window->>StarModal: "starclick" event
+    StarModal->>StarModal: setIsOpen(true), setEntry(data[index])
+    StarModal->>User: Display modal with image + info
+
+    User->>StarModal: Click close / Press Escape / Click backdrop
+    StarModal->>StarModal: setIsOpen(false)
+    StarModal->>User: Modal closes (AnimatePresence exit)
+
+    Note over User,StarModal: Focus returns to<br/>previously focused element
+
+    rect rgb(26,35,46)
+        Note over Starfield: Astronaut Mascot Flow
+        User->>User: Scroll to new section
+        Note right of User: IntersectionObserver<br/>detects visible section
+        Note right of User: Astronaut drifts<br/>toward active section
+    end

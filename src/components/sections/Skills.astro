@@ -1,0 +1,33 @@
+---
+import SectionHeading from "@/components/ui/SectionHeading.astro";
+import { skillCategories } from "@/content/skills";
+---
+
+<section id="skills" class="px-6 py-24" aria-label="Technical skills">
+  <div class="mx-auto max-w-6xl">
+    <SectionHeading
+      title="Skills & Tools"
+      subtitle="Technologies I work with regularly"
+    />
+
+    <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+      {
+        skillCategories.map((category) => (
+          <div>
+            <h3 class="mb-3 font-heading text-sm font-semibold uppercase tracking-wider text-gold-400">
+              {category.name}
+            </h3>
+            <ul class="space-y-1.5" role="list">
+              {category.skills.map((skill) => (
+                <li class="flex items-center gap-2 text-sm text-text-muted">
+                  <span class="h-1 w-1 shrink-0 rounded-full bg-royal-400" aria-hidden="true" />
+                  {skill}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>

@@ -137,3 +137,13 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Astro
+.astro/
+
+# Playwright
+test-results/
+playwright-report/
+
+# Claude
+.claude/
