@@ -46,7 +46,9 @@ describe("StarModal", () => {
   async function openModal(baseElement: HTMLElement) {
     await act(async () => {
       window.dispatchEvent(
-        new CustomEvent("starclick", { detail: { hubbleIndex: 0 } }),
+        new CustomEvent("starclick", {
+          detail: { hubbleIndex: 0, isLegacy: true },
+        }),
       );
       await new Promise((r) => setTimeout(r, 50));
     });
@@ -147,7 +149,9 @@ describe("StarModal", () => {
 
     await act(async () => {
       window.dispatchEvent(
-        new CustomEvent("starclick", { detail: { hubbleIndex: 0 } }),
+        new CustomEvent("starclick", {
+          detail: { hubbleIndex: 0, isLegacy: true },
+        }),
       );
       await new Promise((r) => setTimeout(r, 100));
     });
@@ -161,5 +165,108 @@ describe("StarModal", () => {
     );
 
     expect(baseElement.textContent).toContain("A Distant Nebula");
+  });
+
+  it('shows "Today\'s Discovery" badge in NASA mode', async () => {
+    // Mock NASA API response - title must match search terms (e.g. pillars-of-creation) for quality filter
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("images-api.nasa.gov")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              collection: {
+                items: [
+                  {
+                    data: [
+                      {
+                        title: "Pillars of Creation in Eagle Nebula",
+                        description: "Pillars of creation nebula M16",
+                        nasa_id: "NASA001",
+                      },
+                    ],
+                    links: [
+                      { href: "https://example.com/nasa.jpg", rel: "preview" },
+                    ],
+                  },
+                ],
+              },
+            }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(mockHubbleData),
+      });
+    });
+
+    const { baseElement, getAllByText } = await renderAndWaitForData();
+
+    await act(async () => {
+      // Simulate NASA star click
+      window.dispatchEvent(
+        new CustomEvent("starclick", {
+          detail: {
+            targetId: "pillars-of-creation",
+            isLegacy: false,
+          },
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 300));
+    });
+
+    await waitFor(
+      () => {
+        const badges = getAllByText("Today's Discovery");
+        expect(badges.length).toBeGreaterThan(0);
+        expect(badges[0]).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+  });
+
+  it("does NOT show badge in Hubble/legacy mode", async () => {
+    const { baseElement } = await renderAndWaitForData();
+    await openModal(baseElement);
+
+    // Badge should not be present in legacy Hubble mode
+    expect(baseElement.textContent).not.toContain("Today's Discovery");
+  });
+
+  it("has h-80 class on image container for fixed height", async () => {
+    const { baseElement } = await renderAndWaitForData();
+    await openModal(baseElement);
+
+    await waitFor(() => {
+      const imageContainer = baseElement.querySelector(".h-80");
+      expect(imageContainer).toBeTruthy();
+    });
+  });
+
+  it("has object-contain class on image element", async () => {
+    const { baseElement } = await renderAndWaitForData();
+    await openModal(baseElement);
+
+    await waitFor(() => {
+      const img = baseElement.querySelector("img.object-contain");
+      expect(img).toBeTruthy();
+    });
+  });
+
+  it("image container and element maintain aspect ratio", async () => {
+    const { baseElement } = await renderAndWaitForData();
+    await openModal(baseElement);
+
+    await waitFor(() => {
+      // Verify h-80 on container
+      const imageContainer = baseElement.querySelector(
+        ".h-80.w-full.overflow-hidden",
+      );
+      expect(imageContainer).toBeTruthy();
+
+      // Verify object-contain on image
+      const img = baseElement.querySelector("img.object-contain");
+      expect(img).toBeTruthy();
+    });
   });
 });

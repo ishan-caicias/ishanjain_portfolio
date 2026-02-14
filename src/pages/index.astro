@@ -1,22 +1,53 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import Hero from "@/components/sections/Hero.astro";
-import Credibility from "@/components/sections/Credibility.astro";
-import Experience from "@/components/sections/Experience.astro";
-import Achievements from "@/components/sections/Achievements.astro";
-import Projects from "@/components/sections/Projects.astro";
-import Skills from "@/components/sections/Skills.astro";
-import Writing from "@/components/sections/Writing.astro";
-import Contact from "@/components/sections/Contact.astro";
+import CosmicBackgroundScene from "@/components/background/CosmicBackgroundScene";
+import CosmicAROverlay from "@/components/background/CosmicAROverlay";
+import AstronautMascot from "@/components/islands/AstronautMascot";
+import StarModal from "@/components/islands/StarModal";
+import PanelCoordinator from "@/components/islands/PanelCoordinator";
+import SpaceshipScene from "@/components/spaceship/SpaceshipScene";
+import ShipDebugUI from "@/components/spaceship/ShipDebugUI";
 ---
 
 <BaseLayout>
-  <Hero />
-  <Credibility />
-  <Experience />
-  <Achievements />
-  <Projects />
-  <Skills />
-  <Writing />
-  <Contact />
+  <!-- Cosmic background: R3F starfield (layer 0, pointer-events: none; picking via document raycaster) -->
+  <CosmicBackgroundScene
+    client:load
+    debugCaptureSelect={Astro.url.searchParams.get("cosmic-debug") === "1"}
+    testCenterObject={Astro.url.searchParams.get("cosmic-debug") === "1"}
+  />
+
+  <!-- AR overlay for cosmic object selection -->
+  <CosmicAROverlay client:load />
+
+  <!-- Hero: ship above the fold (100vh, centered) -->
+  <section
+    id="landing-hero"
+    class="relative z-[var(--z-ship-3d)] flex min-h-screen flex-col items-center justify-center px-4"
+    aria-label="Landing hero"
+  >
+    <div
+      class="mx-auto w-full max-w-[1100px] h-[45vh] md:h-[60vh] max-h-[720px] min-h-[320px] bg-transparent"
+    >
+      <SpaceshipScene client:visible />
+    </div>
+  </section>
+
+  <!-- Mission Control: normal flow, below the fold -->
+  <section
+    id="mission-control"
+    class="section-spacing relative z-[var(--z-hud)] flex flex-col items-center justify-center px-4 py-16"
+    aria-labelledby="mission-control-heading"
+    data-testid="mission-control-section"
+  >
+    <PanelCoordinator client:load />
+  </section>
+
+  <!-- Astronaut mascot (desktop only, docks to panels) -->
+  <div class="astronaut-wrapper">
+    <AstronautMascot client:idle />
+  </div>
+
+  <StarModal client:idle />
+  <ShipDebugUI client:load />
 </BaseLayout>

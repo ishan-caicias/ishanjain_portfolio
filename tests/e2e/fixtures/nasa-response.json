@@ -1,0 +1,67 @@
+{
+  "collection": {
+    "items": [
+      {
+        "data": [
+          {
+            "title": "Pillars of Creation (Eagle Nebula)",
+            "description": "Iconic star-forming region captured by the Hubble Space Telescope. This image shows towering columns of cold gas and dust where new stars are being born.",
+            "nasa_id": "PIA15985",
+            "date_created": "2012-04-01T00:00:00Z",
+            "center": "JPL",
+            "media_type": "image"
+          }
+        ],
+        "links": [
+          {
+            "href": "https://images-assets.nasa.gov/image/PIA15985/PIA15985~large.jpg",
+            "rel": "preview",
+            "render": "image"
+          }
+        ]
+      },
+      {
+        "data": [
+          {
+            "title": "Eagle Nebula - Wider View",
+            "description": "A wider perspective of the Eagle Nebula showing the Pillars of Creation in context within the larger star-forming region.",
+            "nasa_id": "PIA15986",
+            "date_created": "2012-04-02T00:00:00Z",
+            "center": "JPL",
+            "media_type": "image"
+          }
+        ],
+        "links": [
+          {
+            "href": "https://images-assets.nasa.gov/image/PIA15986/PIA15986~medium.jpg",
+            "rel": "preview",
+            "render": "image"
+          }
+        ]
+      },
+      {
+        "data": [
+          {
+            "title": "Pillars of Creation Infrared",
+            "description": "Infrared view of the Pillars of Creation reveals embedded stars within the gas and dust columns.",
+            "nasa_id": "PIA15987",
+            "date_created": "2014-10-15T00:00:00Z",
+            "center": "JPL",
+            "media_type": "image"
+          }
+        ],
+        "links": [
+          {
+            "href": "https://images-assets.nasa.gov/image/PIA15987/PIA15987~large.jpg",
+            "rel": "preview",
+            "render": "image"
+          }
+        ]
+      }
+    ],
+    "metadata": {
+      "total_hits": 3
+    },
+    "version": "1.0"
+  }
+}

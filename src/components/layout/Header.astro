@@ -1,5 +1,6 @@
 ---
 import type { NavItem } from "@/types";
+import LogoMark from "@/components/islands/LogoMark";
 
 const navItems: NavItem[] = [
   { label: "About", href: "#about" },
@@ -19,13 +20,7 @@ const navItems: NavItem[] = [
     aria-label="Main navigation"
   >
     <!-- Logo -->
-    <a
-      href="#hero"
-      class="font-heading text-2xl font-bold text-gold-400 transition-colors hover:text-gold-300"
-      aria-label="Ishan Jain — back to top"
-    >
-      IJ<span class="text-royal-300">.</span>
-    </a>
+    <LogoMark client:load />
 
     <!-- Desktop nav -->
     <ul class="hidden items-center gap-8 md:flex" role="list">

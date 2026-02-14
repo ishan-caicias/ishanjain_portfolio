@@ -1,98 +1,37 @@
 ---
-import MissionControl from "@/components/islands/MissionControl";
+import RoverAnimation from "@/components/islands/RoverAnimation";
+import MercurySurfaceFooter from "@/components/layout/MercurySurfaceFooter.astro";
 ---
 
-<footer class="relative mt-24 overflow-hidden" role="contentinfo">
-  <!-- Earth surface SVG -->
-  <div class="relative">
-    <svg
-      class="w-full"
-      viewBox="0 0 1440 200"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
+<footer
+  id="site-footer"
+  class="relative mt-24 overflow-hidden"
+  role="contentinfo"
+  data-testid="site-footer"
+>
+  <div class="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 pt-8 pb-4">
+    <p class="text-center text-sm text-pine-400/60">
+      Built with Astro, React, and a love for the cosmos.
+      <br />
+      &copy; {new Date().getFullYear()} Ishan Jain. All rights reserved.
+    </p>
+    <div
+      class="footer-rover-layer pointer-events-none flex w-full max-w-[1440px] items-end justify-center"
+      style="height: var(--mercury-footer-height);"
       aria-hidden="true"
-      preserveAspectRatio="none"
     >
-      <!-- Sky gradient -->
-      <defs>
-        <linearGradient id="earth-gradient" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="transparent"></stop>
-          <stop offset="40%" stop-color="#0a1628"></stop>
-          <stop offset="100%" stop-color="#1a3a2a"></stop>
-        </linearGradient>
-        <linearGradient id="ground-gradient" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#1b3a2a"></stop>
-          <stop offset="100%" stop-color="#0f2218"></stop>
-        </linearGradient>
-      </defs>
-
-      <!-- Atmosphere glow -->
-      <rect width="1440" height="200" fill="url(#earth-gradient)"></rect>
-
-      <!-- Rolling hills -->
-      <path
-        d="M0 140 Q120 100 240 130 Q360 160 480 120 Q600 80 720 110 Q840 140 960 100 Q1080 60 1200 90 Q1320 120 1440 80 L1440 200 L0 200Z"
-        fill="url(#ground-gradient)"></path>
-
-      <!-- Foreground hill -->
-      <path
-        d="M0 160 Q180 130 360 150 Q540 170 720 140 Q900 110 1080 135 Q1260 160 1440 130 L1440 200 L0 200Z"
-        fill="#0f2218"></path>
-
-      <!-- Trees/vegetation silhouettes -->
-      <g fill="#0a1a12" opacity="0.8">
-        <path d="M100 155 L108 135 L116 155Z"></path>
-        <path d="M105 150 L108 128 L111 150Z"></path>
-        <path d="M300 148 L310 125 L320 148Z"></path>
-        <path d="M305 142 L310 118 L315 142Z"></path>
-        <path d="M700 138 L712 110 L724 138Z"></path>
-        <path d="M706 130 L712 102 L718 130Z"></path>
-        <path d="M1100 132 L1112 108 L1124 132Z"></path>
-        <path d="M1106 126 L1112 100 L1118 126Z"></path>
-      </g>
-
-      <!-- Small buildings silhouette (mission control) -->
-      <g fill="#0a1a12" opacity="0.6">
-        <rect x="880" y="130" width="30" height="20" rx="1"></rect>
-        <rect x="915" y="125" width="20" height="25" rx="1"></rect>
-        <rect x="940" y="135" width="15" height="15" rx="1"></rect>
-        <!-- Antenna -->
-        <line
-          x1="925"
-          y1="125"
-          x2="925"
-          y2="115"
-          stroke="#0a1a12"
-          stroke-width="1.5"></line>
-        <circle cx="925" cy="113" r="2" fill="#1b5e20" opacity="0.8"></circle>
-      </g>
-
-      <!-- Engineer silhouette (clickable area for MissionControl) -->
-      <g id="engineer-silhouette" class="cursor-pointer" transform="translate(950, 118)">
-        <title>Open Mission Control</title>
-        <!-- Person standing -->
-        <circle cx="5" cy="0" r="3" fill="#1a3a2a"></circle>
-        <path d="M5 3 L5 14 M1 8 L9 8 M5 14 L1 22 M5 14 L9 22" stroke="#1a3a2a" stroke-width="1.5" fill="none" stroke-linecap="round"></path>
-        <!-- Laptop -->
-        <rect x="10" y="10" width="6" height="4" fill="#1a3a2a" rx="0.5"></rect>
-        <line x1="10" y1="14" x2="17" y2="14" stroke="#1a3a2a" stroke-width="1"></line>
-        <!-- Screen glow -->
-        <rect x="10.5" y="10.5" width="5" height="3" fill="#2e7d32" opacity="0.6" rx="0.3"></rect>
-      </g>
-    </svg>
-  </div>
-
-  <!-- Footer content -->
-  <div class="bg-[#0f2218] px-6 pb-8">
-    <div class="mx-auto flex max-w-6xl flex-col items-center gap-4">
-      <!-- Mission Control React island -->
-      <MissionControl client:visible />
-
-      <p class="text-center text-sm text-pine-400/60">
-        Built with Astro, React, and a love for the cosmos.
-        <br />
-        &copy; {new Date().getFullYear()} Ishan Jain. All rights reserved.
-      </p>
+      <div class="pointer-events-auto relative h-full w-full">
+        <RoverAnimation client:idle />
+      </div>
     </div>
   </div>
+  <MercurySurfaceFooter />
 </footer>
+
+<style is:global>
+  @media (max-width: 640px) {
+    .footer-rover-layer {
+      height: var(--mercury-footer-height-sm) !important;
+    }
+  }
+</style>

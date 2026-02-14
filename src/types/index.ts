@@ -39,3 +39,38 @@ export interface NavItem {
   label: string;
   href: string;
 }
+
+// Mission Control Hub Types
+export type PanelId =
+  | "about"
+  | "skills"
+  | "experience"
+  | "projects"
+  | "writing"
+  | "contact";
+
+export interface HubControl {
+  id: PanelId | "deploy";
+  label: string;
+  ariaLabel: string;
+  description: string;
+}
+
+export interface PanelConfig {
+  id: PanelId;
+  title: string;
+  subtitle?: string;
+}
+
+// Astronaut Docking Types
+export type DockingState = "hub" | "docking" | "docked" | "returning";
+
+export interface AstronautDockEvent extends CustomEvent {
+  detail: {
+    x: number;
+    y: number;
+  };
+}
+
+// Rover Animation Types
+export type RoverState = "idle" | "traveling" | "deployed" | "resetting";

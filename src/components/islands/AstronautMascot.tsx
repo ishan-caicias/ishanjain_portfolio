@@ -1,16 +1,34 @@
 import { useRef, useEffect, useState } from "react";
+import type { DockingState } from "@/types";
+
+// Configuration constants
+const DOCKING_TRANSITION_DURATION = 1.5; // seconds
 
 export default function AstronautMascot() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ x: 80, y: 200 });
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [dockingState, setDockingState] = useState<DockingState>("hub");
+  const [dockTarget, setDockTarget] = useState<{ x: number; y: number } | null>(
+    null,
+  );
 
+  // Reduced motion detection
   useEffect(() => {
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     setPrefersReducedMotion(motionQuery.matches);
     const handler = (e: MediaQueryListEvent) =>
       setPrefersReducedMotion(e.matches);
     motionQuery.addEventListener("change", handler);
+
+    return () => {
+      motionQuery.removeEventListener("change", handler);
+    };
+  }, []);
+
+  // Section tracking (only when not docked)
+  useEffect(() => {
+    if (dockingState !== "hub") return;
 
     // Track which section is in view and drift toward it
     const sections = document.querySelectorAll("section[id]");
@@ -35,21 +53,82 @@ export default function AstronautMascot() {
 
     return () => {
       observer.disconnect();
-      motionQuery.removeEventListener("change", handler);
+    };
+  }, [dockingState]);
+
+  // Docking event listeners
+  useEffect(() => {
+    const handleDock = (e: Event) => {
+      const event = e as CustomEvent<{ x: number; y: number }>;
+      setDockTarget(event.detail);
+      setDockingState("docking");
+
+      // After docking animation completes, set to docked state
+      setTimeout(() => {
+        setDockingState("docked");
+      }, DOCKING_TRANSITION_DURATION * 1000);
+    };
+
+    const handleReturn = () => {
+      setDockingState("returning");
+      setDockTarget(null);
+
+      // After return animation completes, set to hub state
+      setTimeout(() => {
+        setDockingState("hub");
+      }, DOCKING_TRANSITION_DURATION * 1000);
+    };
+
+    window.addEventListener("astronaut:dock", handleDock);
+    window.addEventListener("astronaut:return", handleReturn);
+
+    return () => {
+      window.removeEventListener("astronaut:dock", handleDock);
+      window.removeEventListener("astronaut:return", handleReturn);
     };
   }, []);
+
+  // Calculate final position based on docking state
+  const finalPosition =
+    dockingState === "docked" || dockingState === "docking"
+      ? dockTarget
+      : position;
+
+  // Determine if we should animate float (disable when docking/docked)
+  const shouldFloat =
+    dockingState === "hub" || dockingState === "returning";
+
+  // Calculate transition duration
+  const transitionDuration =
+    dockingState === "docking" || dockingState === "returning"
+      ? `${DOCKING_TRANSITION_DURATION}s`
+      : "2s";
 
   return (
     <div
       ref={containerRef}
-      className="pointer-events-none fixed right-8 z-40 lg:right-16"
+      className="pointer-events-none fixed z-40"
       style={{
-        top: `${position.y}px`,
-        transition: prefersReducedMotion ? "none" : "top 2s ease-in-out",
+        top: finalPosition ? `${finalPosition.y}px` : `${position.y}px`,
+        right:
+          dockingState === "docked" || dockingState === "docking"
+            ? "auto"
+            : "32px",
+        left:
+          dockingState === "docked" || dockingState === "docking"
+            ? `${finalPosition?.x}px`
+            : "auto",
+        transition: prefersReducedMotion
+          ? "none"
+          : `top ${transitionDuration} ease-in-out, left ${transitionDuration} ease-in-out, right ${transitionDuration} ease-in-out`,
       }}
       aria-hidden="true"
     >
-      <div className={prefersReducedMotion ? "" : "animate-float"}>
+      <div
+        className={
+          prefersReducedMotion || !shouldFloat ? "" : "animate-float"
+        }
+      >
         <svg
           width="64"
           height="80"

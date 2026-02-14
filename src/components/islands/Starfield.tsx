@@ -1,4 +1,6 @@
 import { useRef, useEffect, useCallback } from "react";
+import { selectTargets, getDailySeed } from "@/content/nasaTargets";
+import type { NasaTarget } from "@/types/nasa";
 
 interface Star {
   x: number;
@@ -10,6 +12,7 @@ interface Star {
   twinkleOffset: number;
   isSpecial: boolean;
   hubbleIndex: number | null;
+  targetId?: string; // NASA target ID
 }
 
 interface StarfieldProps {
@@ -19,21 +22,31 @@ interface StarfieldProps {
 
 export default function Starfield({
   starCount = 200,
-  specialStarCount = 6,
+  specialStarCount = 8, // Increased from 6 to 8 for NASA targets
 }: StarfieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const starsRef = useRef<Star[]>([]);
   const mouseRef = useRef({ x: 0, y: 0 });
   const animationRef = useRef<number>(0);
   const prefersReducedMotion = useRef(false);
+  const nasaTargetsRef = useRef<NasaTarget[]>([]);
 
   const createStars = useCallback(
     (width: number, height: number): Star[] => {
       const stars: Star[] = [];
       const totalStars = starCount + specialStarCount;
 
+      // Select NASA targets for special stars (deterministic daily selection)
+      if (nasaTargetsRef.current.length === 0) {
+        const dailySeed = getDailySeed();
+        nasaTargetsRef.current = selectTargets(dailySeed, specialStarCount);
+        console.log(`[Starfield] Selected ${nasaTargetsRef.current.length} NASA targets for ${dailySeed}`);
+      }
+
       for (let i = 0; i < totalStars; i++) {
         const isSpecial = i >= starCount;
+        const specialIndex = i - starCount;
+
         stars.push({
           x: Math.random() * width,
           y: Math.random() * height,
@@ -43,7 +56,10 @@ export default function Starfield({
           twinkleSpeed: 0.002 + Math.random() * 0.004,
           twinkleOffset: Math.random() * Math.PI * 2,
           isSpecial,
-          hubbleIndex: isSpecial ? i - starCount : null,
+          hubbleIndex: isSpecial ? specialIndex : null,
+          targetId: isSpecial && nasaTargetsRef.current[specialIndex]
+            ? nasaTargetsRef.current[specialIndex].id
+            : undefined,
         });
       }
       return stars;
@@ -183,11 +199,15 @@ export default function Starfield({
         const dy = clickY - star.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (distance < hitRadius && star.hubbleIndex !== null) {
-          // Dispatch custom event for the StarModal to listen to
+        if (distance < hitRadius) {
+          // Dispatch custom event with NASA target ID or Hubble fallback
           window.dispatchEvent(
             new CustomEvent("starclick", {
-              detail: { hubbleIndex: star.hubbleIndex },
+              detail: {
+                targetId: star.targetId,
+                isLegacy: !star.targetId, // Legacy if no NASA target
+                hubbleIndex: star.hubbleIndex,
+              },
             }),
           );
           break;
@@ -200,10 +220,10 @@ export default function Starfield({
   return (
     <canvas
       ref={canvasRef}
-      className="absolute inset-0 h-full w-full"
+      className="starfield-canvas absolute inset-0 h-full w-full"
       onClick={handleCanvasClick}
       role="img"
-      aria-label="Animated starfield background. Click on the brighter golden stars to discover Hubble telescope images."
+      aria-label="Animated starfield background. Click on the brighter golden stars to discover NASA space imagery."
       style={{ cursor: "crosshair" }}
     />
   );

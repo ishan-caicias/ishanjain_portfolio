@@ -1,0 +1,134 @@
+/* Mission Control Panel Styles */
+
+/* Panel Shell - DockedModule aesthetics */
+.panel-shell {
+  background: rgba(17, 22, 56, 0.95);
+  backdrop-filter: blur(12px);
+  border-left: 2px solid var(--color-royal-700);
+  box-shadow:
+    0 0 40px rgba(92, 107, 192, 0.3),
+    inset 0 0 60px rgba(92, 107, 192, 0.05);
+}
+
+/* Custom scrollbar for panels */
+.panel-shell::-webkit-scrollbar {
+  width: 8px;
+}
+
+.panel-shell::-webkit-scrollbar-track {
+  background: var(--color-surface);
+  border-radius: 4px;
+}
+
+.panel-shell::-webkit-scrollbar-thumb {
+  background: var(--color-royal-700);
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.panel-shell::-webkit-scrollbar-thumb:hover {
+  background: var(--color-royal-600);
+}
+
+/* Panel header - sticky with border */
+.panel-header {
+  background: var(--color-surface-elevated);
+  border-bottom: 1px solid var(--color-royal-700);
+  backdrop-filter: blur(12px);
+}
+
+/* Panel content container */
+.panel-content {
+  min-height: calc(100vh - 120px); /* Account for header */
+}
+
+/* Backdrop overlay */
+.panel-backdrop {
+  background: rgba(10, 14, 39, 0.8);
+  backdrop-filter: blur(4px);
+}
+
+/* Hub container - centered with offset for footer */
+.hub-container {
+  /* No additional styles needed, handled inline */
+}
+
+/* Hub controls grid */
+.hub-controls {
+  /* Styles handled inline via Tailwind */
+}
+
+/* Individual hub control button */
+.hub-control {
+  /* Pulse animation on hover (subtle) */
+  position: relative;
+  overflow: hidden;
+}
+
+.hub-control::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+.hub-control:hover::before {
+  opacity: 1;
+  animation: pulse-glow 2s infinite;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 10px rgba(92, 107, 192, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(92, 107, 192, 0.5);
+  }
+}
+
+/* Focus visible styles (keyboard navigation) */
+.hub-control:focus-visible {
+  outline: 2px solid var(--color-gold-400);
+  outline-offset: 2px;
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .hub-control::before {
+    animation: none !important;
+  }
+
+  .panel-shell,
+  .panel-backdrop {
+    transition: none !important;
+  }
+}
+
+/* Mobile responsiveness */
+@media (max-width: 767px) {
+  .panel-shell {
+    max-width: 100%;
+    border-left: none;
+    border-top: 2px solid var(--color-royal-700);
+  }
+
+  .hub-controls {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 1rem !important;
+  }
+
+  .panel-content {
+    padding: 1.5rem !important;
+  }
+}
+
+/* Tablet adjustments */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .hub-controls {
+    gap: 1.5rem !important;
+  }
+}

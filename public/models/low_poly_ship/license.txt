@@ -1,0 +1,11 @@
+Model Information:
+* title:	Low-Poly Sci-Fi SpaceShip
+* source:	https://sketchfab.com/3d-models/low-poly-sci-fi-spaceship-4b3d87807e5841d39ae6897421be24c0
+* author:	ArixPix (https://sketchfab.com/ArixPix)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Low-Poly Sci-Fi SpaceShip" (https://sketchfab.com/3d-models/low-poly-sci-fi-spaceship-4b3d87807e5841d39ae6897421be24c0) by ArixPix (https://sketchfab.com/ArixPix) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
