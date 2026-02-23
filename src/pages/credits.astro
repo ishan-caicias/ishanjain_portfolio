@@ -1,0 +1,190 @@
+---
+import BaseLayout from "@layouts/BaseLayout.astro";
+import * as fs from 'fs';
+import * as path from 'path';
+
+// Load credits from public directory (may not exist during initial build)
+let credits: any[] = [];
+try {
+  const creditsPath = path.join(process.cwd(), 'public/hero-dso/credits.json');
+  if (fs.existsSync(creditsPath)) {
+    const data = fs.readFileSync(creditsPath, 'utf-8');
+    credits = JSON.parse(data);
+  }
+} catch (err) {
+  // Credits file doesn't exist yet - show empty state
+  console.warn("Hero DSO credits not found. Run 'npm run fetch-hero-dso' to generate.");
+}
+---
+
+<BaseLayout
+  title="Image Credits | Ishan Jain"
+  description="Attribution and licensing information for astronomical images used in this portfolio."
+>
+  <main class="relative z-20 mx-auto max-w-5xl px-6 py-16 sm:px-8 lg:px-12">
+    <!-- Header -->
+    <header class="mb-12">
+      <h1 class="mb-4 text-4xl font-bold text-white sm:text-5xl">
+        Image Credits
+      </h1>
+      <p class="text-lg text-gray-300">
+        This portfolio features astronomical images sourced from <a
+          href="https://commons.wikimedia.org"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 underline hover:text-blue-300"
+        >Wikimedia Commons</a>. All images are used under
+        <strong>Public Domain</strong>, <strong>CC0</strong>, <strong>CC BY</strong>, or <strong>CC BY-SA</strong> licenses.
+      </p>
+    </header>
+
+    {credits.length === 0 ? (
+      <!-- No credits available -->
+      <div class="rounded-lg border border-gray-700 bg-gray-800/50 p-8 text-center">
+        <p class="text-gray-400">
+          No hero images have been downloaded yet. Run <code class="rounded bg-gray-700 px-2 py-1">npm run fetch-hero-dso</code> to fetch images from Wikimedia Commons.
+        </p>
+      </div>
+    ) : (
+      <!-- Credits table -->
+      <div class="overflow-hidden rounded-lg border border-gray-700 bg-gray-800/30">
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead class="bg-gray-800/70">
+              <tr class="border-b border-gray-700">
+                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-200">
+                  Object
+                </th>
+                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-200">
+                  License
+                </th>
+                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-200">
+                  Attribution
+                </th>
+                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-200">
+                  Source
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-700">
+              {credits.map((credit) => (
+                <tr class="transition-colors hover:bg-gray-700/30">
+                  <!-- Object ID & Label -->
+                  <td class="px-6 py-4">
+                    <div class="flex flex-col">
+                      <span class="font-mono text-sm font-semibold text-blue-400">
+                        {credit.id}
+                      </span>
+                      <span class="text-sm text-gray-300">
+                        {credit.label}
+                      </span>
+                    </div>
+                  </td>
+
+                  <!-- License -->
+                  <td class="px-6 py-4">
+                    {credit.licenseUrl ? (
+                      <a
+                        href={credit.licenseUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-sm text-blue-400 underline hover:text-blue-300"
+                      >
+                        {credit.licenseShortName || "View License"}
+                      </a>
+                    ) : (
+                      <span class="text-sm text-gray-400">
+                        {credit.licenseShortName || "Unknown"}
+                      </span>
+                    )}
+                  </td>
+
+                  <!-- Attribution -->
+                  <td class="px-6 py-4">
+                    <div class="flex flex-col gap-1">
+                      {credit.artist && (
+                        <span class="text-sm text-gray-300" set:html={credit.artist} />
+                      )}
+                      {credit.credit && (
+                        <span class="text-xs text-gray-400" set:html={credit.credit} />
+                      )}
+                      {!credit.artist && !credit.credit && (
+                        <span class="text-sm text-gray-400">Not specified</span>
+                      )}
+                    </div>
+                  </td>
+
+                  <!-- Source Link -->
+                  <td class="px-6 py-4">
+                    {credit.imageDescriptionUrl ? (
+                      <a
+                        href={credit.imageDescriptionUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="inline-flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          class="h-4 w-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                          />
+                        </svg>
+                        View
+                      </a>
+                    ) : (
+                      <span class="text-sm text-gray-400">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Footer note -->
+      <div class="mt-8 rounded-lg border border-blue-900/50 bg-blue-950/20 p-6">
+        <h3 class="mb-2 text-sm font-semibold text-blue-300">
+          Attribution Requirements
+        </h3>
+        <p class="text-sm leading-relaxed text-gray-300">
+          Images marked with <strong>CC BY</strong> or <strong>CC BY-SA</strong> require attribution.
+          All attributions are provided above with links to original sources.
+          Images are used in accordance with their respective licenses for educational and portfolio purposes.
+        </p>
+      </div>
+    )}
+
+    <!-- Back link -->
+    <div class="mt-12">
+      <a
+        href="/"
+        class="inline-flex items-center gap-2 text-blue-400 transition-colors hover:text-blue-300"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          class="h-5 w-5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M10 19l-7-7m0 0l7-7m-7 7h18"
+          />
+        </svg>
+        Back to Portfolio
+      </a>
+    </div>
+  </main>
+</BaseLayout>

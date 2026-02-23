@@ -1,0 +1,7 @@
+[
+  { "id": "M31", "label": "Andromeda Galaxy", "preferredQuery": "Andromeda Galaxy" },
+  { "id": "M42", "label": "Orion Nebula", "preferredQuery": "Orion Nebula" },
+  { "id": "M51", "label": "Whirlpool Galaxy", "preferredQuery": "Whirlpool Galaxy" },
+  { "id": "NGC7000", "label": "North America Nebula", "preferredQuery": "North America Nebula" },
+  { "id": "M104", "label": "Sombrero Galaxy", "preferredQuery": "Sombrero Galaxy" }
+]

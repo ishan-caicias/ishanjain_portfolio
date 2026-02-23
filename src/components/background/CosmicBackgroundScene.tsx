@@ -12,6 +12,9 @@ import {
   COSMIC_OBJECT_SELECTED_EVENT,
   type CosmicObjectKind,
 } from "./cosmicTypes";
+import RealStarLayer from "./RealStarLayer";
+import GaiaCombinedLayer from "./GaiaCombinedLayer";
+import { OrbitControls } from "@react-three/drei";
 
 /* ----- TUNING CONSTANTS ----- */
 
@@ -1701,8 +1704,9 @@ export default function CosmicBackgroundScene({
       const ndx = (x / rect.width) * 2 - 1;
       const ndy = -((y / rect.height) * 2 - 1);
       const raycaster = new THREE.Raycaster();
-      // Increase threshold in normal mode for easier clicking (7), keep 5 in debug mode
-      raycaster.params.Points = { threshold: debugCaptureSelect ? 5 : 7 };
+      // Reduced threshold to prevent false positives on empty space
+      // Higher values = larger click radius (more forgiving but more false positives)
+      raycaster.params.Points = { threshold: debugCaptureSelect ? 3 : 5 };
       const mouse = new THREE.Vector2(ndx, ndy);
 
       // Temporarily reset camera rotation for accurate raycasting
@@ -1737,7 +1741,19 @@ export default function CosmicBackgroundScene({
 
       const pointIndex = hit.index ?? 0;
       const obj = interactiveObjects[pointIndex];
-      if (!obj) return;
+
+      // CRITICAL: Validate object exists and index is valid
+      if (!obj || pointIndex < 0 || pointIndex >= interactiveObjects.length) {
+        console.warn('Invalid object click detected - ignoring');
+        return;
+      }
+
+      // Additional validation: check distance from camera (reject too-far clicks)
+      const hitDistance = hit.distance;
+      if (hitDistance > WRAP_RADIUS * 1.5) {
+        console.warn('Click too far from valid objects - ignoring');
+        return;
+      }
 
       const detail: CosmicObjectSelectedDetail = {
         id: obj.id,
@@ -1746,6 +1762,9 @@ export default function CosmicBackgroundScene({
         screen: { x: e.clientX, y: e.clientY },
         timestamp: Date.now(),
       };
+
+      console.log(`✅ Valid click on object: ${obj.id} (${obj.kind})`);
+
       window.dispatchEvent(
         new CustomEvent(COSMIC_OBJECT_SELECTED_EVENT, { detail })
       );
@@ -1858,7 +1877,7 @@ export default function CosmicBackgroundScene({
       data-testid="cosmic-background"
     >
       <Canvas
-        camera={{ position: [0, 0, 8], fov: 60, near: 0.1, far: 100 }}
+        camera={{ position: [0, 0, 5], fov: 75, near: 0.1, far: 100 }}
         dpr={[
           1,
           typeof window !== 'undefined' && window.innerWidth < DPR_MOBILE_BREAKPOINT
@@ -1880,38 +1899,31 @@ export default function CosmicBackgroundScene({
         aria-label="Cosmic background: starfield with discoverable stars and objects. Click brighter stars to explore."
       >
         <RefCapture cameraRef={cameraRef} sceneRef={sceneRef} debugMode={debugCaptureSelect} />
+        <OrbitControls
+          enableDamping
+          dampingFactor={0.05}
+          rotateSpeed={0.5}
+          enableZoom={true}
+          enablePan={false}
+          minDistance={2}
+          maxDistance={20}
+        />
         <CameraOscillation cameraRef={cameraRef} reducedMotion={reducedMotion} debugMode={debugCaptureSelect} />
         <color attach="background" args={[0x000000]} />
         <NebulaLayer reducedMotion={reducedMotion} />
-        <BackgroundGalaxyLayer
+        {/* TEMP DISABLED: Procedural background galaxies - will replace with real OpenNGC data */}
+        {/* <BackgroundGalaxyLayer
           geometry={geos.backgroundGalaxy}
           reducedMotion={reducedMotion}
-        />
-        <StarLayer
-          layerIndex={0}
-          geometry={geos.far}
-          parallaxFactor={PARALLAX_FAR}
-          baseOpacity={BASE_OPACITY_FAR}
+        /> */}
+
+        {/* GAIA COMBINED LAYER - Hipparcos stars + Gaia galaxies */}
+        <GaiaCombinedLayer
+          baseOpacity={0.85}
           blendMode={THREE.AdditiveBlending}
           reducedMotion={reducedMotion}
         />
-        <StarLayer
-          layerIndex={1}
-          geometry={geos.mid}
-          parallaxFactor={PARALLAX_MID}
-          baseOpacity={BASE_OPACITY_MID}
-          blendMode={THREE.AdditiveBlending}
-          reducedMotion={reducedMotion}
-        />
-        <StarLayer
-          layerIndex={2}
-          geometry={geos.near}
-          parallaxFactor={PARALLAX_NEAR}
-          baseOpacity={BASE_OPACITY_NEAR}
-          blendMode={THREE.NormalBlending}
-          reducedMotion={reducedMotion}
-          fragmentShader={starFragmentShaderNear}  // NEW: Use streak-enabled shader for NEAR layer
-        />
+
         <InteractiveLayer
           groupRef={interactiveGroupRef}
           objects={interactiveObjects}

@@ -147,3 +147,10 @@ playwright-report/
 
 # Claude
 .claude/
+
+# Hero DSO images and generated files
+public/hero-dso/*
+!public/hero-dso/credits.json
+!public/hero-dso/manifest.json
+scripts/hero/rejected.json
+# Note: credits.json and manifest.json are committed as empty placeholders

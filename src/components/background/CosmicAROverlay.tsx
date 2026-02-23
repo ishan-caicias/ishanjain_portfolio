@@ -89,12 +89,41 @@ function clampToViewport(
   };
 }
 
+// ============================================
+// HERO IMAGE MANIFEST LOADER
+// ============================================
+
+interface HeroManifest {
+  [id: string]: {
+    src: string;
+  };
+}
+
+let manifestCache: HeroManifest | null = null;
+let manifestPromise: Promise<HeroManifest> | null = null;
+
+async function loadManifest(): Promise<HeroManifest> {
+  if (manifestCache) return manifestCache;
+  if (manifestPromise) return manifestPromise;
+
+  manifestPromise = fetch('/hero-dso/manifest.json')
+    .then(res => res.ok ? res.json() : {})
+    .catch(() => ({}))
+    .then(data => {
+      manifestCache = data;
+      return data;
+    });
+
+  return manifestPromise;
+}
+
 export default function CosmicAROverlay() {
   const [cardData, setCardData] = useState<ARCardData | null>(null);
   const [cardPosition, setCardPosition] = useState<ARCardPosition>({ x: 0, y: 0 });
   const [reducedMotion, setReducedMotion] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
+  const [heroImageSrc, setHeroImageSrc] = useState<string | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const cardDataRef = useRef<ARCardData | null>(null);
@@ -180,6 +209,44 @@ export default function CosmicAROverlay() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, [cardData, cardPosition.x, cardPosition.y]);
+
+  // Check if hero image exists for this object via manifest
+  useEffect(() => {
+    if (!cardData?.id) {
+      setHeroImageSrc(null);
+      return;
+    }
+
+    // Load manifest and check if this object has a hero image
+    loadManifest().then(manifest => {
+      // Try exact ID match first
+      let entry = manifest[cardData.id];
+
+      // If no match, try extracting potential DSO IDs
+      if (!entry) {
+        const possibleIds = [
+          cardData.id.toUpperCase(),
+          cardData.id.split('-').pop()?.toUpperCase(),
+        ].filter(Boolean) as string[];
+
+        for (const testId of possibleIds) {
+          if (manifest[testId]) {
+            entry = manifest[testId];
+            break;
+          }
+        }
+      }
+
+      // Set hero image source if found in manifest
+      if (entry?.src) {
+        setHeroImageSrc(entry.src);
+      } else {
+        setHeroImageSrc(null);
+      }
+    }).catch(() => {
+      setHeroImageSrc(null);
+    });
+  }, [cardData?.id]);
 
   // Trigger scan animation on card open
   useEffect(() => {
@@ -345,9 +412,34 @@ export default function CosmicAROverlay() {
               )}
 
               {/* Card content */}
-              <div className="relative z-10 p-4">
-                {/* Header */}
-                <div className="mb-3 flex items-start justify-between">
+              <div className="relative z-10">
+                {/* Hero Image (if exists in manifest) */}
+                {!isScanning && heroImageSrc && (
+                  <div className="relative overflow-hidden rounded-t-lg">
+                    <img
+                      src={heroImageSrc}
+                      alt={`${title} - Deep-sky object`}
+                      className="h-48 w-full object-cover"
+                      loading="lazy"
+                      onError={() => {
+                        // Hide if image fails to load
+                        setHeroImageSrc(null);
+                      }}
+                    />
+                    {/* Credits overlay */}
+                    <a
+                      href="/credits"
+                      className="absolute bottom-2 right-2 rounded bg-black/70 px-2 py-1 text-xs text-blue-300 backdrop-blur-sm transition-colors hover:bg-black/90 hover:text-blue-200"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Image Credits
+                    </a>
+                  </div>
+                )}
+
+                <div className="p-4">
+                  {/* Header */}
+                  <div className="mb-3 flex items-start justify-between">
                   <div className="flex-1">
                     <h3 className="text-lg font-semibold text-royal-300">
                       {title} <span className="text-royal-500">•</span>{" "}
@@ -397,11 +489,12 @@ export default function CosmicAROverlay() {
                   </div>
                 )}
 
-                {/* Position data (for debugging/reference) */}
-                <div className="mt-3 border-t border-royal-700/30 pt-3">
-                  <p className="text-xs font-mono text-text-dim">
-                    Position: [{cardData.position[0].toFixed(1)}, {cardData.position[1].toFixed(1)}, {cardData.position[2].toFixed(1)}]
-                  </p>
+                  {/* Position data (for debugging/reference) */}
+                  <div className="mt-3 border-t border-royal-700/30 pt-3">
+                    <p className="text-xs font-mono text-text-dim">
+                      Position: [{cardData.position[0].toFixed(1)}, {cardData.position[1].toFixed(1)}, {cardData.position[2].toFixed(1)}]
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
