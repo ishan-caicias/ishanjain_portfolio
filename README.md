@@ -11,19 +11,19 @@ npm run dev        # Start dev server at localhost:4321
 
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start development server |
-| `npm run build` | Production build to `dist/` |
-| `npm run preview` | Preview production build locally |
-| `npm run check` | Run Astro type checking |
-| `npm run lint` | Run ESLint + Prettier check |
-| `npm run lint:fix` | Auto-fix lint and formatting issues |
-| `npm run format` | Format all files with Prettier |
-| `npm run test` | Run unit tests (Vitest) |
-| `npm run test:watch` | Run unit tests in watch mode |
-| `npm run test:e2e` | Run E2E tests (Playwright) |
-| `npm run test:e2e:ui` | Run E2E tests with Playwright UI |
+| Command               | Description                         |
+| --------------------- | ----------------------------------- |
+| `npm run dev`         | Start development server            |
+| `npm run build`       | Production build to `dist/`         |
+| `npm run preview`     | Preview production build locally    |
+| `npm run check`       | Run Astro type checking             |
+| `npm run lint`        | Run ESLint + Prettier check         |
+| `npm run lint:fix`    | Auto-fix lint and formatting issues |
+| `npm run format`      | Format all files with Prettier      |
+| `npm run test`        | Run unit tests (Vitest)             |
+| `npm run test:watch`  | Run unit tests in watch mode        |
+| `npm run test:e2e`    | Run E2E tests (Playwright)          |
+| `npm run test:e2e:ui` | Run E2E tests with Playwright UI    |
 
 ## Tech Stack
 
@@ -81,9 +81,9 @@ Set `PUBLIC_NASA_API_KEY` in a `.env` file to optionally fetch from NASA's Astro
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PUBLIC_NASA_API_KEY` | No | NASA API key for APOD integration |
+| Variable              | Required | Description                       |
+| --------------------- | -------- | --------------------------------- |
+| `PUBLIC_NASA_API_KEY` | No       | NASA API key for APOD integration |
 
 ## Testing
 
@@ -116,6 +116,7 @@ npx playwright install chromium
 Configured for Netlify with `netlify.toml`. Push to `main` triggers auto-deploy.
 
 Build settings:
+
 - **Build command**: `npm run build`
 - **Publish directory**: `dist`
 - **Node version**: 20

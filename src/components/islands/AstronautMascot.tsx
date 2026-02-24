@@ -96,8 +96,24 @@ export default function AstronautMascot() {
           />
 
           {/* Suit details - chest panel */}
-          <rect x="26" y="30" width="12" height="8" rx="2" fill="#e8eaf6" opacity="0.5" />
-          <line x1="32" y1="30" x2="32" y2="38" stroke="#9fa8da" strokeWidth="0.5" opacity="0.5" />
+          <rect
+            x="26"
+            y="30"
+            width="12"
+            height="8"
+            rx="2"
+            fill="#e8eaf6"
+            opacity="0.5"
+          />
+          <line
+            x1="32"
+            y1="30"
+            x2="32"
+            y2="38"
+            stroke="#9fa8da"
+            strokeWidth="0.5"
+            opacity="0.5"
+          />
 
           {/* Helmet */}
           <ellipse

@@ -1,5 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import {
+  LINKEDIN_URL,
+  GITHUB_URL,
+  RESUME_PATH,
+  SHORT_BIO,
+} from "@/content/links";
 
 interface QuickLink {
   label: string;
@@ -11,17 +17,17 @@ interface QuickLink {
 const quickLinks: QuickLink[] = [
   {
     label: "Resume",
-    href: "/resume.pdf",
+    href: RESUME_PATH,
     icon: "M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
   },
   {
     label: "LinkedIn",
-    href: "https://www.linkedin.com/in/ishanjain08/",
+    href: LINKEDIN_URL,
     icon: "M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-4 0v7h-4v-7a6 6 0 016-6zM2 9h4v12H2zM4 6a2 2 0 100-4 2 2 0 000 4z",
   },
   {
     label: "GitHub",
-    href: "https://github.com/ishan-caicias",
+    href: GITHUB_URL,
     icon: "M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22",
   },
   {
@@ -31,8 +37,7 @@ const quickLinks: QuickLink[] = [
   },
 ];
 
-const SHORT_BIO =
-  "Ishan Jain — Backend-leaning full-stack engineer specialising in fintech risk infrastructure, .NET microservices, and production ownership. Based in Sydney, AU.";
+const SHORT_BIO_LOCAL = SHORT_BIO;
 
 export default function MissionControl() {
   const [isOpen, setIsOpen] = useState(false);
@@ -42,28 +47,25 @@ export default function MissionControl() {
 
   const toggle = useCallback(() => setIsOpen((prev) => !prev), []);
 
-  const handleAction = useCallback(
-    async (link: QuickLink) => {
-      if (link.action === "copy-bio") {
-        try {
-          await navigator.clipboard.writeText(SHORT_BIO);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        } catch {
-          // Fallback: create temporary textarea
-          const textarea = document.createElement("textarea");
-          textarea.value = SHORT_BIO;
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand("copy");
-          document.body.removeChild(textarea);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        }
+  const handleAction = useCallback(async (link: QuickLink) => {
+    if (link.action === "copy-bio") {
+      try {
+        await navigator.clipboard.writeText(SHORT_BIO_LOCAL);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        // Fallback: create temporary textarea
+        const textarea = document.createElement("textarea");
+        textarea.value = SHORT_BIO_LOCAL;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
       }
-    },
-    [],
-  );
+    }
+  }, []);
 
   // Keyboard handling
   useEffect(() => {
@@ -80,16 +82,17 @@ export default function MissionControl() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  // Click outside to close
+  // Click outside to close (use 'click' so link clicks fire before we close)
   useEffect(() => {
     if (!isOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
       if (
         panelRef.current &&
-        !panelRef.current.contains(e.target as Node) &&
+        !panelRef.current.contains(target) &&
         triggerRef.current &&
-        !triggerRef.current.contains(e.target as Node)
+        !triggerRef.current.contains(target)
       ) {
         setIsOpen(false);
       }

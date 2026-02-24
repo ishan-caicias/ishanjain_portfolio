@@ -72,7 +72,9 @@ describe("StarModal", () => {
     await openModal(baseElement);
 
     expect(baseElement.textContent).toContain("Test Nebula");
-    expect(baseElement.textContent).toContain("A test nebula for unit testing.");
+    expect(baseElement.textContent).toContain(
+      "A test nebula for unit testing.",
+    );
     expect(baseElement.textContent).toContain("Test Credit");
   });
 
@@ -161,5 +163,41 @@ describe("StarModal", () => {
     );
 
     expect(baseElement.textContent).toContain("A Distant Nebula");
+  });
+
+  it("traps focus with Tab when modal is open", async () => {
+    const { baseElement } = await renderAndWaitForData();
+    await openModal(baseElement);
+
+    const dialog = baseElement.querySelector('[role="dialog"]') as HTMLElement;
+    const closeButton = baseElement.querySelector(
+      '[aria-label="Close modal"]',
+    ) as HTMLElement;
+    expect(closeButton).toBeTruthy();
+    closeButton.focus();
+
+    const focusable = dialog.querySelectorAll<HTMLElement>(
+      'button, a[href], [tabindex]:not([tabindex="-1"])',
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    const keyDownEvent = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: false,
+      bubbles: true,
+    });
+    Object.defineProperty(keyDownEvent, "preventDefault", {
+      value: vi.fn(),
+      configurable: true,
+    });
+    if (last) {
+      last.focus();
+      document.dispatchEvent(keyDownEvent);
+      expect(
+        (keyDownEvent as unknown as { preventDefault: () => void })
+          .preventDefault,
+      ).toHaveBeenCalled();
+    }
   });
 });
