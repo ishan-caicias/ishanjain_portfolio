@@ -149,7 +149,8 @@ describe("MissionControl", () => {
       expect(container.querySelector('[role="menu"]')).toBeInTheDocument();
     });
 
-    fireEvent.click(document.body);
+    // Component uses document.addEventListener("mousedown", ...) for click-outside
+    fireEvent.mouseDown(document.body);
 
     await waitFor(() => {
       expect(container.querySelector('[role="menu"]')).not.toBeInTheDocument();
