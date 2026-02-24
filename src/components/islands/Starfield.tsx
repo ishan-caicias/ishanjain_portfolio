@@ -37,7 +37,9 @@ export default function Starfield({
         stars.push({
           x: Math.random() * width,
           y: Math.random() * height,
-          radius: isSpecial ? 2 + Math.random() * 1.5 : 0.5 + Math.random() * 1.5,
+          radius: isSpecial
+            ? 2 + Math.random() * 1.5
+            : 0.5 + Math.random() * 1.5,
           opacity: 0.3 + Math.random() * 0.7,
           baseOpacity: 0.3 + Math.random() * 0.7,
           twinkleSpeed: 0.002 + Math.random() * 0.004,
@@ -52,7 +54,12 @@ export default function Starfield({
   );
 
   const draw = useCallback(
-    (ctx: CanvasRenderingContext2D, width: number, height: number, time: number) => {
+    (
+      ctx: CanvasRenderingContext2D,
+      width: number,
+      height: number,
+      time: number,
+    ) => {
       ctx.clearRect(0, 0, width, height);
 
       const mx = mouseRef.current.x;
@@ -151,7 +158,12 @@ export default function Starfield({
 
     if (prefersReducedMotion.current) {
       // Draw once for reduced motion
-      draw(ctx, canvas.getBoundingClientRect().width, canvas.getBoundingClientRect().height, 0);
+      draw(
+        ctx,
+        canvas.getBoundingClientRect().width,
+        canvas.getBoundingClientRect().height,
+        0,
+      );
     } else {
       animationRef.current = requestAnimationFrame(animate);
     }

@@ -58,7 +58,14 @@ function buildReportFromSummary(data) {
 }
 
 function aggregateFromFinal(data) {
-  const totals = { statements: 0, coveredStatements: 0, functions: 0, coveredFunctions: 0, lines: 0, coveredLines: 0 };
+  const totals = {
+    statements: 0,
+    coveredStatements: 0,
+    functions: 0,
+    coveredFunctions: 0,
+    lines: 0,
+    coveredLines: 0,
+  };
 
   for (const [file, entry] of Object.entries(data)) {
     if (!entry || typeof entry !== "object") continue;
@@ -88,16 +95,23 @@ function aggregateFromFinal(data) {
       const lineCount = linesSet.size;
       const coveredLineIds = new Set();
       for (const [id, hit] of Object.entries(s || {})) {
-        if (hit && statementMap[id]) coveredLineIds.add(lineMap[statementMap[id].start.line]);
+        if (hit && statementMap[id])
+          coveredLineIds.add(lineMap[statementMap[id].start.line]);
       }
       totals.lines += lineCount;
       totals.coveredLines += coveredLineIds.size;
     }
   }
 
-  const linesPct = totals.lines ? (totals.coveredLines / totals.lines) * 100 : null;
-  const stPct = totals.statements ? (totals.coveredStatements / totals.statements) * 100 : null;
-  const fnPct = totals.functions ? (totals.coveredFunctions / totals.functions) * 100 : null;
+  const linesPct = totals.lines
+    ? (totals.coveredLines / totals.lines) * 100
+    : null;
+  const stPct = totals.statements
+    ? (totals.coveredStatements / totals.statements) * 100
+    : null;
+  const fnPct = totals.functions
+    ? (totals.coveredFunctions / totals.functions) * 100
+    : null;
 
   let md = `# Test Coverage Report\n\n`;
   md += `Generated: ${new Date().toISOString()}\n\n`;

@@ -15,10 +15,7 @@ test.describe("Star Interaction", () => {
   test("starfield canvas is rendered", async ({ page }) => {
     const canvas = page.locator("canvas");
     await expect(canvas).toBeVisible();
-    await expect(canvas).toHaveAttribute(
-      "aria-label",
-      /starfield.*Hubble/i,
-    );
+    await expect(canvas).toHaveAttribute("aria-label", /starfield.*Hubble/i);
   });
 
   test("star modal opens via custom event", async ({ page }) => {

@@ -30,13 +30,21 @@ export const projects: Project[] = [
     status: "Open Source",
     description:
       "Astronomy-themed portfolio built with Astro and React islands. Features a canvas starfield, interactive Hubble image modal, and accessible design. Demonstrates frontend craft alongside backend focus.",
-    tech: ["Astro", "React", "TypeScript", "TailwindCSS", "Canvas API", "Motion"],
+    tech: [
+      "Astro",
+      "React",
+      "TypeScript",
+      "TailwindCSS",
+      "Canvas API",
+      "Motion",
+    ],
     link: "https://github.com/ishan-caicias/ishanjain_portfolio",
   },
   {
     title: "University Game Project",
     status: "Archived",
-    description: "Game development project completed during undergraduate studies.",
+    description:
+      "Game development project completed during undergraduate studies.",
     tech: ["Unity", "C#"],
   },
 ];

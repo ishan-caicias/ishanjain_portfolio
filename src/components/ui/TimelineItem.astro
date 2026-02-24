@@ -39,7 +39,10 @@ const { role, company, period, location, bullets } = Astro.props;
       {
         bullets.map((bullet) => (
           <li class="flex gap-3 text-sm leading-relaxed text-text-muted">
-            <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-royal-400" aria-hidden="true" />
+            <span
+              class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-royal-400"
+              aria-hidden="true"
+            />
             <span>{bullet}</span>
           </li>
         ))

@@ -72,7 +72,9 @@ describe("StarModal", () => {
     await openModal(baseElement);
 
     expect(baseElement.textContent).toContain("Test Nebula");
-    expect(baseElement.textContent).toContain("A test nebula for unit testing.");
+    expect(baseElement.textContent).toContain(
+      "A test nebula for unit testing.",
+    );
     expect(baseElement.textContent).toContain("Test Credit");
   });
 

@@ -25,12 +25,12 @@ src/
 
 ### Component Boundaries
 
-| Layer | Rendering | JS Shipped | Purpose |
-|-------|-----------|------------|---------|
-| `sections/` | Server (Astro) | None | Static content sections |
-| `ui/` | Server (Astro) | None | Reusable UI primitives |
-| `layout/` | Server (Astro) | Minimal inline | Page shell (nav has inline scroll handler) |
-| `islands/` | Client (React) | Per-island bundle | Interactive features |
+| Layer       | Rendering      | JS Shipped        | Purpose                                    |
+| ----------- | -------------- | ----------------- | ------------------------------------------ |
+| `sections/` | Server (Astro) | None              | Static content sections                    |
+| `ui/`       | Server (Astro) | None              | Reusable UI primitives                     |
+| `layout/`   | Server (Astro) | Minimal inline    | Page shell (nav has inline scroll handler) |
+| `islands/`  | Client (React) | Per-island bundle | Interactive features                       |
 
 ### React Islands
 
@@ -117,6 +117,7 @@ Astro components render to static HTML at build time. Testing them would effecti
 See [diagrams/ci-pipeline.mmd](diagrams/ci-pipeline.mmd) for the visual flow.
 
 Jobs run in this order:
+
 1. **Lint** (ESLint + Prettier) — parallel with Typecheck and Unit Tests
 2. **Typecheck** (astro check) — parallel with Lint and Unit Tests
 3. **Unit Tests** (Vitest) — parallel with Lint and Typecheck

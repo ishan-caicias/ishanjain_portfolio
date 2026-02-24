@@ -1,6 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { LINKEDIN_URL, GITHUB_URL, RESUME_PATH, SHORT_BIO } from "@/content/links";
+import {
+  LINKEDIN_URL,
+  GITHUB_URL,
+  RESUME_PATH,
+  SHORT_BIO,
+} from "@/content/links";
 
 interface QuickLink {
   label: string;
@@ -42,28 +47,25 @@ export default function MissionControl() {
 
   const toggle = useCallback(() => setIsOpen((prev) => !prev), []);
 
-  const handleAction = useCallback(
-    async (link: QuickLink) => {
-      if (link.action === "copy-bio") {
-        try {
-          await navigator.clipboard.writeText(SHORT_BIO_LOCAL);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        } catch {
-          // Fallback: create temporary textarea
-          const textarea = document.createElement("textarea");
-          textarea.value = SHORT_BIO_LOCAL;
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand("copy");
-          document.body.removeChild(textarea);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        }
+  const handleAction = useCallback(async (link: QuickLink) => {
+    if (link.action === "copy-bio") {
+      try {
+        await navigator.clipboard.writeText(SHORT_BIO_LOCAL);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        // Fallback: create temporary textarea
+        const textarea = document.createElement("textarea");
+        textarea.value = SHORT_BIO_LOCAL;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
       }
-    },
-    [],
-  );
+    }
+  }, []);
 
   // Keyboard handling
   useEffect(() => {

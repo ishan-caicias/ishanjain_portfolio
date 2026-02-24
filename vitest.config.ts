@@ -19,10 +19,7 @@ export default defineConfig({
     globals: false,
     coverage: {
       provider: "v8",
-      include: [
-        "src/components/islands/**/*.{ts,tsx}",
-        "src/utils/**/*.ts",
-      ],
+      include: ["src/components/islands/**/*.{ts,tsx}", "src/utils/**/*.ts"],
       exclude: [
         "**/*.test.{ts,tsx}",
         "**/node_modules/**",

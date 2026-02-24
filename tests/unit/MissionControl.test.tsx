@@ -114,7 +114,11 @@ describe("MissionControl", () => {
       configurable: true,
     });
     Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("clipboard unavailable")) },
+      clipboard: {
+        writeText: vi
+          .fn()
+          .mockRejectedValue(new Error("clipboard unavailable")),
+      },
     });
 
     const { container } = render(<MissionControl />);
@@ -135,7 +139,9 @@ describe("MissionControl", () => {
     await waitFor(() => {
       expect(execCommandMock).toHaveBeenCalledWith("copy");
     });
-    expect(container.querySelector('[role="menu"]')?.textContent).toContain("Copied!");
+    expect(container.querySelector('[role="menu"]')?.textContent).toContain(
+      "Copied!",
+    );
   });
 
   it("closes panel when clicking outside", async () => {
