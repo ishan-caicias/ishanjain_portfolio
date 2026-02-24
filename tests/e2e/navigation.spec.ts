@@ -18,18 +18,21 @@ test.describe("Navigation", () => {
   test("navigation links are visible on desktop", async ({ page }) => {
     const nav = page.getByRole("navigation", { name: "Main navigation" });
     await expect(nav).toBeVisible();
+    const desktopList = nav.locator("ul").first();
 
-    await expect(nav.getByText("About")).toBeVisible();
-    await expect(nav.getByText("Experience")).toBeVisible();
-    await expect(nav.getByText("Projects")).toBeVisible();
-    await expect(nav.getByText("Skills")).toBeVisible();
-    await expect(nav.getByText("Contact")).toBeVisible();
+    await expect(desktopList.getByRole("link", { name: "About" })).toBeVisible();
+    await expect(desktopList.getByRole("link", { name: "Experience" })).toBeVisible();
+    await expect(desktopList.getByRole("link", { name: "Projects" })).toBeVisible();
+    await expect(desktopList.getByRole("link", { name: "Skills" })).toBeVisible();
+    await expect(desktopList.getByRole("link", { name: "Contact" })).toBeVisible();
   });
 
   test("clicking nav link scrolls to section", async ({ page }) => {
     const experienceLink = page
       .getByRole("navigation")
-      .getByText("Experience");
+      .locator("ul")
+      .first()
+      .getByRole("link", { name: "Experience" });
     await experienceLink.click();
 
     // Wait for smooth scroll

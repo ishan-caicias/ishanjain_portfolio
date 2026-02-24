@@ -11,11 +11,8 @@ test.describe("Accessibility", () => {
     page,
   }) => {
     const violations = await getViolations(page, undefined, {
-      axeOptions: {
-        rules: {
-          // Canvas has aria-label, exclude from color contrast check
-          "color-contrast": { enabled: false },
-        },
+      rules: {
+        "color-contrast": { enabled: false },
       },
     });
 
