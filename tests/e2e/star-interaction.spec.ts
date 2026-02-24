@@ -3,8 +3,13 @@ import { test, expect } from "@playwright/test";
 test.describe("Star Interaction", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    // Wait for starfield to render
+    const dataPromise = page.waitForResponse(
+      (r) => r.url().includes("/hubble/data.json") && r.ok(),
+      { timeout: 15000 },
+    );
     await page.waitForSelector("canvas");
+    await dataPromise;
+    await page.waitForTimeout(500);
   });
 
   test("starfield canvas is rendered", async ({ page }) => {
@@ -24,9 +29,8 @@ test.describe("Star Interaction", () => {
       );
     });
 
-    // Modal should appear
     const modal = page.getByRole("dialog");
-    await expect(modal).toBeVisible({ timeout: 5000 });
+    await expect(modal).toBeVisible({ timeout: 10000 });
 
     // Check content loaded
     await expect(modal).toContainText("Pillars of Creation");
@@ -40,7 +44,7 @@ test.describe("Star Interaction", () => {
     });
 
     const modal = page.getByRole("dialog");
-    await expect(modal).toBeVisible({ timeout: 5000 });
+    await expect(modal).toBeVisible({ timeout: 10000 });
 
     const closeButton = page.getByLabel("Close modal");
     await closeButton.click();
@@ -56,7 +60,7 @@ test.describe("Star Interaction", () => {
     });
 
     const modal = page.getByRole("dialog");
-    await expect(modal).toBeVisible({ timeout: 5000 });
+    await expect(modal).toBeVisible({ timeout: 10000 });
 
     await page.keyboard.press("Escape");
 

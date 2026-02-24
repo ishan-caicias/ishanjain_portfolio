@@ -16,7 +16,7 @@ const quickLinks: QuickLink[] = [
   },
   {
     label: "LinkedIn",
-    href: "https://linkedin.com/in/your-profile",
+    href: "https://www.linkedin.com/in/ishanjain08/",
     icon: "M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-4 0v7h-4v-7a6 6 0 016-6zM2 9h4v12H2zM4 6a2 2 0 100-4 2 2 0 000 4z",
   },
   {
