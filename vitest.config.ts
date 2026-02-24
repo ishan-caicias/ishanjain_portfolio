@@ -17,5 +17,26 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["tests/unit/setup.ts"],
     globals: false,
+    coverage: {
+      provider: "v8",
+      include: [
+        "src/components/islands/**/*.{ts,tsx}",
+        "src/utils/**/*.ts",
+      ],
+      exclude: [
+        "**/*.test.{ts,tsx}",
+        "**/node_modules/**",
+        "src/components/islands/Starfield.tsx",
+        "src/components/islands/AstronautMascot.tsx",
+      ],
+      reporter: ["text", "html", "json-summary"],
+      reportsDirectory: "./coverage",
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        branches: 80,
+        statements: 80,
+      },
+    },
   },
 });

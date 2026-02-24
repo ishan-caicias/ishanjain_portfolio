@@ -106,4 +106,53 @@ describe("MissionControl", () => {
       expect(trigger).toHaveAttribute("aria-expanded", "true");
     });
   });
+
+  it("uses clipboard fallback when writeText fails", async () => {
+    const execCommandMock = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", {
+      value: execCommandMock,
+      configurable: true,
+    });
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("clipboard unavailable")) },
+    });
+
+    const { container } = render(<MissionControl />);
+    const trigger = container.querySelector(
+      '[aria-label="Open mission control quick links"]',
+    ) as HTMLElement;
+
+    fireEvent.click(trigger);
+    await waitFor(() => {
+      expect(container.querySelector('[role="menu"]')).toBeInTheDocument();
+    });
+
+    const copyBtn = Array.from(
+      container.querySelectorAll('[role="menuitem"]'),
+    ).find((el) => el.textContent?.includes("Copy Bio")) as HTMLElement;
+    fireEvent.click(copyBtn);
+
+    await waitFor(() => {
+      expect(execCommandMock).toHaveBeenCalledWith("copy");
+    });
+    expect(container.querySelector('[role="menu"]')?.textContent).toContain("Copied!");
+  });
+
+  it("closes panel when clicking outside", async () => {
+    const { container } = render(<MissionControl />);
+    const trigger = container.querySelector(
+      '[aria-label="Open mission control quick links"]',
+    ) as HTMLElement;
+
+    fireEvent.click(trigger);
+    await waitFor(() => {
+      expect(container.querySelector('[role="menu"]')).toBeInTheDocument();
+    });
+
+    fireEvent.click(document.body);
+
+    await waitFor(() => {
+      expect(container.querySelector('[role="menu"]')).not.toBeInTheDocument();
+    });
+  });
 });

@@ -38,10 +38,12 @@ function getFallbackData(): HubbleEntry[] {
 
 /**
  * Optional: Fetch from NASA APOD API.
- * Only used if PUBLIC_NASA_API_KEY environment variable is set.
+ * Only used if PUBLIC_NASA_API_KEY environment variable is set (or options.apiKey in tests).
  */
-export async function fetchNasaApod(): Promise<HubbleEntry | null> {
-  const apiKey = import.meta.env.PUBLIC_NASA_API_KEY;
+export async function fetchNasaApod(options?: {
+  apiKey?: string;
+}): Promise<HubbleEntry | null> {
+  const apiKey = options?.apiKey ?? import.meta.env.PUBLIC_NASA_API_KEY;
   if (!apiKey) return null;
 
   try {
