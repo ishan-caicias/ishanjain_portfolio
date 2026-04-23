@@ -36,10 +36,10 @@ src/
 
 Only 4 components ship JavaScript to the client:
 
-1. **Starfield** (`client:load`) — Canvas particle system. Loaded immediately as it's the hero background.
-2. **AstronautMascot** (`client:idle`) — Floating SVG mascot. Hydrated when browser is idle.
-3. **StarModal** (`client:idle`) — Hubble image modal. Hydrated when browser is idle, listens for custom events.
-4. **MissionControl** (`client:visible`) — Footer quick-links panel. Hydrated when scrolled into view.
+1. **Starfield** (`client:load`) - Canvas particle system. Loaded immediately as it's the hero background.
+2. **AstronautMascot** (`client:idle`) - Floating SVG mascot. Hydrated when browser is idle.
+3. **StarModal** (`client:idle`) - Hubble image modal. Hydrated when browser is idle, listens for custom events.
+4. **MissionControl** (`client:visible`) - Footer quick-links panel. Hydrated when scrolled into view.
 
 ## Data Flow
 
@@ -118,8 +118,8 @@ See [diagrams/ci-pipeline.mmd](diagrams/ci-pipeline.mmd) for the visual flow.
 
 Jobs run in this order:
 
-1. **Lint** (ESLint + Prettier) — parallel with Typecheck and Unit Tests
-2. **Typecheck** (astro check) — parallel with Lint and Unit Tests
-3. **Unit Tests** (Vitest) — parallel with Lint and Typecheck
-4. **Build** (astro build) — depends on all above passing
-5. **E2E Tests** (Playwright) — depends on Build, uses built artefacts
+1. **Lint** (ESLint + Prettier) - parallel with Typecheck and Unit Tests
+2. **Typecheck** (astro check) - parallel with Lint and Unit Tests
+3. **Unit Tests** (Vitest) - parallel with Lint and Typecheck
+4. **Build** (astro build) - depends on all above passing
+5. **E2E Tests** (Playwright) - depends on Build, uses built artefacts

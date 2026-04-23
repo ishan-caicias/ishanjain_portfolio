@@ -7,4 +7,4 @@ export const GITHUB_URL = "https://github.com/ishan-caicias";
 export const RESUME_PATH = "/resume.pdf";
 
 export const SHORT_BIO =
-  "Ishan Jain — Backend-leaning full-stack engineer specialising in fintech risk infrastructure, .NET microservices, and production ownership. Based in Sydney, AU.";
+  "Ishan Jain - Product-minded software engineer with strong backend foundations. Builds reliable systems and useful products in C#/.NET, AWS, and distributed architectures, with experience in production-critical environments across FinTech. Based in Sydney, AU.";

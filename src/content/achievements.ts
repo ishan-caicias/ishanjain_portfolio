@@ -2,39 +2,39 @@ import type { Achievement } from "@/types";
 
 export const achievements: Achievement[] = [
   {
-    title: "Real-Time SMS Verification",
+    title: "Zero-Disruption Traffic Cutover",
     description:
-      "Designed and delivered end-to-end two-way SMS verification flow for high-risk transaction activity, from API integration to production rollout.",
-    icon: "sms",
+      "Executed full-traffic cutovers across mission-critical event pipelines, achieving 100% coverage with zero incidents.",
+    icon: "shield",
   },
   {
-    title: "Full-Traffic Risk Monitoring",
+    title: "Real-Time SMS Verification",
     description:
-      "Executed full-traffic cutovers across payment and customer lifecycle monitoring, achieving 100% transaction coverage with zero incidents.",
-    icon: "shield",
+      "Designed and shipped an end-to-end two-way SMS verification flow for real-time fraud decisioning on live payment transactions - from design through production rollout.",
+    icon: "sms",
   },
   {
     title: "Automated Case Management",
     description:
-      "Built automated case management system providing operations teams a 360-degree view of flagged activity, integrating signals from multiple risk sources.",
+      "Built a Fraud Case Management platform with a 360° case view and automated routing to vendor decisioning, cutting manual triage load for operations.",
     icon: "cases",
   },
   {
     title: "Platform Modernisation",
     description:
-      "Led .NET framework upgrades and security remediation across microservices, implementing feature flags and defensive programming for safe rollout.",
+      "Led framework upgrades and security remediation across multiple microservices, utilizing feature flags and defensive programming patterns for safe, incremental rollouts.",
     icon: "upgrade",
   },
   {
-    title: "Auto-Decisioning Discovery",
+    title: "Performance & Reliability",
     description:
-      "Drove discovery and design for auto-decisioning improvements via bank-statement classification, taking design ownership from problem framing to solution proposal.",
+      "Improved system performance and reduced on-call noise through targeted database and api-level fixes, and matured load testing with k6 and JMeter ahead of major launches.",
     icon: "brain",
   },
   {
     title: "E2E Test Infrastructure",
     description:
-      "Established Playwright test suites integrated into CI/CD pipelines, improving deployment confidence across microservice boundaries.",
+      "Built and Implemented Playwright end-to-end test suites wired into CI/CD across microservices, raising deployment confidence across service boundaries.",
     icon: "test",
   },
 ];

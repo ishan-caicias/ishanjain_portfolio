@@ -33,10 +33,10 @@ function buildReportFromSummary(data) {
   md += `## Summary (islands + utils)\n\n`;
   md += `| Metric      | Coverage | Threshold |\n`;
   md += `|-------------|----------|----------|\n`;
-  md += `| Statements  | ${statements != null ? `${statements.toFixed(1)}%` : "—"} | 80% |\n`;
-  md += `| Branches    | ${branches != null ? `${branches.toFixed(1)}%` : "—"} | 80% |\n`;
-  md += `| Functions   | ${functions != null ? `${functions.toFixed(1)}%` : "—"} | 80% |\n`;
-  md += `| Lines       | ${lines != null ? `${lines.toFixed(1)}%` : "—"} | 80% |\n\n`;
+  md += `| Statements  | ${statements != null ? `${statements.toFixed(1)}%` : "-"} | 80% |\n`;
+  md += `| Branches    | ${branches != null ? `${branches.toFixed(1)}%` : "-"} | 80% |\n`;
+  md += `| Functions   | ${functions != null ? `${functions.toFixed(1)}%` : "-"} | 80% |\n`;
+  md += `| Lines       | ${lines != null ? `${lines.toFixed(1)}%` : "-"} | 80% |\n\n`;
 
   const files = Object.entries(data).filter(([k]) => k !== "total");
   if (files.length > 0) {
@@ -49,7 +49,7 @@ function buildReportFromSummary(data) {
       const b = pct(cov.branches);
       const f = pct(cov.functions);
       const l = pct(cov.lines);
-      md += `| \`${rel}\` | ${s != null ? `${s.toFixed(1)}%` : "—"} | ${b != null ? `${b.toFixed(1)}%` : "—"} | ${f != null ? `${f.toFixed(1)}%` : "—"} | ${l != null ? `${l.toFixed(1)}%` : "—"} |\n`;
+      md += `| \`${rel}\` | ${s != null ? `${s.toFixed(1)}%` : "-"} | ${b != null ? `${b.toFixed(1)}%` : "-"} | ${f != null ? `${f.toFixed(1)}%` : "-"} | ${l != null ? `${l.toFixed(1)}%` : "-"} |\n`;
     }
   }
 
@@ -118,10 +118,10 @@ function aggregateFromFinal(data) {
   md += `## Summary (islands + utils)\n\n`;
   md += `| Metric      | Coverage | Threshold |\n`;
   md += `|-------------|----------|----------|\n`;
-  md += `| Statements  | ${stPct != null ? `${stPct.toFixed(1)}%` : "—"} | 80% |\n`;
-  md += `| Branches    | — | 80% |\n`;
-  md += `| Functions   | ${fnPct != null ? `${fnPct.toFixed(1)}%` : "—"} | 80% |\n`;
-  md += `| Lines       | ${linesPct != null ? `${linesPct.toFixed(1)}%` : "—"} | 80% |\n\n`;
+  md += `| Statements  | ${stPct != null ? `${stPct.toFixed(1)}%` : "-"} | 80% |\n`;
+  md += `| Branches    | - | 80% |\n`;
+  md += `| Functions   | ${fnPct != null ? `${fnPct.toFixed(1)}%` : "-"} | 80% |\n`;
+  md += `| Lines       | ${linesPct != null ? `${linesPct.toFixed(1)}%` : "-"} | 80% |\n\n`;
   md += `---\n*Scoped to \`src/components/islands/**\` and \`src/utils/**\`. Excluded: Starfield, AstronautMascot (no unit tests). Run \`npm run test:coverage:report\` to regenerate.*\n`;
   return md;
 }

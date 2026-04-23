@@ -12,7 +12,8 @@ test.describe("Navigation", () => {
   test("hero section is visible", async ({ page }) => {
     const hero = page.locator("#hero");
     await expect(hero).toBeVisible();
-    await expect(hero).toContainText("Building reliable systems");
+    await expect(hero).toContainText("Reliable systems");
+    await expect(hero).toContainText("Product-minded software engineer");
   });
 
   test("navigation links are visible on desktop", async ({ page }) => {
@@ -70,7 +71,6 @@ test.describe("Navigation", () => {
       "#achievements",
       "#projects",
       "#skills",
-      "#writing",
       "#contact",
     ];
 
@@ -90,12 +90,12 @@ test.describe("Navigation", () => {
   test("experience timeline renders", async ({ page }) => {
     const experienceSection = page.locator("#experience");
     await expect(experienceSection).toContainText("Software Engineer");
-    await expect(experienceSection).toContainText("Fintech Risk Platform");
+    await expect(experienceSection).toContainText("Zip Co");
   });
 
-  test("projects section renders Project Kubera", async ({ page }) => {
+  test("projects section renders Kubera", async ({ page }) => {
     const projectsSection = page.locator("#projects");
-    await expect(projectsSection).toContainText("Project Kubera");
+    await expect(projectsSection).toContainText("Kubera");
     await expect(projectsSection).toContainText("Clean Architecture");
   });
 });
