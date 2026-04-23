@@ -2,34 +2,42 @@ import type { Project } from "@/types";
 
 export const projects: Project[] = [
   {
-    title: "Project Kubera",
+    title: "Kubera - Personal Finance Platform",
     status: "In Progress",
     description:
-      "Personal finance platform built with Clean Architecture and DDD patterns. React frontend with .NET backend and PostgreSQL. Full CI/CD pipeline with automated testing. Exploring an AI-assisted insights layer with RAG experiments connecting to LLM APIs — focused on architecture patterns, full-stack ownership, and iterative delivery.",
+      "Product-minded personal finance platform with a .NET backend (Clean Architecture, DDD, CQRS) and a React/TypeScript frontend. Models goals, accounts, and projections as a proper domain, with analytics-oriented thinking and an extensible surface. Includes an AI-assisted insights layer using RAG and LLM APIs, full CI/CD, and end-to-end testing - a showcase of backend depth, product judgement, and delivery discipline.",
     tech: [
       "C#/.NET",
-      "React",
-      "PostgreSQL",
       "Clean Architecture",
       "DDD",
+      "CQRS",
+      "PostgreSQL",
+      "React",
+      "TypeScript",
       "RAG",
-      "OpenAI API",
       "Docker",
       "GitHub Actions",
     ],
   },
   {
-    title: "Trading Systems R&D",
-    status: "Private",
+    title: "Algorithmic Trader - Market Systems R&D",
+    status: "In Progress",
     description:
-      "Experimental quantitative trading platform exploring algorithmic strategies. High-level architecture exploration covering backtesting infrastructure and data pipeline design.",
-    tech: ["Python", "C#", "Data Pipelines", "Backtesting"],
+      "Event-driven backend for market data ingestion, streaming, and broker integration, paired with research workflows for strategy analysis. Emphasises clean service boundaries, resilient integrations, and AI-assisted analysis - built as a serious exercise in distributed, latency-sensitive system design.",
+    tech: [
+      "C#/.NET",
+      "Python",
+      "Event-Driven",
+      "Streaming",
+      "Broker APIs",
+      "AI-Assisted Analysis",
+    ],
   },
   {
     title: "This Portfolio",
     status: "Open Source",
     description:
-      "Astronomy-themed portfolio built with Astro and React islands. Features a canvas starfield, interactive Hubble image modal, and accessible design. Demonstrates frontend craft alongside backend focus.",
+      "Astronomy-themed portfolio built with Astro and React islands. Accessible and responsive design - a small showcase of frontend craft alongside the core backend focus.",
     tech: [
       "Astro",
       "React",
@@ -41,10 +49,10 @@ export const projects: Project[] = [
     link: "https://github.com/ishan-caicias/ishanjain_portfolio",
   },
   {
-    title: "University Game Project",
+    title: "University Game Project - 2018",
     status: "Archived",
     description:
-      "Game development project completed during undergraduate studies.",
-    tech: ["Unity", "C#"],
+      "A 2D OOP puzzle game (“Dungeon Master”) applying design patterns, version control, agile practices, and TDD; collaborated via pair programming.",
+    tech: ["Java", "JavaFX"],
   },
 ];

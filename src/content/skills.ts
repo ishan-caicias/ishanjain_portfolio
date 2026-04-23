@@ -4,56 +4,84 @@ export const skillCategories: SkillCategory[] = [
   {
     name: "Backend",
     skills: [
-      "C#/.NET",
+      "C# / .NET",
       "ASP.NET Core",
-      "Entity Framework",
+      "REST APIs",
       "Microservices",
       "Event-Driven Architecture",
-      "REST APIs",
+      "Entity Framework",
     ],
   },
   {
-    name: "Cloud & Infrastructure",
-    skills: ["AWS (ECS, SQS, SNS, S3, CloudWatch)", "Docker", "Terraform"],
+    name: "Cloud & Platform",
+    skills: [
+      "AWS (RDS, S3, SQS, SNS)",
+      "API Gateway",
+      "Git",
+      "Docker",
+      "CICD",
+    ],
   },
   {
-    name: "Data",
-    skills: ["PostgreSQL", "SQL Server", "Redis"],
+    name: "Data & Messaging",
+    skills: [
+      "SQL",
+      "PostgreSQL",
+      "SQL Server",
+      "Redis Caching",
+      "SQS / SNS",
+      "Kafka"
+    ],
   },
   {
-    name: "Testing & Quality",
-    skills: ["xUnit", "Playwright", "Vitest", "TDD", "Integration Testing"],
+    name: "Testing & Reliability",
+    skills: [
+      "xUnit",
+      "Integration Testing",
+      "Playwright",
+      "k6 / JMeter",
+      "Observability (New Relic/Dynatrace)",
+      "Incident Response",
+    ],
   },
   {
-    name: "CI/CD & DevOps",
+    name: "CI/CD & Delivery",
     skills: [
       "GitHub Actions",
-      "Azure DevOps",
       "Feature Flags",
-      "Infrastructure as Code",
+      "Safe Rollouts",
     ],
   },
   {
-    name: "Frontend",
-    skills: ["React", "TypeScript", "HTML/CSS", "Astro"],
-  },
-  {
-    name: "AI/ML (Exploring)",
-    skills: [
-      "RAG Patterns",
-      "Embeddings",
-      "Prompt Engineering",
-      "LLM Evaluation",
-    ],
-  },
-  {
-    name: "Practices",
+    name: "Architecture & Practices",
     skills: [
       "Clean Architecture",
-      "DDD",
       "SOLID",
-      "Observability",
-      "Incident Response",
+      "DDD",
+      "TDD",
+      "CQRS",
+      "Defensive Programming",
+      "Stakeholder Collaboration",
+      "Leadership and mentoring"
+    ],
+  },
+  {
+    name: "Frontend (Working Knowledge)",
+    skills: [
+      "React",
+      "TypeScript",
+      "HTML / CSS",
+      "Astro"
+    ],
+  },
+  {
+    name: "AI and emerging technologies (Learning)",
+    skills: [
+      "AI-assisted development",
+      "Prompt engineering",
+      "LLM/RAG Concepts",
+      "LLM APIs",
+      "LLM Evaluation"
     ],
   },
 ];
