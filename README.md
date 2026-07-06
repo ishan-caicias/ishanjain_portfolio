@@ -1,4 +1,4 @@
-# Ishan Jain — Portfolio
+# Ishan Jain - Portfolio
 
 Production-ready portfolio website with an astronomy theme, built with Astro, React islands, and TailwindCSS.
 
@@ -49,7 +49,7 @@ src/
 ├── pages/               # index.astro + robots.txt
 ├── styles/              # global.css with theme tokens
 ├── types/               # Shared TypeScript interfaces
-└── utils/               # Hubble data loader + helpers
+└── utils/               # Hero DSO data loader + helpers
 ```
 
 See [docs/architecture.md](docs/architecture.md) for detailed architecture documentation.
@@ -57,27 +57,35 @@ See [docs/architecture.md](docs/architecture.md) for detailed architecture docum
 ## Interactive Features
 
 - **Starfield**: Canvas-based particle system with parallax and twinkling stars
-- **Clickable Stars**: Golden stars open a modal with real Hubble telescope images
+- **Clickable Stars**: Golden stars reveal a real deep-sky-object photo in the hero background
 - **Astronaut Mascot**: Floating SVG that drifts toward active sections (desktop only)
 - **Mission Control**: Footer panel with quick links (Resume, LinkedIn, GitHub, Copy Bio)
 
-All interactive elements respect `prefers-reduced-motion` and are keyboard accessible.
+All interactive elements respect `prefers-reduced-motion`. Star discovery itself is mouse-driven
+(canvas hit-testing, no keyboard equivalent yet); the reveal's dismiss control and credit/license
+link are fully keyboard accessible once a reveal is open.
 
-## Hubble Images
+## Hero Deep-Sky-Object Images
 
-The star modal uses a local dataset of real NASA/Hubble images. Images are public domain.
+Clicking a gold star reveals a real astrophotography image of that object, sourced from Wikimedia
+Commons and pre-filtered to Public Domain / CC0 / CC BY licenses only (see
+`scripts/hero/rejected.json` for what was excluded and why). A small persistent credit line -
+with a license link when required - stays visible while a reveal is active.
 
-To download the images for local development:
+To regenerate the shipped dataset (`public/hero-dso/manifest.json` + `public/hero-dso/images/*.webp`)
+from the license-vetted sources in `scripts/hero/source/`:
 
-1. Visit the source URLs listed in `public/hubble/data.json`
-2. Download each image and save as WebP format (~50-80KB) in `public/hubble/images/`
-3. Suggested tool: `cwebp` or any image converter
+```bash
+node scripts/hero/build-hero-dso.mjs
+```
 
-The modal degrades gracefully if images are missing, showing a text-only fallback.
+This dedupes objects catalogued under both a Messier and NGC number and converts the survivors to
+WebP. Raw source images aren't committed (see `.gitignore`); only the per-object `.attribution.json`
+provenance files and the build script are.
 
 ### Optional: NASA APOD API
 
-Set `PUBLIC_NASA_API_KEY` in a `.env` file to optionally fetch from NASA's Astronomy Picture of the Day API. This is purely additive — the local dataset is always available.
+Set `PUBLIC_NASA_API_KEY` in a `.env` file to optionally fetch from NASA's Astronomy Picture of the Day API via `src/utils/nasaApod.ts`. This is unrelated to the hero star-click feature and not currently wired into any UI.
 
 ## Environment Variables
 
@@ -94,7 +102,7 @@ npm run test           # Run once
 npm run test:watch     # Watch mode
 ```
 
-Tests cover: StarModal (open/close/fallback), MissionControl (open/close/copy bio), Hubble data loading.
+Tests cover: HeroBackgroundReveal (reveal/dismiss/fallback), MissionControl (open/close/copy bio), hero DSO manifest loading.
 
 ### E2E Tests
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render } from "@testing-library/react";
 import Starfield from "../../src/components/islands/Starfield";
 
@@ -14,7 +14,7 @@ describe("Starfield", () => {
     expect(canvas).toHaveAttribute("role", "img");
     expect(canvas).toHaveAttribute(
       "aria-label",
-      expect.stringMatching(/starfield.*Hubble/i),
+      expect.stringMatching(/starfield.*deep-sky/i),
     );
   });
 

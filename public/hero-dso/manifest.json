@@ -1,0 +1,502 @@
+[
+  {
+    "id": "IC1396",
+    "label": "Elephant's Trunk Nebula",
+    "imagePath": "/hero-dso/images/IC1396.webp",
+    "credit": "NASA/JPL-Caltech/W. Reach (SSC/Caltech)",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:54345main_ic1396_highres.jpg"
+  },
+  {
+    "id": "IC1805",
+    "label": "Heart Nebula",
+    "imagePath": "/hero-dso/images/IC1805.webp",
+    "credit": "NASA/JPL-Caltech/UCLA",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Heart_and_Soul_nebulae.jpg"
+  },
+  {
+    "id": "IC443",
+    "label": "Jellyfish Nebula",
+    "imagePath": "/hero-dso/images/IC443.webp",
+    "credit": "NASA",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:IC443.jpeg"
+  },
+  {
+    "id": "M101",
+    "label": "Pinwheel Galaxy",
+    "imagePath": "/hero-dso/images/M101.webp",
+    "credit": "Credit: Image: European Space Agency &amp; NASA Acknowledgements: Project Investigators for the original Hubble data: K.D. Kuntz (GSFC), F. Bresolin (University of Hawaii), J. Trauger (JPL), J. Mould (NOAO), and Y.-H. Chu (University of Illinois, Urbana) Image processing: Davide De Martin (ESA/Hubble) CFHT image: Canada-France-Hawaii Telescope/J.-C. Cuillandre/Coelum NOAO image: George Jacoby, Bruce Bohannan, Mark Hanna/NOAO/AURA/NSF",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:M101_hires_STScI-PRC2006-10a.jpg"
+  },
+  {
+    "id": "M104",
+    "label": "Sombrero Galaxy",
+    "imagePath": "/hero-dso/images/M104.webp",
+    "credit": "NASA/JPL-Caltech and The Hubble Heritage Team (STScI/AURA)",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Sombrero_Galaxy_in_infrared_light_(Hubble_Space_Telescope_and_Spitzer_Space_Telescope).jpg"
+  },
+  {
+    "id": "M106",
+    "label": "Spiral Galaxy in Canes Venatici",
+    "imagePath": "/hero-dso/images/M106.webp",
+    "credit": "NASA, ESA, the Hubble Heritage Team (STScI/AURA), and R. Gendler (for the Hubble Heritage Team). Acknowledgment: J. GaBany",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Messier_106_visible_and_infrared_composite.jpg"
+  },
+  {
+    "id": "M27",
+    "label": "Dumbbell Nebula",
+    "imagePath": "/hero-dso/images/M27.webp",
+    "credit": "Taavi Niittee",
+    "attributionRequired": false,
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Dumbbell_Nebula_(Messier_27).png"
+  },
+  {
+    "id": "M31",
+    "label": "Andromeda Galaxy",
+    "imagePath": "/hero-dso/images/M31.webp",
+    "credit": "NASA, ESA, Benjamin F. Williams (UWashington), Zhuo Chen (UWashington), L. Clifton Johnson (Northwestern); Image Processing: Joseph DePasquale (STScI).[1]",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Andromeda_Galaxy_Hubble_M31Mosaic_2025_42208x9870.jpg"
+  },
+  {
+    "id": "M42",
+    "label": "Orion Nebula",
+    "imagePath": "/hero-dso/images/M42.webp",
+    "credit": "NASA, ESA, M. Robberto (Space Telescope Science Institute/ESA) and the Hubble Space Telescope Orion Treasury Project Team",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Orion_Nebula_-_Hubble_2006_mosaic_18000.jpg"
+  },
+  {
+    "id": "M45",
+    "label": "Pleiades",
+    "imagePath": "/hero-dso/images/M45.webp",
+    "credit": "NASA, ESA, AURA/Caltech, Palomar Observatory The science team consists of: D. Soderblom and E. Nelan (STScI), F. Benedict and B. Arthur (U. Texas), and B. Jones (Lick Obs.)",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Pleiades_large.jpg"
+  },
+  {
+    "id": "M51",
+    "label": "Whirlpool Galaxy",
+    "imagePath": "/hero-dso/images/M51.webp",
+    "credit": "NASA and European Space Agency",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Messier51_sRGB.jpg"
+  },
+  {
+    "id": "M57",
+    "label": "Ring Nebula",
+    "imagePath": "/hero-dso/images/M57.webp",
+    "credit": "NASA, ESA, C.R. Robert O’Dell (Vanderbilt University), G.J. Ferland (University of Kentucky), W.J. Henney and M. Peimbert (National Autonomous University of Mexico) Credit for Large Binocular Telescope data: David Thompson (University of Arizona) This is a featured picture on Wikimedia Commons (Featured pictures) and is considered one of the finest images. See its nomination here. This is a featured picture on the Persian language Wikipedia (نگاره‌های برگزیده) and is considered one of the finest images. See its nomination here. If you have an image of similar quality that can be published under a suitable copyright license, be sure to upload it, tag it, and nominate it.",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Hubble_reveals_the_Ring_Nebula%E2%80%99s_true_shape.jpg"
+  },
+  {
+    "id": "M63",
+    "label": "Sunflower Galaxy",
+    "imagePath": "/hero-dso/images/M63.webp",
+    "credit": "Stephen Rahn from Macon, GA, USA",
+    "attributionRequired": false,
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Messier_63_-_The_Sunflower_Galaxy_(49706015278).jpg"
+  },
+  {
+    "id": "M64",
+    "label": "Black Eye Galaxy",
+    "imagePath": "/hero-dso/images/M64.webp",
+    "credit": "NASA and The Hubble Heritage Team (AURA/STScI)",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Blackeyegalaxy.jpg"
+  },
+  {
+    "id": "M74",
+    "label": "Phantom Galaxy",
+    "imagePath": "/hero-dso/images/M74.webp",
+    "credit": "No machine-readable author provided. Med assumed (based on copyright claims).",
+    "attributionRequired": true,
+    "license": "CC BY 2.5",
+    "licenseUrl": "https://creativecommons.org/licenses/by/2.5",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:M74_3.6_5.8_8.0_microns_spitzer.png"
+  },
+  {
+    "id": "M77",
+    "label": "Cetus A Galaxy",
+    "imagePath": "/hero-dso/images/M77.webp",
+    "credit": "NASA, ESA &amp; A. van der Hoeven",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Messier_77_spiral_galaxy_by_HST.jpg"
+  },
+  {
+    "id": "M78",
+    "label": "Reflection Nebula",
+    "imagePath": "/hero-dso/images/M78.webp",
+    "credit": "ESO/Igor Chekalin",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Messier_78_reflection_nebula_in_Orion.jpg"
+  },
+  {
+    "id": "M82",
+    "label": "Cigar Galaxy",
+    "imagePath": "/hero-dso/images/M82.webp",
+    "credit": "NASA, ESA, and The Hubble Heritage Team (STScI/AURA)",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:M82_HST_ACS_2006-14-a-large_web.jpg"
+  },
+  {
+    "id": "M83",
+    "label": "Southern Pinwheel Galaxy",
+    "imagePath": "/hero-dso/images/M83.webp",
+    "credit": "Credit: NASA, ESA, and the Hubble Heritage Team (STScI/AURA) Acknowledgement: William Blair (Johns Hopkins University)",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Messier83_-_Heic1403a.jpg"
+  },
+  {
+    "id": "M87",
+    "label": "Virgo A Galaxy",
+    "imagePath": "/hero-dso/images/M87.webp",
+    "credit": "Credits: NASA, ESA and the Hubble Heritage Team (STScI/AURA); Acknowledgment: P. Cote (Herzberg Institute of Astrophysics) and E. Baltz (Stanford University)",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:M87-full_jpg.jpg"
+  },
+  {
+    "id": "M95",
+    "label": "Barred Spiral Galaxy",
+    "imagePath": "/hero-dso/images/M95.webp",
+    "credit": "ESO",
+    "attributionRequired": true,
+    "license": "CC BY 3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/3.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:The_VLT_goes_lion_hunting.jpg"
+  },
+  {
+    "id": "M96",
+    "label": "Leo I Group Galaxy",
+    "imagePath": "/hero-dso/images/M96.webp",
+    "credit": "ESO/Oleg Maliy",
+    "attributionRequired": true,
+    "license": "CC BY 3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/3.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:NGC_3368_ESO.jpg"
+  },
+  {
+    "id": "NGC1275",
+    "label": "Perseus A",
+    "imagePath": "/hero-dso/images/NGC1275.webp",
+    "credit": "NASA, ESA, and the Hubble Heritage (STScI/AURA)-ESA/Hubble Collaboration",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:NGC_1275_Hubble.jpg"
+  },
+  {
+    "id": "NGC1499",
+    "label": "California Nebula",
+    "imagePath": "/hero-dso/images/NGC1499.webp",
+    "credit": "Taavi Niittee/Tõrva Astronoomiaklubi/Tõrva Astronomy Club",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:California_nebula_from_Estonia.jpg"
+  },
+  {
+    "id": "NGC1977",
+    "label": "Running Man Nebula",
+    "imagePath": "/hero-dso/images/NGC1977.webp",
+    "credit": "KPNO/NOIRLab/NSF/AURA/Peter Spokes/Adam Block",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:NGC_1977-_The_Running_Man_Nebula_(noao-n1977spokes).jpg"
+  },
+  {
+    "id": "NGC2070",
+    "label": "Tarantula Nebula",
+    "imagePath": "/hero-dso/images/NGC2070.webp",
+    "credit": "ESO",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Tarantula_Nebula.jpg"
+  },
+  {
+    "id": "NGC2264",
+    "label": "Cone Nebula",
+    "imagePath": "/hero-dso/images/NGC2264.webp",
+    "credit": "ESO",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:NGC_2264_by_ESO.jpg"
+  },
+  {
+    "id": "NGC2392",
+    "label": "Eskimo Nebula",
+    "imagePath": "/hero-dso/images/NGC2392.webp",
+    "credit": "NASA, ESA, Andrew Fruchter (STScI), and the ERO team (STScI + ST-ECF)",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Ngc2392.jpg"
+  },
+  {
+    "id": "NGC253",
+    "label": "Sculptor Galaxy",
+    "imagePath": "/hero-dso/images/NGC253.webp",
+    "credit": "SSRO/PROMPT/CTIO",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Sculptor_Galaxy,_NGC_253_(noao-ngc-253).tiff"
+  },
+  {
+    "id": "NGC2841",
+    "label": "Spiral Galaxy in Ursa Major",
+    "imagePath": "/hero-dso/images/NGC2841.webp",
+    "credit": "NASA/JPL-Caltech",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Spiral_Galaxy_NGC_2841.jpg"
+  },
+  {
+    "id": "NGC3132",
+    "label": "Eight-Burst Nebula",
+    "imagePath": "/hero-dso/images/NGC3132.webp",
+    "credit": "Image: National Aeronautics and Space Administration (a U.S. federal government agency; https://www.nasa.gov/) European space agency (https://www.esa.int/), Canadian Space Agency (https://www.asc-csa.gc.ca/eng/) Space Telescope Science Institute (https://www.stsci.edu/, science operations center for the Hubble Space Telescope)",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Southern_Ring_Nebula_(NIRCam_and_MIRI_Images_Side_by_Side).png"
+  },
+  {
+    "id": "NGC3242",
+    "label": "Ghost of Jupiter",
+    "imagePath": "/hero-dso/images/NGC3242.webp",
+    "credit": "Judy Schmidt",
+    "attributionRequired": true,
+    "license": "CC BY 2.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/2.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:NGC_3242_%22Ghost_of_Jupiter%22.png"
+  },
+  {
+    "id": "NGC3372",
+    "label": "Carina Nebula",
+    "imagePath": "/hero-dso/images/NGC3372.webp",
+    "credit": "ESO/IDA/Danish 1.5 m/R.Gendler, J-E. Ovaldsen, C. Thöne, and C. Feron.",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:ESO_-_The_Carina_Nebula_(by).jpg"
+  },
+  {
+    "id": "NGC4038",
+    "label": "Antennae Galaxies",
+    "imagePath": "/hero-dso/images/NGC4038.webp",
+    "credit": "NASA, ESA, and the Hubble Heritage Team (STScI/AURA)-ESA/Hubble Collaboration",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Antennae_galaxies_xl.jpg"
+  },
+  {
+    "id": "NGC4631",
+    "label": "Whale Galaxy",
+    "imagePath": "/hero-dso/images/NGC4631.webp",
+    "credit": "Juan lacruz",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:NGC_4631_The_whale_galaxy.png"
+  },
+  {
+    "id": "NGC4755",
+    "label": "Jewel Box Cluster",
+    "imagePath": "/hero-dso/images/NGC4755.webp",
+    "credit": "ESO/Y. Beletsky",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:A_Snapshot_of_the_Jewel_Box_cluster_with_the_ESO_VLT.jpg"
+  },
+  {
+    "id": "NGC5139",
+    "label": "Omega Centauri",
+    "imagePath": "/hero-dso/images/NGC5139.webp",
+    "credit": "ESO",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Omega_Centauri_by_ESO.jpg"
+  },
+  {
+    "id": "NGC6302",
+    "label": "Bug Nebula",
+    "imagePath": "/hero-dso/images/NGC6302.webp",
+    "credit": "NASA, ESA and the Hubble SM4 ERO Team",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:NGC_6302_Hubble_2009.full.jpg"
+  },
+  {
+    "id": "NGC6357",
+    "label": "War and Peace Nebula",
+    "imagePath": "/hero-dso/images/NGC6357.webp",
+    "credit": "NASA",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Cosmic_%E2%80%98Winter%E2%80%99_Wonderland.jpg"
+  },
+  {
+    "id": "NGC6514",
+    "label": "Trifid Nebula",
+    "imagePath": "/hero-dso/images/NGC6514.webp",
+    "credit": "NSF–DOE Vera C. Rubin Observatory",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Trifid_and_Lagoon_nebulae.jpg"
+  },
+  {
+    "id": "NGC6523",
+    "label": "Lagoon Nebula",
+    "imagePath": "/hero-dso/images/NGC6523.webp",
+    "credit": "ESO/S. Guisard",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Lagoon_Nebula_(ESO).jpg"
+  },
+  {
+    "id": "NGC6543",
+    "label": "Cat's Eye Nebula",
+    "imagePath": "/hero-dso/images/NGC6543.webp",
+    "credit": "J.P. Harrington and K.J. Borkowski (University of Maryland), and NASA",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:NGC6543.jpg"
+  },
+  {
+    "id": "NGC6611",
+    "label": "Eagle Nebula",
+    "imagePath": "/hero-dso/images/NGC6611.webp",
+    "credit": "ESO",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Eagle_Nebula_from_ESO.jpg"
+  },
+  {
+    "id": "NGC6618",
+    "label": "Omega Nebula",
+    "imagePath": "/hero-dso/images/NGC6618.webp",
+    "credit": "ESO/INAF-VST/OmegaCAM. Acknowledgement: OmegaCen/Astro-WISE/Kapteyn Institute",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:VST_image_of_the_spectacular_star-forming_region_Messier_17_(Omega_Nebula).jpg"
+  },
+  {
+    "id": "NGC6826",
+    "label": "Blinking Planetary",
+    "imagePath": "/hero-dso/images/NGC6826.webp",
+    "credit": "Bruce Balick (University of Washington), Jason Alexander (University of Washington), Arsen Hajian (U.S. Naval Observatory), Yervant Terzian (Cornell University), Mario Perinotto (University of Florence, Italy), Patrizio Patriarchi (Arcetri Observatory, Italy) and NASA/ESA",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Hubble%27s_planetary_nebula_gallery_A_view_of_NGC_6826_(opo9738d).tiff"
+  },
+  {
+    "id": "NGC7009",
+    "label": "Saturn Nebula",
+    "imagePath": "/hero-dso/images/NGC7009.webp",
+    "credit": "en:NASA, en:STScI",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:NGC_7009_Hubble.jpg"
+  },
+  {
+    "id": "NGC7293",
+    "label": "Helix Nebula",
+    "imagePath": "/hero-dso/images/NGC7293.webp",
+    "credit": "NASA/JPL-Caltech/Univ. of Ariz.",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Comets_Kick_up_Dust_in_Helix_Nebula_(PIA09178).jpg"
+  },
+  {
+    "id": "NGC7331",
+    "label": "Deer Lick Group Galaxy",
+    "imagePath": "/hero-dso/images/NGC7331.webp",
+    "credit": "NASA/JPL-Caltech/M. Regan (STScI), and the SINGS Team / Daniel Bramich (ING) and Nik Szymanek",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:NGC7331Visible.jpg"
+  },
+  {
+    "id": "NGC7380",
+    "label": "Wizard Nebula",
+    "imagePath": "/hero-dso/images/NGC7380.webp",
+    "credit": "KPNO/NOIRLab/NSF/AURA/Kris Sandburg and Peter Jacobs/Adam Block",
+    "attributionRequired": true,
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:NGC_7380_(noao-n7380sandburg).tiff"
+  },
+  {
+    "id": "NGC7635",
+    "label": "Bubble Nebula",
+    "imagePath": "/hero-dso/images/NGC7635.webp",
+    "credit": "NASA, ESA, Hubble Heritage Team",
+    "attributionRequired": false,
+    "license": "Public domain",
+    "licenseUrl": null,
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:The_Bubble_Nebula_-_NGC_7635_-_Heic1608a.jpg"
+  }
+]

@@ -36,9 +36,9 @@ src/
 
 Only 4 components ship JavaScript to the client:
 
-1. **Starfield** (`client:load`) - Canvas particle system. Loaded immediately as it's the hero background.
+1. **Starfield** (`client:load`) - Canvas particle system. Loaded immediately as it's the hero background. A subset of "special" (gold) stars are clickable.
 2. **AstronautMascot** (`client:idle`) - Floating SVG mascot. Hydrated when browser is idle.
-3. **StarModal** (`client:idle`) - Hubble image modal. Hydrated when browser is idle, listens for custom events.
+3. **HeroBackgroundReveal** (`client:idle`) - Hero background photo reveal. Hydrated when browser is idle, listens for custom events.
 4. **MissionControl** (`client:visible`) - Footer quick-links panel. Hydrated when scrolled into view.
 
 ## Data Flow
@@ -50,12 +50,26 @@ content/*.ts  →  sections/*.astro  →  Server-rendered HTML
                                           ↓
                               React islands hydrate on demand
                                           ↓
+                     HeroBackgroundReveal fetches /hero-dso/manifest.json,
+                        samples up to 24 deep-sky objects for this load
+                                          ↓
                               Starfield emits CustomEvent("starclick")
+                              with the clicked star's sample index
                                           ↓
-                              StarModal listens and opens
-                                          ↓
-                              Fetches /hubble/data.json (local dataset)
+                        HeroBackgroundReveal crossfades the hero background
+                        to that object's real photo, with a persistent
+                        credit line; dismiss returns to the Starfield canvas
 ```
+
+### Hero DSO Dataset
+
+The clickable-star photos come from `public/hero-dso/manifest.json` + `public/hero-dso/images/*.webp`,
+built by `scripts/hero/build-hero-dso.mjs` from a license-vetted source set in `scripts/hero/source/`
+(Wikimedia Commons images pre-filtered to Public Domain / CC0 / CC BY only; rejected candidates and
+reasons are logged in `scripts/hero/rejected.json`). The build script deduplicates objects catalogued
+under both a Messier and NGC number, excludes known bad source images, and converts the survivors to
+WebP. Re-run it with `node scripts/hero/build-hero-dso.mjs` after adding new source images/attribution
+files to `scripts/hero/source/`.
 
 ## Theme System
 
@@ -75,9 +89,9 @@ All tokens are available as Tailwind utility classes (e.g., `text-gold-400`, `bg
 
 Focus on React islands since they contain the interactive logic:
 
-- **StarModal**: Open/close mechanics, fallback handling, event system
+- **HeroBackgroundReveal**: Reveal/dismiss mechanics, credit line and license link rendering, event system
 - **MissionControl**: Panel toggle, keyboard accessibility, clipboard API
-- **hubble.ts**: Data loading, error handling, fallback data
+- **heroDso.ts / nasaApod.ts**: Data loading, error handling, fallback data
 
 ### E2E Tests (Playwright)
 

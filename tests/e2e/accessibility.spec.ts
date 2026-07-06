@@ -29,7 +29,7 @@ test.describe("Accessibility", () => {
     expect(h1Count).toBe(1);
 
     const h1Text = await page.locator("h1").textContent();
-    expect(h1Text).toContain("Building reliable systems");
+    expect(h1Text).toContain("Reliable systems");
   });
 
   test("all images have alt text", async ({ page }) => {

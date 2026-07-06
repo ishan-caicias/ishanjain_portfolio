@@ -4,7 +4,7 @@ test.describe("Star Interaction", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     const dataPromise = page.waitForResponse(
-      (r) => r.url().includes("/hubble/data.json") && r.ok(),
+      (r) => r.url().includes("/hero-dso/manifest.json") && r.ok(),
       { timeout: 15000 },
     );
     await page.waitForSelector("canvas");
@@ -15,52 +15,81 @@ test.describe("Star Interaction", () => {
   test("starfield canvas is rendered", async ({ page }) => {
     const canvas = page.locator("canvas");
     await expect(canvas).toBeVisible();
-    await expect(canvas).toHaveAttribute("aria-label", /starfield.*Hubble/i);
+    await expect(canvas).toHaveAttribute("aria-label", /starfield.*deep-sky/i);
   });
 
-  test("star modal opens via custom event", async ({ page }) => {
-    // Dispatch a starclick event programmatically
+  test("clicking a star reveals a real DSO photo in the hero background", async ({
+    page,
+  }) => {
     await page.evaluate(() => {
       window.dispatchEvent(
-        new CustomEvent("starclick", { detail: { hubbleIndex: 0 } }),
+        new CustomEvent("starclick", { detail: { dsoIndex: 0 } }),
       );
     });
 
-    const modal = page.getByRole("dialog");
-    await expect(modal).toBeVisible({ timeout: 10000 });
+    const dismissButton = page.getByRole("button", {
+      name: /Return to starfield/i,
+    });
+    await expect(dismissButton).toBeVisible({ timeout: 10000 });
 
-    // Check content loaded
-    await expect(modal).toContainText("Pillars of Creation");
+    const status = page.getByRole("status");
+    await expect(status).toHaveText(/Showing .+ in the background\./);
   });
 
-  test("star modal closes on close button", async ({ page }) => {
+  test("clicking the same star again dismisses the reveal", async ({
+    page,
+  }) => {
     await page.evaluate(() => {
       window.dispatchEvent(
-        new CustomEvent("starclick", { detail: { hubbleIndex: 0 } }),
+        new CustomEvent("starclick", { detail: { dsoIndex: 0 } }),
       );
     });
 
-    const modal = page.getByRole("dialog");
-    await expect(modal).toBeVisible({ timeout: 10000 });
+    const dismissButton = page.getByRole("button", {
+      name: /Return to starfield/i,
+    });
+    await expect(dismissButton).toBeVisible({ timeout: 10000 });
 
-    const closeButton = page.getByLabel("Close modal");
-    await closeButton.click();
-
-    await expect(modal).not.toBeVisible();
-  });
-
-  test("star modal closes on Escape key", async ({ page }) => {
     await page.evaluate(() => {
       window.dispatchEvent(
-        new CustomEvent("starclick", { detail: { hubbleIndex: 0 } }),
+        new CustomEvent("starclick", { detail: { dsoIndex: 0 } }),
       );
     });
 
-    const modal = page.getByRole("dialog");
-    await expect(modal).toBeVisible({ timeout: 10000 });
+    await expect(dismissButton).not.toBeVisible();
+  });
+
+  test("reveal closes on close button", async ({ page }) => {
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new CustomEvent("starclick", { detail: { dsoIndex: 0 } }),
+      );
+    });
+
+    const dismissButton = page.getByRole("button", {
+      name: /Return to starfield/i,
+    });
+    await expect(dismissButton).toBeVisible({ timeout: 10000 });
+
+    await dismissButton.click();
+
+    await expect(dismissButton).not.toBeVisible();
+  });
+
+  test("reveal closes on Escape key", async ({ page }) => {
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new CustomEvent("starclick", { detail: { dsoIndex: 0 } }),
+      );
+    });
+
+    const dismissButton = page.getByRole("button", {
+      name: /Return to starfield/i,
+    });
+    await expect(dismissButton).toBeVisible({ timeout: 10000 });
 
     await page.keyboard.press("Escape");
 
-    await expect(modal).not.toBeVisible();
+    await expect(dismissButton).not.toBeVisible();
   });
 });

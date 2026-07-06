@@ -20,6 +20,6 @@
     Cache-Control = "public, max-age=31536000, immutable"
 
 [[headers]]
-  for = "/hubble/images/*"
+  for = "/hero-dso/images/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"

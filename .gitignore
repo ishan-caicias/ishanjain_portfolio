@@ -91,6 +91,12 @@ dist
 # vuepress build output
 .vuepress/dist
 
+# Hero DSO raw source images (regenerable via scripts/hero/build-hero-dso.mjs from the
+# attribution.json sourceUrl; not needed at runtime, kept out of git to avoid repo bloat)
+scripts/hero/source/*.jpg
+scripts/hero/source/*.jpeg
+scripts/hero/source/*.png
+
 # vuepress v2.x temp and cache directory
 .temp
 .cache

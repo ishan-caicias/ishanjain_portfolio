@@ -25,13 +25,24 @@ export interface SkillCategory {
   skills: string[];
 }
 
-export interface HubbleEntry {
+export interface ApodEntry {
   id: string;
   title: string;
   date: string;
   description: string;
   imagePath: string;
   credit: string;
+  sourceUrl: string;
+}
+
+export interface HeroDsoEntry {
+  id: string;
+  label: string;
+  imagePath: string;
+  credit: string;
+  attributionRequired: boolean;
+  license: string;
+  licenseUrl: string | null;
   sourceUrl: string;
 }
 

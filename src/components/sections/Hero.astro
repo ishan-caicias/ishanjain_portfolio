@@ -1,7 +1,7 @@
 ---
 import Starfield from "@/components/islands/Starfield";
 import AstronautMascot from "@/components/islands/AstronautMascot";
-import StarModal from "@/components/islands/StarModal";
+import HeroBackgroundReveal from "@/components/islands/HeroBackgroundReveal";
 ---
 
 <section
@@ -19,8 +19,8 @@ import StarModal from "@/components/islands/StarModal";
     <AstronautMascot client:idle />
   </div>
 
-  <!-- Star Modal (renders when star is clicked) -->
-  <StarModal client:idle />
+  <!-- Reveals the real deep-sky-object photo behind the hero when a gold star is clicked -->
+  <HeroBackgroundReveal client:idle />
 
   <!-- Content -->
   <div class="relative z-10 mx-auto max-w-3xl text-center">
@@ -43,10 +43,11 @@ import StarModal from "@/components/islands/StarModal";
     <p
       class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-text-muted md:text-xl"
     >
-      I’m a Sydney-based software engineer with a product mindset specializing in .NET, event-driven architectures,
-      and distributed systems. Recently, my focus has been in orchestrating high-stakes backend systems, with a
-      domain drive approach whilst optimizing databases, building fault-tolerant microservices,
-      and keeping production rock-solid.
+      I’m a Sydney-based software engineer with a product mindset specializing
+      in .NET, event-driven architectures, and distributed systems. Recently, my
+      focus has been in orchestrating high-stakes backend systems, with a domain
+      drive approach whilst optimizing databases, building fault-tolerant
+      microservices, and keeping production rock-solid.
     </p>
 
     <p

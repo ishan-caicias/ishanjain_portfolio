@@ -13,7 +13,9 @@ test.describe("Navigation", () => {
     const hero = page.locator("#hero");
     await expect(hero).toBeVisible();
     await expect(hero).toContainText("Reliable systems");
-    await expect(hero).toContainText("Product-minded software engineer");
+    await expect(hero).toContainText(
+      "Sydney-based software engineer with a product mindset",
+    );
   });
 
   test("navigation links are visible on desktop", async ({ page }) => {
@@ -83,7 +85,7 @@ test.describe("Navigation", () => {
   test("credibility cards render", async ({ page }) => {
     const aboutSection = page.locator("#about");
     await expect(aboutSection).toContainText(".NET Microservices");
-    await expect(aboutSection).toContainText("AWS Cloud Infrastructure");
+    await expect(aboutSection).toContainText("AWS & Cloud Platform");
     await expect(aboutSection).toContainText("Production Ownership");
   });
 

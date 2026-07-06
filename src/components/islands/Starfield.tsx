@@ -9,7 +9,7 @@ interface Star {
   twinkleSpeed: number;
   twinkleOffset: number;
   isSpecial: boolean;
-  hubbleIndex: number | null;
+  dsoIndex: number | null;
 }
 
 interface StarfieldProps {
@@ -19,7 +19,7 @@ interface StarfieldProps {
 
 export default function Starfield({
   starCount = 200,
-  specialStarCount = 6,
+  specialStarCount = 24,
 }: StarfieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const starsRef = useRef<Star[]>([]);
@@ -45,7 +45,7 @@ export default function Starfield({
           twinkleSpeed: 0.002 + Math.random() * 0.004,
           twinkleOffset: Math.random() * Math.PI * 2,
           isSpecial,
-          hubbleIndex: isSpecial ? i - starCount : null,
+          dsoIndex: isSpecial ? i - starCount : null,
         });
       }
       return stars;
@@ -195,11 +195,11 @@ export default function Starfield({
         const dy = clickY - star.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (distance < hitRadius && star.hubbleIndex !== null) {
-          // Dispatch custom event for the StarModal to listen to
+        if (distance < hitRadius && star.dsoIndex !== null) {
+          // Dispatch custom event for the hero background reveal to listen to
           window.dispatchEvent(
             new CustomEvent("starclick", {
-              detail: { hubbleIndex: star.hubbleIndex },
+              detail: { dsoIndex: star.dsoIndex },
             }),
           );
           break;
@@ -215,7 +215,7 @@ export default function Starfield({
       className="absolute inset-0 h-full w-full"
       onClick={handleCanvasClick}
       role="img"
-      aria-label="Animated starfield background. Click on the brighter golden stars to discover Hubble telescope images."
+      aria-label="Animated starfield background. Click on the brighter golden stars to reveal real deep-sky object photos."
       style={{ cursor: "crosshair" }}
     />
   );
