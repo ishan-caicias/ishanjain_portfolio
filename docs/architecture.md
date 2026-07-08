@@ -14,13 +14,15 @@ src/
 │   ├── layout/      → Shell components (Header, Footer, SkipLink)
 │   ├── sections/    → Content domain sections (Hero, Experience, etc.)
 │   ├── islands/     → Interactive React components (client-side hydrated)
+│   │   └── space/   → Space scene chrome (HUD, dossiers, station sprites, etc.)
 │   └── ui/          → Reusable presentational primitives
 ├── content/         → Domain data objects (typed, importable)
+├── data/celestial/  → Ported Hipparcos/Gaia/SDSS catalog data
+├── lib/             → WebGL space-engine (custom element) + render helpers
 ├── layouts/         → Page-level HTML templates
 ├── pages/           → Route definitions
 ├── styles/          → Design tokens and global CSS
-├── types/           → Shared TypeScript interfaces
-└── utils/           → Helper functions
+└── types/           → Shared TypeScript interfaces
 ```
 
 ### Component Boundaries
@@ -34,12 +36,16 @@ src/
 
 ### React Islands
 
-Only 4 components ship JavaScript to the client:
+Three top-level islands ship JavaScript to the client:
 
-1. **Starfield** (`client:load`) - Canvas particle system. Loaded immediately as it's the hero background.
+1. **SpaceScene** (`client:load`) - Mounts the `<space-engine>` WebGL custom element (168K+
+   real Hipparcos/Gaia/SDSS objects), plus the always-visible chrome under
+   `islands/space/` (HUD, mission control bar, hover tooltip, warp overlay, collector-card
+   and section-overlay dossiers, station sprites). Loaded immediately as it's the hero
+   background. Degrades to a static CSS starfield (`_domFallback()` in `space-engine.js`)
+   if WebGL is unavailable, with navigation still functional.
 2. **AstronautMascot** (`client:idle`) - Floating SVG mascot. Hydrated when browser is idle.
-3. **StarModal** (`client:idle`) - Hubble image modal. Hydrated when browser is idle, listens for custom events.
-4. **MissionControl** (`client:visible`) - Footer quick-links panel. Hydrated when scrolled into view.
+3. **MissionControl** (`client:visible`) - Footer quick-links panel. Hydrated when scrolled into view.
 
 ## Data Flow
 
@@ -50,11 +56,14 @@ content/*.ts  →  sections/*.astro  →  Server-rendered HTML
                                           ↓
                               React islands hydrate on demand
                                           ↓
-                              Starfield emits CustomEvent("starclick")
+                    SpaceScene dynamically imports space-engine.js +
+                    celestial-*.js catalog data (client-only, browser APIs)
                                           ↓
-                              StarModal listens and opens
+                    <space-engine> mounts, emits cosmos:* events
+                    (progress, ready, hover, select, warp, arrive, home)
                                           ↓
-                              Fetches /hubble/data.json (local dataset)
+                    SpaceScene listens and drives HUD/dossier/overlay state;
+                    header nav links warp via document-level click delegation
 ```
 
 ## Theme System
@@ -75,16 +84,17 @@ All tokens are available as Tailwind utility classes (e.g., `text-gold-400`, `bg
 
 Focus on React islands since they contain the interactive logic:
 
-- **StarModal**: Open/close mechanics, fallback handling, event system
 - **MissionControl**: Panel toggle, keyboard accessibility, clipboard API
-- **hubble.ts**: Data loading, error handling, fallback data
+- **spaceHelpers.ts**: Pure computation logic extracted from the space scene (formatting,
+  rarity colours, field-star dossier synthesis) so it's testable independent of React/WebGL
 
 ### E2E Tests (Playwright)
 
 Focus on integration and user journeys:
 
-- **Navigation**: Section scrolling, mobile menu, skip link
-- **Star Interaction**: Custom event flow, modal content, close mechanisms
+- **Navigation**: Section scrolling (classic view), mobile menu, skip link
+- **Space Scene**: Mount + live catalog data, travel-mode-by-default, nav-link warp →
+  dossier open/close, RNG travel, travel/scroll mode toggle, WebGL fallback, reduced motion
 - **Accessibility**: axe-core scan, heading hierarchy, keyboard navigation, semantic landmarks
 
 ### Why Not Test Astro Components?
@@ -95,9 +105,13 @@ Astro components render to static HTML at build time. Testing them would effecti
 
 - **Zero JS by default**: Astro ships no JavaScript for static sections
 - **Islands architecture**: React bundles are code-split per component
-- **Canvas starfield**: Single canvas element, no per-star DOM nodes
-- **requestAnimationFrame**: Throttled to 60fps, paused when tab is hidden
-- **prefers-reduced-motion**: Disables all animations, renders static starfield
+- **WebGL space engine**: Adaptive quality tiers, DPR clamp, and a no-WebGL DOM fallback;
+  the ~7MB initial texture/catalog payload lazy-loads DSO imagery only on arrival (the
+  bulk of the 38MB asset folder never loads unless visited) - see
+  [delivery-plan/PF-07-space-portfolio-webgl.md](delivery-plan/PF-07-space-portfolio-webgl.md)
+- **requestAnimationFrame**: Paused/throttled when tab is hidden
+- **prefers-reduced-motion**: Halves/shortens engine animation durations and clamps every
+  DC-layer CSS keyframe via a blanket rule in `global.css`
 - **Font strategy**: Self-hosted variable fonts with `font-display: swap`
 - **Image lazy loading**: All images use `loading="lazy"`
 

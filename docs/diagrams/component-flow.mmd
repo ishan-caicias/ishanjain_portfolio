@@ -3,35 +3,37 @@ title: Component Interaction Flow
 ---
 sequenceDiagram
     participant User
-    participant Starfield as Starfield (Canvas)
-    participant Window as Window Events
-    participant StarModal as Star Modal
-    participant HubbleData as /hubble/data.json
+    participant Header as Header Nav
+    participant Engine as space-engine (WebGL)
+    participant Scene as SpaceScene (React)
+    participant Overlay as SectionOverlay / CollectorCard
 
-    Note over Starfield: Renders ~200 stars<br/>6 are "special" (gold)
+    Note over Engine: 168K+ real Hipparcos/Gaia/SDSS objects<br/>streams in on load
 
-    User->>Starfield: Click on golden star
-    Starfield->>Starfield: Hit detection (20px radius)
-    Starfield->>Window: dispatchEvent("starclick", {hubbleIndex})
+    User->>Header: Click "About"
+    Header->>Scene: document-level click delegation
+    Scene->>Engine: travelTo("st-about")
+    Engine->>Scene: dispatchEvent("cosmos:select", {id})
+    Engine->>Scene: dispatchEvent("cosmos:warp", {id, t, phase})
+    Note over Engine: Aim + warp animation<br/>(halved duration if prefers-reduced-motion)
+    Engine->>Scene: dispatchEvent("cosmos:arrive", {id})
+    Scene->>Overlay: open dossier for arrived section
 
-    Note over StarModal: Loaded on page idle
-
-    StarModal->>HubbleData: fetch("/hubble/data.json")
-    HubbleData-->>StarModal: HubbleEntry[]
-
-    Window->>StarModal: "starclick" event
-    StarModal->>StarModal: setIsOpen(true), setEntry(data[index])
-    StarModal->>User: Display modal with image + info
-
-    User->>StarModal: Click close / Press Escape / Click backdrop
-    StarModal->>StarModal: setIsOpen(false)
-    StarModal->>User: Modal closes (AnimatePresence exit)
-
-    Note over User,StarModal: Focus returns to<br/>previously focused element
+    User->>Overlay: Click close / Press Escape
+    Overlay->>Scene: onClose()
+    Scene->>Overlay: unmount dossier
 
     rect rgb(26,35,46)
-        Note over Starfield: Astronaut Mascot Flow
-        User->>User: Scroll to new section
+        Note over Engine: Astronaut Mascot Flow
+        User->>User: Scroll to new section (classic view)
         Note right of User: IntersectionObserver<br/>detects visible section
         Note right of User: Astronaut drifts<br/>toward active section
+    end
+
+    rect rgb(26,35,46)
+        Note over Engine: No-WebGL Fallback
+        Engine->>Engine: getContext("webgl") fails
+        Engine->>Engine: _domFallback() - static CSS sky
+        Engine->>Scene: dispatchEvent("cosmos:ready")
+        Note over Scene: Navigation still works via<br/>the noGL branch of travelTo/goHome
     end

@@ -29,7 +29,7 @@ test.describe("Accessibility", () => {
     expect(h1Count).toBe(1);
 
     const h1Text = await page.locator("h1").textContent();
-    expect(h1Text).toContain("Building reliable systems");
+    expect(h1Text).toContain("Reliable systems");
   });
 
   test("all images have alt text", async ({ page }) => {
@@ -62,6 +62,12 @@ test.describe("Accessibility", () => {
   });
 
   test("semantic landmarks are present", async ({ page }) => {
+    // The footer is hidden by design while the space scene's travel mode is
+    // active (default) - switch to classic view to check the full landmark
+    // set the way a scroll-mode visitor sees it. See PF-07 delivery plan
+    // Phase 4/5.
+    await page.getByRole("button", { name: /CLASSIC VIEW/ }).click();
+
     await expect(page.getByRole("banner")).toBeVisible(); // header
     await expect(page.getByRole("main")).toBeVisible(); // main
     await expect(page.getByRole("contentinfo")).toBeVisible(); // footer

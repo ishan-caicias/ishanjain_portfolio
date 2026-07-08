@@ -23,7 +23,6 @@ export default defineConfig({
       exclude: [
         "**/*.test.{ts,tsx}",
         "**/node_modules/**",
-        "src/components/islands/Starfield.tsx",
         "src/components/islands/AstronautMascot.tsx",
       ],
       reporter: ["text", "html", "json-summary"],

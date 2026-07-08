@@ -1,7 +1,6 @@
 ---
-import Starfield from "@/components/islands/Starfield";
+import SpaceScene from "@/components/islands/SpaceScene";
 import AstronautMascot from "@/components/islands/AstronautMascot";
-import StarModal from "@/components/islands/StarModal";
 ---
 
 <section
@@ -9,21 +8,18 @@ import StarModal from "@/components/islands/StarModal";
   class="relative flex min-h-screen items-center justify-center overflow-hidden px-6"
   aria-label="Introduction"
 >
-  <!-- Starfield background -->
-  <div class="absolute inset-0 -z-10">
-    <Starfield client:load />
-  </div>
+  <!-- Interactive WebGL space scene: 168,959 real Hipparcos/Gaia/SDSS objects, warp travel
+       between sections. Fixed-position, covers the full viewport regardless of where it's
+       mounted in the DOM - see PF-07 delivery plan. -->
+  <SpaceScene client:load />
 
   <!-- Astronaut (hidden on mobile) -->
   <div class="pointer-events-none absolute inset-0 hidden md:block">
     <AstronautMascot client:idle />
   </div>
 
-  <!-- Star Modal (renders when star is clicked) -->
-  <StarModal client:idle />
-
   <!-- Content -->
-  <div class="relative z-10 mx-auto max-w-3xl text-center">
+  <div id="ij-hero-copy" class="relative z-10 mx-auto max-w-3xl text-center">
     <div
       class="mb-6 inline-flex items-center gap-2 rounded-full border border-royal-700/50 bg-surface-elevated/80 px-4 py-1.5 text-sm text-text-muted backdrop-blur-sm"
     >
@@ -43,10 +39,11 @@ import StarModal from "@/components/islands/StarModal";
     <p
       class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-text-muted md:text-xl"
     >
-      I’m a Sydney-based software engineer with a product mindset specializing in .NET, event-driven architectures,
-      and distributed systems. Recently, my focus has been in orchestrating high-stakes backend systems, with a
-      domain drive approach whilst optimizing databases, building fault-tolerant microservices,
-      and keeping production rock-solid.
+      I’m a Sydney-based software engineer with a product mindset specializing
+      in .NET, event-driven architectures, and distributed systems. Recently, my
+      focus has been in orchestrating high-stakes backend systems, with a domain
+      drive approach whilst optimizing databases, building fault-tolerant
+      microservices, and keeping production rock-solid.
     </p>
 
     <p

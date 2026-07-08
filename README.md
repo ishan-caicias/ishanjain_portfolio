@@ -42,48 +42,33 @@ src/
 ├── components/
 │   ├── layout/          # Header, Footer, SkipLink
 │   ├── sections/        # Hero, Credibility, Experience, etc.
-│   ├── islands/         # React islands (Starfield, StarModal, etc.)
+│   ├── islands/         # React islands (SpaceScene, AstronautMascot, MissionControl)
+│   │   └── space/       # Space scene chrome (HUD, dossiers, station sprites, etc.)
 │   └── ui/              # Reusable components (Badge, Card, etc.)
 ├── content/             # Typed data (experience, skills, etc.)
+├── data/celestial/      # Ported Hipparcos/Gaia/SDSS catalog data
+├── lib/                 # WebGL space-engine (custom element) + render helpers
 ├── layouts/             # BaseLayout with SEO + meta
 ├── pages/               # index.astro + robots.txt
 ├── styles/              # global.css with theme tokens
-├── types/               # Shared TypeScript interfaces
-└── utils/               # Hubble data loader + helpers
+└── types/               # Shared TypeScript interfaces
 ```
 
-See [docs/architecture.md](docs/architecture.md) for detailed architecture documentation.
+See [docs/architecture.md](docs/architecture.md) and
+[docs/delivery-plan/PF-07-space-portfolio-webgl.md](docs/delivery-plan/PF-07-space-portfolio-webgl.md)
+for detailed architecture documentation.
 
 ## Interactive Features
 
-- **Starfield**: Canvas-based particle system with parallax and twinkling stars
-- **Clickable Stars**: Golden stars open a modal with real Hubble telescope images
+- **Space Scene**: A WebGL star-flight hero (168K+ real Hipparcos/Gaia/SDSS objects) with
+  relativistic warp travel between portfolio sections, each docked to a real celestial object.
+  Degrades to a static CSS starfield with full navigation if WebGL is unavailable.
+- **Classic View Toggle**: Switches between the space scene's travel mode and a traditional
+  scrolling page at any time.
 - **Astronaut Mascot**: Floating SVG that drifts toward active sections (desktop only)
 - **Mission Control**: Footer panel with quick links (Resume, LinkedIn, GitHub, Copy Bio)
 
 All interactive elements respect `prefers-reduced-motion` and are keyboard accessible.
-
-## Hubble Images
-
-The star modal uses a local dataset of real NASA/Hubble images. Images are public domain.
-
-To download the images for local development:
-
-1. Visit the source URLs listed in `public/hubble/data.json`
-2. Download each image and save as WebP format (~50-80KB) in `public/hubble/images/`
-3. Suggested tool: `cwebp` or any image converter
-
-The modal degrades gracefully if images are missing, showing a text-only fallback.
-
-### Optional: NASA APOD API
-
-Set `PUBLIC_NASA_API_KEY` in a `.env` file to optionally fetch from NASA's Astronomy Picture of the Day API. This is purely additive — the local dataset is always available.
-
-## Environment Variables
-
-| Variable              | Required | Description                       |
-| --------------------- | -------- | --------------------------------- |
-| `PUBLIC_NASA_API_KEY` | No       | NASA API key for APOD integration |
 
 ## Testing
 
@@ -94,7 +79,7 @@ npm run test           # Run once
 npm run test:watch     # Watch mode
 ```
 
-Tests cover: StarModal (open/close/fallback), MissionControl (open/close/copy bio), Hubble data loading.
+Tests cover: MissionControl (open/close/copy bio) and space-scene helpers (`src/lib/spaceHelpers.ts`).
 
 ### E2E Tests
 
@@ -103,7 +88,7 @@ npm run build          # Build first
 npm run test:e2e       # Run Playwright tests
 ```
 
-Tests cover: navigation, star interaction, accessibility (axe-core scan).
+Tests cover: navigation, the space scene (mount, travel, dossiers, WebGL fallback, reduced motion), accessibility (axe-core scan).
 
 ### First-time E2E setup
 

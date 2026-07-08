@@ -6,6 +6,9 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   site: "https://ishanjain.dev",
   integrations: [react(), sitemap()],
+  server: {
+    port: process.env.PORT ? Number(process.env.PORT) : 4321,
+  },
   vite: {
     plugins: [tailwindcss()],
   },
