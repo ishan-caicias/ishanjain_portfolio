@@ -149,6 +149,113 @@ test.describe("Space Scene - WebGL fallback", () => {
   });
 });
 
+test.describe("Space Scene - mobile responsive", () => {
+  test.use({ viewport: { width: 375, height: 812 } });
+
+  test("mobile defaults to scroll mode, not travel", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("space-engine");
+
+    await expect(page.locator("body")).not.toHaveClass(/ij-travel/);
+    await expect(page.locator("#about")).toBeVisible();
+    await expect(page.locator("footer")).toBeVisible();
+  });
+
+  test("HUD readouts are hidden on mobile regardless of mode", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.waitForSelector("space-engine");
+
+    await expect(page.getByText(/GAIA DR3/)).toBeHidden();
+    await expect(page.getByText(/^BEARING$/)).toBeHidden();
+  });
+
+  test("mission control bar is hidden in mobile scroll mode, shown after switching to travel", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.waitForSelector("space-engine");
+
+    const missionControl = page.getByLabel(
+      "Mission control: type a destination",
+    );
+    await expect(missionControl).toBeHidden();
+
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await page.getByRole("menuitem", { name: /TRAVEL MODE/ }).click();
+
+    await expect(page.locator("body")).toHaveClass(/ij-travel/);
+    await expect(missionControl).toBeVisible();
+  });
+
+  test("mobile menu: mode toggle switches modes and closes the menu", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.waitForSelector("space-engine");
+
+    const menuButton = page.getByRole("button", { name: "Open menu" });
+    await menuButton.click();
+    await expect(menuButton).toHaveAttribute("aria-expanded", "true");
+
+    await page.getByRole("menuitem", { name: /TRAVEL MODE/ }).click();
+
+    await expect(page.locator("body")).toHaveClass(/ij-travel/);
+    await expect(menuButton).toHaveAttribute("aria-expanded", "false");
+
+    // Reopen - label should now offer switching back
+    await menuButton.click();
+    await expect(
+      page.getByRole("menuitem", { name: /CLASSIC VIEW/ }),
+    ).toBeVisible();
+  });
+
+  test("mobile menu: Data & Licenses opens the credits dialog and closes the menu", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.waitForSelector("space-engine");
+
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await page.getByRole("menuitem", { name: /DATA & LICENSES/ }).click();
+
+    await expect(
+      page.getByRole("dialog", { name: "Data Sources & Licenses" }),
+    ).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByRole("button", { name: "Open menu" }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("mobile menu closes on Escape", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("space-engine");
+
+    const menuButton = page.getByRole("button", { name: "Open menu" });
+    await menuButton.click();
+    await expect(menuButton).toHaveAttribute("aria-expanded", "true");
+
+    await page.keyboard.press("Escape");
+    await expect(menuButton).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("mobile menu nav link still navigates (scroll mode) and closes the menu", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.waitForSelector("space-engine");
+
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await page.getByRole("menuitem", { name: "Contact" }).click();
+
+    await expect(page.locator("#contact")).toBeInViewport({ timeout: 5000 });
+    await expect(
+      page.getByRole("button", { name: "Open menu" }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+});
+
 test.describe("Space Scene - reduced motion", () => {
   test("engine and DC-layer animations respect prefers-reduced-motion", async ({
     page,

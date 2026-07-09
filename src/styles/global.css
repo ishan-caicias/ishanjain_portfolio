@@ -93,6 +93,25 @@ footer {
   z-index: 1;
 }
 
+/* Mobile responsive pass (design_handoff_mobile_responsive): the mobile menu's mode-toggle
+   entry needs to show the opposite label of HUD's desktop toggle (both flip the same
+   `body.ij-travel` class), and the touch hint only makes sense in travel mode on a narrow
+   viewport - the desktop drag/keyboard instructions it replaces already live inside the
+   now mobile-hidden HUD, so no `md:` gate is needed here beyond the media query itself. */
+body.ij-travel .ij-mode-label-scroll {
+  display: none;
+}
+
+body.ij-travel .ij-mode-label-travel {
+  display: inline;
+}
+
+@media (max-width: 767px) {
+  body.ij-travel #ij-touch-hint {
+    display: block;
+  }
+}
+
 #ij-hero-copy {
   transition: opacity 0.6s;
 }

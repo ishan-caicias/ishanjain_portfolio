@@ -54,7 +54,10 @@ function entryFor(id: string | null): CelestialEntry | null {
  * during travel" chrome (HUD, mission control, hover tooltip, warp transit overlay,
  * arrival vista), the collector-card and section-overlay dossiers, station sprite markers,
  * and the travel-mode/scroll-mode toggle. Header nav links work via document-level click
- * delegation (see the event-wiring effect) - no changes needed to the existing Header.astro.
+ * delegation (see the event-wiring effect). The mobile responsive pass
+ * (design_handoff_mobile_responsive) also relocated two HUD actions - the mode toggle and
+ * Data & Licenses - into Header.astro's mobile dropdown menu; the same click delegate below
+ * recognizes clicks on those via `[data-mobile-menu-action]`.
  */
 export default function SpaceScene({
   density = 1,
@@ -66,6 +69,26 @@ export default function SpaceScene({
   const [state, setState] = useState<SceneState>(INITIAL_SCENE_STATE);
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // Mobile responsive pass (design_handoff_mobile_responsive): auto-resolves nav mode to
+  // scroll on mobile / travel on desktop unless the user has explicitly overridden it via
+  // the toggle. `mobileRef` mirrors `mobile` for the same reason `stateRef` mirrors `state` -
+  // so effects that don't re-subscribe on every render (click delegation, the rAF tick) can
+  // read the latest value without going stale.
+  const [mobile, setMobile] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 767px)").matches,
+  );
+  const mobileRef = useRef(mobile);
+  mobileRef.current = mobile;
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const onChange = (e: MediaQueryListEvent) => setMobile(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   const sectionTravelRef = useRef<string | null>(null);
   const desiredBodyRef = useRef<string | null>(null);
@@ -79,7 +102,20 @@ export default function SpaceScene({
     setState((s) => ({ ...s, ...p }));
   }, []);
 
-  const isTravel = (state.navOverride ?? "travel") === "travel";
+  const isTravel =
+    (state.navOverride ?? (mobile ? "scroll" : "travel")) === "travel";
+
+  const toggleNavMode = useCallback(() => {
+    patch({
+      navOverride: isTravel ? "scroll" : "travel",
+      sectionOpen: null,
+      vista: null,
+    });
+  }, [isTravel, patch]);
+
+  const openCredits = useCallback(() => {
+    patch({ sectionOpen: "credits", vista: null, cardId: null });
+  }, [patch]);
 
   // --- Phase 4: body.ij-travel class toggles CSS that hides scrollable sections/footer ---
   useEffect(() => {
@@ -257,12 +293,27 @@ export default function SpaceScene({
     ];
     const clickDelegate = (ev: MouseEvent) => {
       const target = ev.target as HTMLElement;
+
+      // Mobile menu action items (mode toggle / Data & Licenses) live in Header.astro's
+      // dropdown, not in this component's own JSX - see design_handoff_mobile_responsive.
+      const actionEl = target.closest?.(
+        "[data-mobile-menu-action]",
+      ) as HTMLElement | null;
+      if (actionEl) {
+        const action = actionEl.dataset.mobileMenuAction;
+        if (action === "toggle-mode") toggleNavMode();
+        else if (action === "credits") openCredits();
+        return;
+      }
+
       const a = target.closest?.("a[href^='#']") as HTMLAnchorElement | null;
       if (!a) return;
       const sec = (a.getAttribute("href") || "").slice(1);
       if (!knownSections.includes(sec)) return;
       ev.preventDefault();
-      const travelNow = (stateRef.current.navOverride ?? "travel") === "travel";
+      const travelNow =
+        (stateRef.current.navOverride ??
+          (mobileRef.current ? "scroll" : "travel")) === "travel";
       if (sec === "hero") {
         if (travelNow) engineEl()?.goHome();
         else window.scrollTo({ top: 0, behavior: "smooth" });
@@ -297,7 +348,14 @@ export default function SpaceScene({
       document.removeEventListener("click", clickDelegate);
       clearTimeout(vistaTimeoutRef.current);
     };
-  }, [engineReady, patch, goSection, dispatchRoute]);
+  }, [
+    engineReady,
+    patch,
+    goSection,
+    dispatchRoute,
+    toggleNavMode,
+    openCredits,
+  ]);
 
   // --- Phase 4: scroll-mode section routing - ship follows the section scrolled into view ---
   useEffect(() => {
@@ -333,7 +391,9 @@ export default function SpaceScene({
       const en = engineEl();
       if (!en || !en.stations) return;
       const s = stateRef.current;
-      const travel = (s.navOverride ?? "travel") === "travel";
+      const travel =
+        (s.navOverride ?? (mobileRef.current ? "scroll" : "travel")) ===
+        "travel";
       const camHome = Math.hypot(en.cam[0], en.cam[1], en.cam[2]) < 1;
       const atHome =
         camHome && (window.scrollY || 0) < window.innerHeight * 0.3;
@@ -479,14 +539,9 @@ export default function SpaceScene({
         warp={state.warp}
         arrivedId={state.arrivedId}
         sector={state.sector}
-        onOpenCredits={() =>
-          patch({ sectionOpen: "credits", vista: null, cardId: null })
-        }
+        onOpenCredits={openCredits}
         isTravel={isTravel}
-        onToggleNavMode={() => {
-          const next = isTravel ? "scroll" : "travel";
-          patch({ navOverride: next, sectionOpen: null, vista: null });
-        }}
+        onToggleNavMode={toggleNavMode}
       />
 
       <StationSprites
@@ -496,25 +551,29 @@ export default function SpaceScene({
         onGo={goSection}
       />
 
-      <MissionControlBar
-        cmd={state.cmd}
-        suggestions={suggestions}
-        onCmdChange={(value) => patch({ cmd: value })}
-        onCmdKeyDown={(e) => {
-          if (e.key === "Enter" && suggestions.length) {
-            const s = suggestions[0];
+      {/* Mobile responsive pass: a "fly to a destination" search bar makes no sense on the
+          scrolling page - see design_handoff_mobile_responsive. */}
+      {!(mobile && !isTravel) && (
+        <MissionControlBar
+          cmd={state.cmd}
+          suggestions={suggestions}
+          onCmdChange={(value) => patch({ cmd: value })}
+          onCmdKeyDown={(e) => {
+            if (e.key === "Enter" && suggestions.length) {
+              const s = suggestions[0];
+              patch({ cmd: "", hover: null });
+              engineEl()?.travelTo(s.id);
+            }
+            if (e.key === "Escape") patch({ cmd: "" });
+          }}
+          onSuggestionSelect={(s) => {
             patch({ cmd: "", hover: null });
             engineEl()?.travelTo(s.id);
-          }
-          if (e.key === "Escape") patch({ cmd: "" });
-        }}
-        onSuggestionSelect={(s) => {
-          patch({ cmd: "", hover: null });
-          engineEl()?.travelTo(s.id);
-        }}
-        onRandom={() => engineEl()?.randomBody()}
-        onHome={() => engineEl()?.goHome()}
-      />
+          }}
+          onRandom={() => engineEl()?.randomBody()}
+          onHome={() => engineEl()?.goHome()}
+        />
+      )}
 
       <HoverTooltip data={hoverTooltip} />
 

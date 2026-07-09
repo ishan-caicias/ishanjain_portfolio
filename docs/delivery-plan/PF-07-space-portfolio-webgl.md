@@ -279,7 +279,7 @@ time by direct comparison rather than trusting the prior session's own record:
 
 - `space-engine.js`: MD5-identical to source, confirmed byte-for-byte (`ca5865774e03248f03c86073c38aed09`
   on both sides).
-- All 5 `celestial-*.js` files: differ from source *only* by the documented appended `export {};`
+- All 5 `celestial-*.js` files: differ from source _only_ by the documented appended `export {};`
   line - confirmed via direct `diff`, no data content touched.
 - `public/assets/`: 1228 files on both sides, zero differences in the file list (verified via
   `diff` of sorted relative paths) - the asset copy is complete, nothing missing or extra.
@@ -301,3 +301,81 @@ file's hash to the new content's hash; live-dispatched `cosmos:arrive` for `hudf
 the collector card renders the image (`fetch('/assets/dso/HUDF.webp')` → 200, `image/webp`, 98,248
 bytes, matching the file on disk exactly) with correct alt text, stats, and field note. Full
 suite re-verified green after the change: build succeeds, 23/23 e2e passing.
+
+## 7. Mobile Responsive Pass (design_handoff_mobile_responsive)
+
+A follow-on design handoff (`Interactive Outerspace Portfolio_Response mobile handoff/
+design_handoff_mobile_responsive/README.md`), explicitly framed as an addendum to this delivery
+plan's §1 handoff, specifying the mobile/responsive layer this port never had (per its own
+description: "no responsive handling... effectively unusable below ~760px"). Implemented in full,
+reconciled to this repo's Tailwind tokens rather than the doc's raw hex values, per its own
+instruction.
+
+### What changed
+
+1. **Nav mode default is now viewport-aware** (`SpaceScene.tsx`): `navOverride` (null | "scroll" |
+   "travel") now falls back to `mobile ? "scroll" : "travel"` instead of a hardcoded `"travel"`,
+   at all three call sites that read it (`isTravel`, the click-delegate's `travelNow`, the
+   station-sprite tick's `travel`). An explicit user toggle still overrides this on any viewport.
+   `mobile` is tracked via `matchMedia("(max-width: 767px)")` with a live `change` listener (a
+   `mobileRef` mirrors it for the two effects that don't re-subscribe on every render, matching
+   the existing `stateRef` pattern).
+2. **HUD (`HUD.tsx`) is now fully hidden below `md:`** - previously only its decorative text was
+   hidden (a narrower fix from an earlier mobile audit this session); its two actions (Data &
+   Licenses, mode toggle) relocate into Header.astro's mobile menu instead, so nothing is lost.
+3. **Header.astro's mobile menu** gained: a 44×44px hit target (was undersized), a panel
+   repositioned to anchor under the button (`min(74vw,280px)`, was a full-width slide-down), two
+   new action items (mode toggle with a dual-label CSS swap keyed off `body.ij-travel`, and Data &
+   Licenses), an outside-tap scrim, Escape-to-close, close-on-breakpoint-change, and genuine
+   `aria-expanded` state (all previously absent - the old menu was CSS-only with no JS at all).
+4. **Mission Control Bar** (`SpaceScene.tsx`) is hidden when `mobile && !isTravel` - a "fly to a
+   destination" bar has no purpose on the scrolling page.
+5. **Touch hint** (`Hero.astro` + `global.css`): a `DRAG TO LOOK AROUND · TAP A CRAFT TO TRAVEL`
+   line, shown only `mobile && isTravel`, replacing the desktop drag/keyboard instructions that
+   live inside the now mobile-hidden HUD.
+6. **Not implemented, deliberately**: the handoff's literal hero-copy padding values
+   (`clamp(238px,34vh,300px)` → `116px`/`40px`). That fixed-padding approach existed in the
+   prototype to clear its always-visible HUD; this port's hero already vertically centers via
+   flexbox and, with the HUD now fully hidden on mobile, has nothing left to clear - verified via
+   live testing that spacing is correct without it. Station-sprite crowding on mobile travel mode
+   was explicitly out of scope per the handoff's own "Known limitations."
+
+### A real bug found along the way (not a handoff item)
+
+The pre-existing hamburger `<label>` had no `role`, making it invisible to assistive tech and
+automation as an interactive control (a `<label>`'s implicit role is not "button" even with an
+`aria-label` - confirmed empirically when Playwright's `getByRole("button", ...)` couldn't find
+it). Fixed with `role="button"` + `tabindex="0"` + a small keydown handler for Enter/Space (a
+`<label role="button">` doesn't get native keyboard activation for free the way a real `<button>`
+does). This fixes the _original_, pre-existing menu button too, not just the new additions.
+
+### Verification
+
+Manually verified live (mobile viewport) end-to-end: mode auto-resolves to scroll by default:
+`#about`/footer visible, no `ij-travel` class; HUD hidden regardless of mode; Mission Control Bar
+hidden in scroll mode, appears after switching to travel; mobile menu mode-toggle switches modes,
+flips its own label, and closes the menu; Data & Licenses opens the credits dialog and closes the
+menu; Escape and the outside-tap scrim both close the menu; desktop re-verified unaffected at a
+real 1280×800 viewport (an earlier check at a momentarily-0×0 viewport had falsely suggested a
+regression - resolved by confirming `window.innerWidth` before trusting any result).
+
+Added 7 new e2e tests (`tests/e2e/space-scene.spec.ts`, "Space Scene - mobile responsive") at a
+375×812 viewport, covering everything above. Full suite: **30/30 passing**, stable across two
+repeated full runs (one flaked once under full parallel load on the pre-existing
+`scene mounts...console clean` test - the same documented resource-contention pattern from
+TR-004, re-ran clean immediately after).
+
+### Audit: is this a good change for this repo?
+
+**Yes.** The core decision - mobile defaults to a normal scrolling page, not a WebGL flight
+scene - is sound product judgement: touch users get a familiar experience by default, desktop
+keeps the flight experience, and switching is one tap away. It also retroactively explains and
+subsumes an earlier session's more surgical mobile fix (hiding just the HUD's decorative text
+left the two action buttons still overlapping the hero heading in some cases); this pass hides
+the HUD outright and gives those two actions a proper mobile home instead. The hamburger-button
+accessibility fix is a genuine improvement to code that pre-dates this handoff entirely. The one
+place this pass deliberately diverges from the handoff's literal spec (hero-copy padding) was the
+right call, not a shortcut - copying prototype CSS written for a different layout strategy would
+have been cargo-culting a fix for a problem this port's architecture doesn't have.
+
+**Exit criteria — met.** See [TR-009](../test-reports/TR-009.md) for the full BUILD-VERIFY-REPORT.

@@ -16,7 +16,10 @@ interface HUDProps {
 }
 
 /**
- * Top-left catalog-stream readout + top-right bearing readout. Always visible during travel.
+ * Top-left catalog-stream readout + top-right bearing readout. Desktop-only (`md:` and up) -
+ * on mobile both readouts overlap the hero heading with no room to fit, so they're hidden
+ * entirely; their one functional action (Data & Licenses) and the mode toggle relocate into
+ * Header.astro's mobile dropdown menu instead. See design_handoff_mobile_responsive.
  * Ported from Space Portfolio.dc.html lines 351-369.
  */
 export default function HUD({
@@ -60,8 +63,8 @@ export default function HUD({
 
   return (
     <>
-      <div className="pointer-events-none fixed left-6 top-[clamp(72px,12vh,78px)] z-10 select-none font-mono text-[11.5px] tracking-wider text-[#7986cb]">
-        <div className="hidden md:block">
+      <div className="pointer-events-none fixed left-6 top-[clamp(72px,12vh,78px)] z-10 hidden select-none font-mono text-[11.5px] tracking-wider text-[#7986cb] md:block">
+        <div>
           <div className="text-[#9fa8da]">
             GAIA DR3 · HIPPARCOS · CNS5 · NGC2000
           </div>
@@ -86,7 +89,7 @@ export default function HUD({
         >
           DATA &amp; LICENSES ▸
         </button>
-        <div className="mt-2.5 hidden max-w-[190px] text-[10px] leading-relaxed tracking-wider text-[#5c6bc0] md:block">
+        <div className="mt-2.5 max-w-[190px] text-[10px] leading-relaxed tracking-wider text-[#5c6bc0]">
           DRAG TO LOOK 360°
           <br />
           CLICK A CRAFT OR GOLD BEACON TO TRAVEL
@@ -95,8 +98,8 @@ export default function HUD({
         </div>
       </div>
 
-      <div className="pointer-events-none fixed right-6 top-[clamp(72px,12vh,78px)] z-10 select-none text-right font-mono text-[11.5px] tracking-wider text-[#7986cb]">
-        <div aria-hidden="true" className="hidden md:block">
+      <div className="pointer-events-none fixed right-6 top-[clamp(72px,12vh,78px)] z-10 hidden select-none text-right font-mono text-[11.5px] tracking-wider text-[#7986cb] md:block">
+        <div aria-hidden="true">
           <div className="text-[#9fa8da]">BEARING</div>
           <div>{bearingLine}</div>
           <div className="text-[#ffd54f]">{sectorLine}</div>
