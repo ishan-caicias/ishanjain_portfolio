@@ -1,4 +1,5 @@
 <!-- SoxCrunch Strategy Scorecard — auto-generated, do not edit manually -->
+
 Generated: 2026-07-08 04:15:12 UTC
 Phase: 5 — milestone
 Decision matrix source: LIVE FETCH — docs/llm/scorecard-decision-matrix.md
@@ -106,16 +107,16 @@ PRICING SOURCES
 
 ## Scoring Summary
 
-| Model | Agentic Coding (35%) | Reasoning/Math (25%) | Cost Efficiency (25%) | Token Efficiency (15%) | Weighted Score |
-|---|---|---|---|---|---|
-| Claude Sonnet 5 | 4 | 3 | 5 | 5 | **4.15** |
-| Claude Fable 5 | 5 | 5 | 1 | 5 | 4.00 |
-| Claude Opus 4.8 | 4 | 4 | 3 | 5 | 3.90 |
-| GPT-5.5 (high) | 4* | 4 | 2 | 3 | 3.35 |
-| Gemini 3.5 Flash | 2* | 2* | 5 | 4 | 3.05 |
-| Claude Haiku 4.5 | 2* | 2* | 5 | 4 | 3.05 |
-| GPT-5.3 Codex | 3* | 3* | 4 | 2 | 3.10 |
-| Gemini 3.1 Pro Preview | 2* | 2* | 4 | 4 | 2.80 |
+| Model                  | Agentic Coding (35%) | Reasoning/Math (25%) | Cost Efficiency (25%) | Token Efficiency (15%) | Weighted Score |
+| ---------------------- | -------------------- | -------------------- | --------------------- | ---------------------- | -------------- |
+| Claude Sonnet 5        | 4                    | 3                    | 5                     | 5                      | **4.15**       |
+| Claude Fable 5         | 5                    | 5                    | 1                     | 5                      | 4.00           |
+| Claude Opus 4.8        | 4                    | 4                    | 3                     | 5                      | 3.90           |
+| GPT-5.5 (high)         | 4\*                  | 4                    | 2                     | 3                      | 3.35           |
+| Gemini 3.5 Flash       | 2\*                  | 2\*                  | 5                     | 4                      | 3.05           |
+| Claude Haiku 4.5       | 2\*                  | 2\*                  | 5                     | 4                      | 3.05           |
+| GPT-5.3 Codex          | 3\*                  | 3\*                  | 4                     | 2                      | 3.10           |
+| Gemini 3.1 Pro Preview | 2\*                  | 2\*                  | 4                     | 4                      | 2.80           |
 
 `*` = scored from Intelligence Index proxy, not a direct SWE-bench figure — Vellum's fetch only returned
 its top-5 slice (all Claude), so non-Claude agentic-coding scores are a genuine data gap this run.
@@ -130,21 +131,21 @@ Expressed as relative Claude-token cost, not literal spend (this session runs on
 with pooled usage limits, not metered per-token billing — treat these as relative-budget-consumption
 estimates, not dollar figures you'll be charged).
 
-| Scenario | Model mix | Est. sessions | Tokens/session (in/out) | Relative cost (@ list price) |
-|---|---|---|---|---|
-| Conservative | Sonnet 5 only, no Tier A escalation | 3 | 80K in / 15K out | ~$0.63/session |
-| Moderate (recommended) | Tier A for §1 mounting + §3 octree (2 sessions), Sonnet 5 elsewhere (3 sessions) | 5 | 100K in / 20K out avg | ~$1.10/session avg (Tier A sessions ~$1.00, Tier B sessions ~$0.36) |
-| Heavy | Fable 5 for all architecture/data-pipeline work, Sonnet 5 elsewhere | 5 | 100K in / 20K out avg | ~$2.20/session avg |
+| Scenario               | Model mix                                                                        | Est. sessions | Tokens/session (in/out) | Relative cost (@ list price)                                        |
+| ---------------------- | -------------------------------------------------------------------------------- | ------------- | ----------------------- | ------------------------------------------------------------------- |
+| Conservative           | Sonnet 5 only, no Tier A escalation                                              | 3             | 80K in / 15K out        | ~$0.63/session                                                      |
+| Moderate (recommended) | Tier A for §1 mounting + §3 octree (2 sessions), Sonnet 5 elsewhere (3 sessions) | 5             | 100K in / 20K out avg   | ~$1.10/session avg (Tier A sessions ~$1.00, Tier B sessions ~$0.36) |
+| Heavy                  | Fable 5 for all architecture/data-pipeline work, Sonnet 5 elsewhere              | 5             | 100K in / 20K out avg   | ~$2.20/session avg                                                  |
 
 ---
 
 ## Reasoning Configuration
 
-| Model | Reasoning mode | Parameter | When to escalate |
-|---|---|---|---|
-| Claude Opus 4.8 (Tier A) | thinking: auto | effort: high | Octree/spatial-index design; WebGL↔React mounting decision |
-| Claude Sonnet 5 (Tier B) | thinking: disabled (mechanical) / auto (design-adjacent) | — | Escalate to Tier A if a "mechanical" port turns out to hide a real architectural fork (e.g. the custom-element vs. ref-mount choice leaks into it) |
-| Claude Haiku 4.5 (Tier C) | thinking: disabled | — | Never for anything touching correctness of the streaming parsers or octree bounds — pattern-repetition only |
+| Model                     | Reasoning mode                                           | Parameter    | When to escalate                                                                                                                                   |
+| ------------------------- | -------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Opus 4.8 (Tier A)  | thinking: auto                                           | effort: high | Octree/spatial-index design; WebGL↔React mounting decision                                                                                         |
+| Claude Sonnet 5 (Tier B)  | thinking: disabled (mechanical) / auto (design-adjacent) | —            | Escalate to Tier A if a "mechanical" port turns out to hide a real architectural fork (e.g. the custom-element vs. ref-mount choice leaks into it) |
+| Claude Haiku 4.5 (Tier C) | thinking: disabled                                       | —            | Never for anything touching correctness of the streaming parsers or octree bounds — pattern-repetition only                                        |
 
 ---
 

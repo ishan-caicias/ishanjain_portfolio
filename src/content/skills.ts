@@ -14,13 +14,7 @@ export const skillCategories: SkillCategory[] = [
   },
   {
     name: "Cloud & Platform",
-    skills: [
-      "AWS (RDS, S3, SQS, SNS)",
-      "API Gateway",
-      "Git",
-      "Docker",
-      "CICD",
-    ],
+    skills: ["AWS (RDS, S3, SQS, SNS)", "API Gateway", "Git", "Docker", "CICD"],
   },
   {
     name: "Data & Messaging",
@@ -30,7 +24,7 @@ export const skillCategories: SkillCategory[] = [
       "SQL Server",
       "Redis Caching",
       "SQS / SNS",
-      "Kafka"
+      "Kafka",
     ],
   },
   {
@@ -46,11 +40,7 @@ export const skillCategories: SkillCategory[] = [
   },
   {
     name: "CI/CD & Delivery",
-    skills: [
-      "GitHub Actions",
-      "Feature Flags",
-      "Safe Rollouts",
-    ],
+    skills: ["GitHub Actions", "Feature Flags", "Safe Rollouts"],
   },
   {
     name: "Architecture & Practices",
@@ -62,17 +52,12 @@ export const skillCategories: SkillCategory[] = [
       "CQRS",
       "Defensive Programming",
       "Stakeholder Collaboration",
-      "Leadership and mentoring"
+      "Leadership and mentoring",
     ],
   },
   {
     name: "Frontend (Working Knowledge)",
-    skills: [
-      "React",
-      "TypeScript",
-      "HTML / CSS",
-      "Astro"
-    ],
+    skills: ["React", "TypeScript", "HTML / CSS", "Astro"],
   },
   {
     name: "AI and emerging technologies (Learning)",
@@ -81,7 +66,7 @@ export const skillCategories: SkillCategory[] = [
       "Prompt engineering",
       "LLM/RAG Concepts",
       "LLM APIs",
-      "LLM Evaluation"
+      "LLM Evaluation",
     ],
   },
 ];

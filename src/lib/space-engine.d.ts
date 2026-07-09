@@ -5,7 +5,10 @@ import type { DetailedHTMLProps, HTMLAttributes } from "react";
 declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
-      "space-engine": DetailedHTMLProps<HTMLAttributes<HTMLElement>, HTMLElement>;
+      "space-engine": DetailedHTMLProps<
+        HTMLAttributes<HTMLElement>,
+        HTMLElement
+      >;
     }
   }
 }
@@ -41,7 +44,9 @@ export interface SpaceEngineElement extends HTMLElement {
   travelTo(id: string, quiet?: boolean): void;
   goHome(quiet?: boolean): void;
   randomBody(): void;
-  setStations(list: { id: string; ra: number; dec: number; ly: number }[]): void;
+  setStations(
+    list: { id: string; ra: number; dec: number; ly: number }[],
+  ): void;
   fieldInfo(index: number): SpaceEngineFieldInfo | null;
   bodies: SpaceEngineBody[];
   stations: SpaceEngineBody[];
