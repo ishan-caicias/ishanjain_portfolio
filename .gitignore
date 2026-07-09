@@ -152,3 +152,9 @@ playwright-report/
 # src/data/celestial/*.js, which are the converted/committed runtime binaries - see
 # docs/delivery-plan/PF-07-space-portfolio-webgl.md §1). Not needed to build or run the site.
 gaia_datasets/
+
+# PF-07 prototype source (the DC-template original this feature was ported from - reference
+# material only, not a build/runtime dependency; see docs/delivery-plan/PF-07-space-portfolio-webgl.md
+# §1). Was accidentally committed once (42MB, since stripped from history) - kept gitignored so a
+# plain `git add -A`/`git add .` can never pull it back in.
+Interactive Outerspace Portfolio/
