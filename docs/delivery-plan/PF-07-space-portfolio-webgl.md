@@ -257,3 +257,47 @@ issues rather than functional defects:
 
 No other phase's claims were found to be incomplete, pending, or inconsistent with actual repo
 state as of this audit.
+
+## 6. Second Audit (post-CI-fix, post-mobile-audit) - Prototype Folder Recovery
+
+A second full audit, re-run after the CI prettier fix and the mobile/classic-view CSS stacking
+fixes (both since committed as `5b4fb34` and `57a3f6f`, confirmed pushed to `origin` via a fresh
+`git fetch` - an earlier "ahead 1" reading in this audit was stale cached remote-tracking data,
+not an actual unpushed-changes gap).
+
+Full re-verification (typecheck, lint, unit, build, e2e) confirmed green with no regressions
+(23/23 e2e passing). One real, significant gap found:
+
+**The `Interactive Outerspace Portfolio/` prototype folder - this document's own named "Source of
+truth" (see line 5) - was completely gone from disk.** It was always untracked by design (never
+committed, treated as disposable reference material), so there was no git history to recover it
+from; a full-drive search found no trace. Restored from the user's original copy at
+`F:\dev\data\portfolio\Interactive Outerspace Portfolio` (42MB).
+
+Having the source back enabled a full re-verification of Phase 1's port-fidelity claims, this
+time by direct comparison rather than trusting the prior session's own record:
+
+- `space-engine.js`: MD5-identical to source, confirmed byte-for-byte (`ca5865774e03248f03c86073c38aed09`
+  on both sides).
+- All 5 `celestial-*.js` files: differ from source *only* by the documented appended `export {};`
+  line - confirmed via direct `diff`, no data content touched.
+- `public/assets/`: 1228 files on both sides, zero differences in the file list (verified via
+  `diff` of sorted relative paths) - the asset copy is complete, nothing missing or extra.
+
+**One pre-existing data gap confirmed, not a port error:** `assets/dso/HUDF.webp` (Hubble Ultra
+Deep Field) is a 0-byte file **in the original prototype source itself**, not something the PF-07
+port broke - confirmed by checking the restored source copy, which has the identical empty file.
+Fixing it requires sourcing a real replacement image (e.g. from NASA/ESA's public-domain HUDF
+release) rather than re-copying, since there's nothing valid to copy from.
+
+**Fixed**: downloaded the official 2004 HUDF release (`heic0611b`) from
+[esahubble.org](https://esahubble.org/images/heic0611b/) (screensize JPEG, 1280×1280, CC BY 4.0 -
+"NASA, ESA, and S. Beckwith (STScI) and the HUDF Team"), resized/converted to 960×960 WebP via
+`sharp` to match the sibling DSO images' convention (`M42.webp` etc.), and replaced the empty file.
+No new Credits-section attribution needed - the existing generic entry ("NASA / ESA · Hubble &
+JWST archives... public domain per NASA media guidelines," `SectionOverlay.tsx`) already covers
+this image. Verified end-to-end: `git lfs status` shows the correct OID transition from the empty
+file's hash to the new content's hash; live-dispatched `cosmos:arrive` for `hudf` and confirmed
+the collector card renders the image (`fetch('/assets/dso/HUDF.webp')` → 200, `image/webp`, 98,248
+bytes, matching the file on disk exactly) with correct alt text, stats, and field note. Full
+suite re-verified green after the change: build succeeds, 23/23 e2e passing.
