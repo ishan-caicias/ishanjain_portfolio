@@ -60,31 +60,33 @@ export default function HUD({
 
   return (
     <>
-      <div className="pointer-events-none fixed left-6 top-[clamp(72px,12vh,92px)] z-10 select-none font-mono text-[11.5px] tracking-wider text-[#7986cb]">
-        <div className="text-[#9fa8da]">
-          GAIA DR3 · HIPPARCOS · CNS5 · NGC2000
+      <div className="pointer-events-none fixed left-6 top-[clamp(72px,12vh,78px)] z-10 select-none font-mono text-[11.5px] tracking-wider text-[#7986cb]">
+        <div className="hidden md:block">
+          <div className="text-[#9fa8da]">
+            GAIA DR3 · HIPPARCOS · CNS5 · NGC2000
+          </div>
+          <div>
+            {streamLine}
+            <span className="animate-pulse">▌</span>
+          </div>
+          <div className="mt-0.5 h-0.5 w-[210px] overflow-hidden rounded-full bg-[#1a237e]">
+            <div
+              className="h-full transition-[width] duration-200"
+              style={{
+                background: ready ? "#43a047" : "#ffd54f",
+                width: pct + "%",
+              }}
+            />
+          </div>
+          <div className="mt-1.5 text-[#3f51b5]">ORIGIN · SOL-3 (EARTH)</div>
         </div>
-        <div>
-          {streamLine}
-          <span className="animate-pulse">▌</span>
-        </div>
-        <div className="mt-0.5 h-0.5 w-[210px] overflow-hidden rounded-full bg-[#1a237e]">
-          <div
-            className="h-full transition-[width] duration-200"
-            style={{
-              background: ready ? "#43a047" : "#ffd54f",
-              width: pct + "%",
-            }}
-          />
-        </div>
-        <div className="mt-1.5 text-[#3f51b5]">ORIGIN · SOL-3 (EARTH)</div>
         <button
           onClick={onOpenCredits}
           className="pointer-events-auto mt-1.5 rounded border border-[#3f51b5]/50 px-2.5 py-0.5 text-[10.5px] tracking-widest text-[#7986cb] hover:border-[#ffc107]/40 hover:text-[#ffd54f]"
         >
           DATA &amp; LICENSES ▸
         </button>
-        <div className="mt-2.5 max-w-[190px] text-[10px] leading-relaxed tracking-wider text-[#5c6bc0]">
+        <div className="mt-2.5 hidden max-w-[190px] text-[10px] leading-relaxed tracking-wider text-[#5c6bc0] md:block">
           DRAG TO LOOK 360°
           <br />
           CLICK A CRAFT OR GOLD BEACON TO TRAVEL
@@ -93,8 +95,8 @@ export default function HUD({
         </div>
       </div>
 
-      <div className="pointer-events-none fixed right-6 top-[clamp(72px,12vh,92px)] z-10 select-none text-right font-mono text-[11.5px] tracking-wider text-[#7986cb]">
-        <div aria-hidden="true">
+      <div className="pointer-events-none fixed right-6 top-[clamp(72px,12vh,78px)] z-10 select-none text-right font-mono text-[11.5px] tracking-wider text-[#7986cb]">
+        <div aria-hidden="true" className="hidden md:block">
           <div className="text-[#9fa8da]">BEARING</div>
           <div>{bearingLine}</div>
           <div className="text-[#ffd54f]">{sectorLine}</div>

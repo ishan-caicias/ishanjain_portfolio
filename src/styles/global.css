@@ -82,6 +82,17 @@ body.ij-travel footer {
   display: none !important;
 }
 
+/* Space scene classic view (PF-07): the WebGL scene's <space-engine> is position:fixed with
+   z-index:0, mounted inside #hero. Without their own stacking context, these later, plain
+   static-positioned sections would still paint *behind* it per normal CSS stacking order,
+   making them invisible once scrolled into view - confirmed via a live audit where the canvas
+   covered the About section's content entirely despite it being present and visible in the DOM. */
+main > section:not(#hero),
+footer {
+  position: relative;
+  z-index: 1;
+}
+
 #ij-hero-copy {
   transition: opacity 0.6s;
 }
