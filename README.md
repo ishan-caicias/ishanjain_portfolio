@@ -54,7 +54,7 @@ src/
 └── types/               # Shared TypeScript interfaces
 ```
 
-See [docs/architecture.md](docs/architecture.md) and
+See [docs/architecture/overview.md](docs/architecture/overview.md) and
 [docs/delivery-plan/PF-07-space-portfolio-webgl.md](docs/delivery-plan/PF-07-space-portfolio-webgl.md)
 for detailed architecture documentation.
 
