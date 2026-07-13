@@ -1028,12 +1028,8 @@
       this.tabIndex = 0;
       this.setAttribute("role", "application");
       this.setAttribute("aria-label", "Interactive star chart. Arrow keys look around, Enter travels to the target nearest screen centre, H returns home.");
-      if (!document.getElementById("se-focus-style")) {
-        const st = document.createElement("style");
-        st.id = "se-focus-style";
-        st.textContent = "space-engine:focus-visible{outline:2px solid #7986cb;outline-offset:-3px;} space-engine:focus{outline:none;} space-engine:focus-visible{outline:2px solid #7986cb;}";
-        document.head.appendChild(st);
-      }
+      // Focus outline lives in global.css (space-engine:focus-visible) rather than being
+      // injected here as an inline <style>, so it is compatible with the hash-based CSP.
       this.addEventListener("keydown", (e) => {
         if (this.noGL) return;
         const k = e.key;

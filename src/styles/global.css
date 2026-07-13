@@ -127,6 +127,17 @@ body.ij-away #ij-hero-copy {
   outline-offset: 2px;
 }
 
+/* <space-engine> keyboard-focus outline. Moved here from a runtime-injected <style>
+   element in space-engine.js (_bindKeys) so a hash-based Content-Security-Policy
+   (security.csp in astro.config.mjs) does not have to allow inline <style> injection. */
+space-engine:focus {
+  outline: none;
+}
+space-engine:focus-visible {
+  outline: 2px solid #7986cb;
+  outline-offset: -3px;
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,

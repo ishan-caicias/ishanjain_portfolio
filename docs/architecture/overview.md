@@ -126,6 +126,23 @@ Astro components render to static HTML at build time. Testing them would effecti
 - All interactive elements keyboard-navigable
 - Colour contrast meets WCAG AA for text elements
 
+## Security
+
+Being a static site (`output: "static"`), the deployed artefact has no server logic, auth, or
+user input, so hardening is browser-enforced:
+
+- **Content-Security-Policy**: hash-based, via Astro's native `security.csp` (`astro.config.mjs`).
+  Astro auto-hashes its own bundled/inline scripts and styles, so `script-src`/`style-src` use
+  `'self'` + hashes with **no `'unsafe-inline'`**. Emitted as a per-page `<meta>` on
+  `build`/`preview` (not `astro dev`).
+- **Response headers**: `public/_headers` (Netlify/Cloudflare Pages) — `nosniff`, HSTS,
+  `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, COOP/CORP.
+- **Static-CSS discipline**: inline `<style>` must not be injected at runtime (it can't be hashed
+  by the CSP) — put such CSS in `global.css` instead.
+
+Full OWASP audit and rationale: [`../security/`](../security/). Upgrade decisions:
+[`../adr/0001-dependency-and-framework-upgrade.md`](../adr/0001-dependency-and-framework-upgrade.md).
+
 ## CI Pipeline
 
 See [diagrams/ci-pipeline.mmd](diagrams/ci-pipeline.mmd) for the visual flow.
