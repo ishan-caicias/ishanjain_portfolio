@@ -1,17 +1,26 @@
 ---
 import Starfield from "@/components/islands/Starfield";
+import SpaceScene from "@/components/islands/SpaceScene";
 import AstronautMascot from "@/components/islands/AstronautMascot";
 import StarModal from "@/components/islands/StarModal";
+import { features } from "@/config/features";
 ---
 
 <section
   id="hero"
   class="relative flex min-h-screen items-center justify-center overflow-hidden px-6"
   aria-label="Introduction"
+  data-space-scene={String(features.spaceScene)}
 >
   <!-- Starfield background -->
   <div class="absolute inset-0 -z-10">
-    <Starfield client:load />
+    {
+      features.spaceScene ? (
+        <SpaceScene client:load />
+      ) : (
+        <Starfield client:load />
+      )
+    }
   </div>
 
   <!-- Astronaut (hidden on mobile) -->
@@ -43,10 +52,11 @@ import StarModal from "@/components/islands/StarModal";
     <p
       class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-text-muted md:text-xl"
     >
-      I’m a Sydney-based software engineer with a product mindset specializing in .NET, event-driven architectures,
-      and distributed systems. Recently, my focus has been in orchestrating high-stakes backend systems, with a
-      domain drive approach whilst optimizing databases, building fault-tolerant microservices,
-      and keeping production rock-solid.
+      I’m a Sydney-based software engineer with a product mindset specializing
+      in .NET, event-driven architectures, and distributed systems. Recently, my
+      focus has been in orchestrating high-stakes backend systems, with a domain
+      drive approach whilst optimizing databases, building fault-tolerant
+      microservices, and keeping production rock-solid.
     </p>
 
     <p

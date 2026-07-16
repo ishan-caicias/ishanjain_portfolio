@@ -212,6 +212,7 @@ export default function Starfield({
   return (
     <canvas
       ref={canvasRef}
+      data-testid="starfield"
       className="absolute inset-0 h-full w-full"
       onClick={handleCanvasClick}
       role="img"

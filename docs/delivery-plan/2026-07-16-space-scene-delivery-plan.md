@@ -21,55 +21,67 @@
 | 4     | Realism pass                  | Thruster, inertia, and arrival cues meet desktop and mobile acceptance criteria |
 | 5     | Release                       | Automated and manual quality gates pass; rollback is verified                   |
 
+## Mandatory regression guardrail
+
+No delivery phase may be marked complete or used as the baseline for the next phase until all of the following checks are run against that phase's code and recorded in `docs/test-reports/YYYY-MM-DD-space-scene-phase-<N>.md`:
+
+1. Unit tests: run the full `npm run test` suite, including the new behavior tests introduced in the phase.
+2. Integration checks: run `npm run check` and a production build with every flag state introduced by the phase.
+3. E2E tests: run the complete `npm run test:e2e` suite, including the phase-specific browser test.
+4. Manual regression: verify the phase's user-visible behavior at desktop (1440×900), tablet (768×1024), and mobile (390×844) viewports, plus keyboard and reduced-motion behavior when relevant.
+
+The report must state the exact commands, pass/fail results, browser and viewport coverage, manual observations, and any known blocker. A failed check blocks the next phase; it must be fixed or explicitly removed from scope through a delivery-plan update.
+
 ## File map
 
-| Path                                              | Responsibility                                          |
-| ------------------------------------------------- | ------------------------------------------------------- |
-| `src/config/features.ts`                          | Safe-default rollout flag                               |
-| `src/components/sections/Hero.astro`              | Selects existing or new hero                            |
-| `src/components/islands/SpaceScene.tsx`           | React lifecycle, scene state, and custom-engine mount   |
-| `src/components/islands/space/ShipRenderer.ts`    | glTF ship, camera-relative transform, and disposal      |
-| `src/components/islands/space/shipMotion.ts`      | Testable camera-lag, banking, and thruster calculations |
-| `src/components/islands/space/sceneEvents.ts`     | Typed `cosmos:*` event bridge                           |
-| `src/content/spaceCredits.ts`                     | Immutable attribution data                              |
-| `src/components/islands/space/CreditsPanel.tsx`   | Visible attribution panel                               |
-| `public/space/ships/scifi-spaceship-star-gun.glb` | Approved optimized ship asset                           |
-| `scripts/optimize-ship.mjs`                       | Repeatable asset conversion and optimization            |
-| `tests/unit/space/`                               | Unit tests for attribution, event parsing, and motion   |
-| `tests/e2e/space-scene.spec.ts`                   | E2E, accessibility, fallback, and reduced-motion checks |
+| Path                                                       | Responsibility                                          |
+| ---------------------------------------------------------- | ------------------------------------------------------- |
+| `src/config/features.ts`                                   | Safe-default rollout flag                               |
+| `src/components/sections/Hero.astro`                       | Selects existing or new hero                            |
+| `src/components/islands/SpaceScene.tsx`                    | React lifecycle, scene state, and custom-engine mount   |
+| `src/components/islands/space/ShipRenderer.ts`             | glTF ship, camera-relative transform, and disposal      |
+| `src/components/islands/space/shipMotion.ts`               | Testable camera-lag, banking, and thruster calculations |
+| `src/components/islands/space/sceneEvents.ts`              | Typed `cosmos:*` event bridge                           |
+| `src/content/spaceCredits.ts`                              | Immutable attribution data                              |
+| `src/components/islands/space/CreditsPanel.tsx`            | Visible attribution panel                               |
+| `public/space/ships/sci-fi-aircraft-spaceship-fighter.glb` | Approved optimized ship asset                           |
+| `scripts/optimize-ship.mjs`                                | Repeatable asset conversion and optimization            |
+| `tests/unit/space/`                                        | Unit tests for attribution, event parsing, and motion   |
+| `tests/e2e/space-scene.spec.ts`                            | E2E, accessibility, fallback, and reduced-motion checks |
 
 ### Task 1: Add a guarded rollout switch
 
 **Files:** Create `src/config/features.ts`; modify `src/components/sections/Hero.astro` and `src/components/islands/Starfield.tsx`; create `tests/e2e/space-scene.spec.ts`.
 
-- [ ] Write a failing Playwright test that visits `/` without `PUBLIC_SPACE_SCENE`, asserts `[data-testid='starfield']` is visible, and asserts `[data-testid='space-scene']` has count zero.
-- [ ] Run `npm run build && npm run test:e2e -- tests/e2e/space-scene.spec.ts`; expect the test to fail because the stable starfield selector does not exist.
-- [ ] Create `src/config/features.ts` with `export const features = { spaceScene: import.meta.env.PUBLIC_SPACE_SCENE === "true" } as const;`.
-- [ ] Update `Hero.astro` so `features.spaceScene` renders `<SpaceScene client:load />` and the false branch retains `<Starfield client:load />`.
-- [ ] Add `data-testid="starfield"` to the current canvas and reserve `data-testid="space-scene"` for the new island root.
-- [ ] Re-run the focused E2E test; expect PASS. Commit with `feat: add guarded space scene rollout`.
+- [x] Write a failing Playwright test that visits `/` without `PUBLIC_SPACE_SCENE`, asserts `[data-testid='starfield']` is visible, and asserts `[data-testid='space-scene']` has count zero.
+- [x] Run `npm run build && npm run test:e2e -- tests/e2e/space-scene-rollout.spec.ts`; confirm it fails because the stable hero flag attribute and starfield selector do not exist.
+- [x] Create `src/config/features.ts` with `isSpaceSceneEnabled()` and the safe-default `features.spaceScene` value.
+- [x] Update `Hero.astro` to expose `data-space-scene={String(features.spaceScene)}` while retaining `<Starfield client:load />` for both flag states. Do not import `SpaceScene` until Task 3 creates it; Task 3 will replace this temporary safe fallback with the guarded branch.
+- [x] Add `data-testid="starfield"` to the current canvas and reserve `data-testid="space-scene"` for the new island root.
+- [x] Re-run the focused E2E test; it passes. `docs/test-reports/2026-07-16-space-scene-phase-0.md` records that all mandatory Phase 0 quality gates pass.
 
 ### Task 2: Acquire, optimize, and credit the default ship
 
-**Files:** Create `public/space/ships/scifi-spaceship-star-gun.glb`, `scripts/optimize-ship.mjs`, `src/content/spaceCredits.ts`, `src/components/islands/space/CreditsPanel.tsx`, and `tests/unit/space/credits.test.tsx`.
+**Files:** Create `public/space/ships/sci-fi-aircraft-spaceship-fighter.glb`, `scripts/optimize-ship.mjs`, `src/content/spaceCredits.ts`, `src/components/islands/space/CreditsPanel.tsx`, and `tests/unit/space/credits.test.tsx`.
 
-- [ ] Download only the confirmed `SCIFI SpaceShip Star Gun` asset and retain the downloaded license material with the source asset outside the web payload.
-- [ ] Add an immutable credit record with title `SCIFI SpaceShip Star Gun`, author `hellatze`, the validated Sketchfab URL, CC BY 4.0 URL, and the exact modification note: “Converted to GLB and optimized for web delivery.”
-- [ ] Write a failing React Testing Library test that asserts the panel renders the title, source link, CC BY 4.0 link, and modification note.
-- [ ] Add `scripts/optimize-ship.mjs` to invoke `gltf-transform optimize` with WebP texture compression and Meshopt geometry compression from `assets/source/scifi-spaceship-star-gun.glb` to `public/space/ships/scifi-spaceship-star-gun.glb`.
-- [ ] Run `node scripts/optimize-ship.mjs`; accept only output at or below 2 MB. If larger, reduce source texture resolution once and repeat the command.
-- [ ] Implement `CreditsPanel` from the credit record, run `npm run test -- tests/unit/space/credits.test.tsx`, expect PASS, and commit with `feat: add credited optimized ship asset`.
+- [x] Use the selected `Sci-Fi Aircraft | Spaceship Fighter` source asset. Use `resources/spaceship/sci-fi_aircraft__spaceship_fighter.glb` as the conversion input because GLB packages the scene and its textures into one browser-friendly source file; keep it ignored by Git with the supplied license material.
+- [x] Add an immutable credit record with title `Sci-Fi Aircraft | Spaceship Fighter`, author `valterjherson1`, the validated Sketchfab URL, CC BY 4.0 URL, and the exact modification note: “Converted to GLB and optimized for web delivery.”
+- [x] Write a failing React Testing Library test that asserts the panel renders the title, source link, CC BY 4.0 link, and modification note.
+- [x] Add `scripts/optimize-ship.mjs` to invoke `gltf-transform optimize` with 1024 px WebP texture compression and Meshopt geometry compression from `resources/spaceship/sci-fi_aircraft__spaceship_fighter.glb` to `public/space/ships/sci-fi-aircraft-spaceship-fighter.glb`.
+- [x] Run `node scripts/optimize-ship.mjs`; output is 0.42 MiB and passes the 2 MiB limit. The 1024 px texture ceiling keeps the estimated decoded texture allocation appropriate for mobile browser delivery.
+- **Texture policy:** The ignored source asset retains its original 4K textures only as conversion material. The shipped GLB intentionally uses a single 1024 px WebP texture cap for every device; any capability-based high-quality tier requires a separately budgeted follow-up and must not be added to this delivery.
+- [x] Implement `CreditsPanel` from the credit record and run `npm run test -- tests/unit/space/credits.test.tsx`; the test passes. Full Phase 1 quality evidence is recorded in `docs/test-reports/2026-07-16-space-scene-phase-1.md`.
 
 ### Task 3: Build and validate the hybrid ship proof of concept
 
 **Files:** Create `src/components/islands/SpaceScene.tsx`, `src/components/islands/space/ShipRenderer.ts`, `src/components/islands/space/sceneEvents.ts`, and `tests/unit/space/sceneEvents.test.ts`.
 
-- [ ] Add `WarpPhase` as the literal union `"aim" | "warp" | "flip" | "decel" | "idle"`, and add `readWarpEvent(event)` that returns `null` unless `detail.phase` is a string and `detail.t` is a number.
-- [ ] Write a failing unit test with `new CustomEvent("cosmos:warp", { detail: { phase: "warp" } })`; it must return `null` because timing data is absent.
-- [ ] Run `npm run test -- tests/unit/space/sceneEvents.test.ts`; expect FAIL before the bridge is exported, then PASS after implementation.
-- [ ] Implement `ShipRenderer` so its transform is camera-relative: forward offset `3.2`, upward offset `-0.7`, and a base pitch of `-0.08` radians. It must dispose all loaded geometry, material, texture, renderer, and canvas resources.
-- [ ] Mount the custom WebGL star engine and a ship-only canvas overlay in `SpaceScene`; the overlay must use `pointer-events: none` so existing star and station interaction remains functional.
-- [ ] Run `PUBLIC_SPACE_SCENE=true npm run dev`; verify free-look and warp preserve star interaction while the ship stays camera-relative. Run `npm run build`; expect PASS. Commit with `feat: render gltf ship alongside custom space engine`.
+- [x] Add `WarpPhase` as the literal union `"aim" | "warp" | "flip" | "decel" | "idle"`, and add `readWarpEvent(event)` that returns `null` unless `detail.phase` is a string and `detail.t` is a number.
+- [x] Write a failing unit test with `new CustomEvent("cosmos:warp", { detail: { phase: "warp" } })`; it returns `null` because timing data is absent.
+- [x] Run `npm run test -- tests/unit/space/sceneEvents.test.ts`; observe the expected missing-module failure, then PASS after implementation.
+- [x] Implement `ShipRenderer` with camera-relative forward offset `3.2`, upward offset `-0.7`, and base pitch `-0.08` radians. It disposes loaded geometry, material textures, renderer, context, canvas, and observers. Responsive portrait scaling retains the required offsets while preserving CTA legibility.
+- [x] Mount Starfield and a ship-only canvas overlay in `SpaceScene`; the overlay computes `pointer-events: none`, preserving existing Starfield input. The renderer is intentionally static and on-demand until the later motion phase.
+- [x] Run flag-on build and dedicated flag-on E2E/manual regression. The existing Starfield has no free-look or warp controls to preserve at this phase; the validated event bridge is reserved for later interaction work. Full Phase 2 evidence is recorded in `docs/test-reports/2026-07-16-space-scene-phase-2.md`.
 
 ### Task 4: Add mass cues and real thruster phases
 
@@ -113,4 +125,4 @@ Set `PUBLIC_SPACE_SCENE=false` to restore `Starfield` without deleting scene cod
 - World-space staging maps to Task 3; inertia and thrust map to Task 4.
 - Overlay dominance, keyboard operation, reduced motion, and fallback map to Task 5.
 - Toolchain scope, performance constraints, release proof, and rollback map to Task 6.
-- No unverified Sketchfab model is selected; the plan uses the confirmed `SCIFI SpaceShip Star Gun` default.
+- The user-selected `Sci-Fi Aircraft | Spaceship Fighter` is confirmed CC BY and has a browser-suitable GLB source; its ignored source asset will be optimized before use.

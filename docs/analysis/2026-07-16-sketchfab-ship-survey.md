@@ -166,6 +166,10 @@ If built-in animation is mandatory, the current engine is the real blocker, not 
 2. move to glTF-friendly rendering,
 3. then add emissive, banking, exhaust, or skeletal animation on top.
 
+## Delivery Decision
+
+The project owner selected `Sci-Fi Aircraft | Spaceship Fighter` as the final ship on 2026-07-16. The downloaded GLB in `resources/spaceship/` is the source input for optimization; it is intentionally ignored by Git. Phase 1 will generate the production GLB and preserve the required attribution in the site credits.
+
 ## License Handling Note
 
 For Creative Commons models, Sketchfab's own developer guidance says attribution should follow the asset and include the creator and source link:

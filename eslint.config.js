@@ -13,6 +13,16 @@ export default [
     },
   },
   {
-    ignores: ["dist/", "node_modules/", ".astro/"],
+    ignores: [
+      ".astro/",
+      ".claude/",
+      "coverage/",
+      "dist/",
+      "Interactive Outerspace Portfolio/",
+      "node_modules/",
+      "playwright-report/",
+      "resources/",
+      "test-results/",
+    ],
   },
 ];

@@ -4,6 +4,7 @@ import { loadHubbleData } from "../../src/utils/hubble";
 describe("loadHubbleData", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    global.fetch = vi.fn();
   });
 
   it("returns data from local JSON", async () => {
@@ -54,6 +55,7 @@ import { fetchNasaApod } from "../../src/utils/hubble";
 describe("fetchNasaApod", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    global.fetch = vi.fn();
   });
 
   it("returns null when no API key is provided", async () => {

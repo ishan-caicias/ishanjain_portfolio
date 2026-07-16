@@ -46,9 +46,13 @@ The earlier claim that the repository was already on Astro 7 and TypeScript 6 wa
 
 The rejection evidence for the Everspace-derived, CC BY-NC, and 540k-triangle entries was also confirmed from their respective current pages.
 
+## Runtime texture policy
+
+The original 4K texture source remains only in the ignored `resources/` conversion input. The runtime GLB deliberately ships one quality tier: four 1024×1024 WebP textures. This avoids the substantially higher decoded GPU/VRAM allocation of a 4K texture set and keeps the scene within the mobile-browser performance budget. The application must not add a 4K runtime asset or capability-based texture selection in this delivery; an adaptive high-quality tier needs separately budgeted scope, measurements, and acceptance criteria.
+
 ## Implications
 
 1. The realism diagnosis remains sound: spatial integration and flight staging are the dominant gaps, not framework age.
 2. A full framework migration is not justified for a ship replacement. A ship-focused glTF proof of concept is the appropriate technical decision gate.
-3. Treat `SCIFI SpaceShip Star Gun` as the default proof-of-concept asset because it has the smallest confirmed geometry footprint and clear CC BY listing.
+3. The selected delivery asset is `Sci-Fi Aircraft | Spaceship Fighter` by `valterjherson1`. Its supplied GLB is the browser-oriented source input; Phase 1 will produce and measure a separately optimized GLB before it is added to the runtime payload.
 4. Before publishing any CC BY model, include title, author, source URL, CC BY 4.0 URL, and an indication of any conversion or optimization. [Sketchfab's guidance](https://sketchfab.com/developers/download-api/guidelines) requires author and source attribution; [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) specifies the attribution, license-link, and change-indication obligations.

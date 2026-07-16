@@ -179,7 +179,6 @@ describe("StarModal", () => {
     const focusable = dialog.querySelectorAll<HTMLElement>(
       'button, a[href], [tabindex]:not([tabindex="-1"])',
     );
-    const first = focusable[0];
     const last = focusable[focusable.length - 1];
 
     const keyDownEvent = new KeyboardEvent("keydown", {

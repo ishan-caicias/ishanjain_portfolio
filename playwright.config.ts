@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const isSpaceSceneGate = process.env.PLAYWRIGHT_SPACE_SCENE_GATE === "true";
+
 export default defineConfig({
   testDir: "tests/e2e",
   fullyParallel: true,
@@ -18,9 +20,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run preview",
+    command: "npm run build && npm run preview",
     url: "http://localhost:4321",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: !process.env.CI && !isSpaceSceneGate,
     timeout: 120_000,
   },
 });
