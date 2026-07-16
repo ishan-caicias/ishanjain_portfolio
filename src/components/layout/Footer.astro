@@ -1,5 +1,6 @@
 ---
 import MissionControl from "@/components/islands/MissionControl";
+import CreditsPanel from "@/components/islands/space/CreditsPanel";
 ---
 
 <footer class="relative mt-24 overflow-hidden" role="contentinfo">
@@ -104,6 +105,20 @@ import MissionControl from "@/components/islands/MissionControl";
     <div class="mx-auto flex max-w-6xl flex-col items-center gap-4">
       <!-- Mission Control React island -->
       <MissionControl client:visible />
+
+      <details
+        id="space-credits"
+        class="w-full max-w-xl rounded-lg border border-pine-700/50 bg-black/10 p-3 text-left"
+      >
+        <summary
+          class="cursor-pointer text-sm font-medium text-pine-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-400"
+        >
+          Space credits
+        </summary>
+        <div class="pt-3 text-sm text-pine-200/80">
+          <CreditsPanel client:visible />
+        </div>
+      </details>
 
       <p class="text-center text-sm text-pine-400/60">
         Built with Astro, React, and a love for the cosmos.

@@ -41,6 +41,9 @@ vi.mock("@/components/islands/space/ShipRenderer", () => ({
 }));
 
 vi.mock("@/components/islands/space/shipQualityDetection", () => detection);
+vi.mock("@/components/islands/space/webglSupport", () => ({
+  canCreateWebGL: vi.fn(() => true),
+}));
 
 import SpaceScene from "@/components/islands/SpaceScene";
 
