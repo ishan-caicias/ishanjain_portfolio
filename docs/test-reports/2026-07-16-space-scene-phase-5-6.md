@@ -71,6 +71,6 @@ feature flag remains the rollback control for the first release cycle.
 - Sustained 50+ FPS on an agreed mid-tier Android/iOS handset was not measured
   here. Treat that as a follow-up performance validation, not as a claim made
   by this report.
-- WebGL context-loss recovery is covered by renderer-failure/fallback behavior;
-  a physical context-loss gesture on Safari remains part of the follow-up
-  device matrix.
+- Renderer construction/load failures are covered by the semantic fallback;
+  runtime WebGL context-loss recovery was not measured or implemented as a
+  separate recovery path and remains part of the follow-up device matrix.
