@@ -44,4 +44,12 @@ describe("spaceStations", () => {
   it("returns undefined for an unknown station", () => {
     expect(getSpaceStation("unknown")).toBeUndefined();
   });
+
+  it("freezes the registry and every station entry", () => {
+    expect(Object.isFrozen(spaceStations)).toBe(true);
+
+    for (const station of spaceStations) {
+      expect(Object.isFrozen(station)).toBe(true);
+    }
+  });
 });
