@@ -238,6 +238,7 @@ export class ShipRenderer {
       -shipTransform.forwardOffset,
     );
     ship.rotation.x = shipTransform.basePitch;
+    // Bank around the ship's local Z axis; X pitch remains camera-relative.
     ship.rotation.z = this.motionState.bank;
     ship.scale.setScalar(getResponsiveShipScale(this.camera.aspect));
     this.camera.add(ship);
@@ -293,6 +294,7 @@ export class ShipRenderer {
       return;
     }
 
+    // Bank around the ship's local Z axis while retaining the base X pitch.
     this.ship.rotation.z = this.motionState.bank;
     const phase = this.reducedMotion ? "idle" : this.motionPhase;
     const plumeIntensity = plumeIntensityForPhase(phase);
