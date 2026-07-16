@@ -5,6 +5,12 @@ import {
   shipAssets,
   type ShipAsset,
 } from "@/components/islands/space/shipQuality";
+import {
+  nextShipMotion,
+  plumeIntensityForPhase,
+  type ShipMotionState,
+} from "@/components/islands/space/shipMotion";
+import type { WarpPhase } from "@/components/islands/space/sceneEvents";
 
 const MAX_PIXEL_RATIO = 1.5;
 const CAMERA_FOV = 45;
@@ -34,6 +40,15 @@ export function getResponsiveShipScale(aspect: number): number {
 
 type ShipRendererFailureHandler = (error: Error) => void;
 type ShipRendererReadyHandler = (asset: ShipAsset) => void;
+
+export interface ShipMotionUpdate {
+  readonly phase: WarpPhase;
+  readonly targetBank: number;
+}
+
+export interface ShipRendererOptions {
+  readonly reducedMotion?: boolean;
+}
 
 function toError(reason: unknown): Error {
   return reason instanceof Error ? reason : new Error("Unable to render ship");
@@ -80,15 +95,57 @@ export class ShipRenderer {
   private resizeObserver?: ResizeObserver;
   private retriedLowAsset = false;
   private ship?: THREE.Object3D;
+  private readonly reducedMotion: boolean;
+  private motionPhase: WarpPhase = "idle";
+  private targetBank = 0;
+  private motionState: ShipMotionState = { bank: 0, bankVelocity: 0 };
+  private animationFrame?: number;
+  private previousFrameTime?: number;
+  private readonly baseEmissiveIntensity = new WeakMap<
+    THREE.Material,
+    number
+  >();
 
   constructor(
     asset: ShipAsset,
     onFailure?: ShipRendererFailureHandler,
     onReady?: ShipRendererReadyHandler,
+    options: ShipRendererOptions = {},
   ) {
     this.currentAsset = asset;
     this.onFailure = onFailure;
     this.onReady = onReady;
+    this.reducedMotion = options.reducedMotion ?? false;
+  }
+
+  /** Synchronises the renderer with the scene's travel phase. Bank is in radians. */
+  setMotion(update: ShipMotionUpdate): void {
+    if (this.disposed) {
+      return;
+    }
+
+    this.motionPhase = update.phase;
+    this.targetBank = Number.isFinite(update.targetBank)
+      ? Math.max(-1, Math.min(1, update.targetBank))
+      : 0;
+
+    if (this.reducedMotion) {
+      this.motionPhase = "idle";
+      this.targetBank = 0;
+      this.motionState = { bank: 0, bankVelocity: 0 };
+      this.cancelAnimation();
+    }
+
+    this.updateVisualState();
+    if (
+      !this.reducedMotion &&
+      this.ship &&
+      (this.motionPhase !== "idle" ||
+        Math.abs(this.motionState.bank) > 0.001 ||
+        Math.abs(this.motionState.bankVelocity) > 0.001)
+    ) {
+      this.scheduleAnimation();
+    }
   }
 
   mount(container: HTMLElement): void {
@@ -133,6 +190,7 @@ export class ShipRenderer {
 
     this.disposed = true;
     this.resizeObserver?.disconnect();
+    this.cancelAnimation();
 
     if (this.ship) {
       this.camera.remove(this.ship);
@@ -180,9 +238,19 @@ export class ShipRenderer {
       -shipTransform.forwardOffset,
     );
     ship.rotation.x = shipTransform.basePitch;
+    ship.rotation.z = this.motionState.bank;
     ship.scale.setScalar(getResponsiveShipScale(this.camera.aspect));
     this.camera.add(ship);
     this.ship = ship;
+    this.updateVisualState();
+    if (
+      !this.reducedMotion &&
+      (this.motionPhase !== "idle" ||
+        Math.abs(this.motionState.bank) > 0.001 ||
+        Math.abs(this.motionState.bankVelocity) > 0.001)
+    ) {
+      this.scheduleAnimation();
+    }
     this.render();
     this.onReady?.(this.currentAsset);
   }
@@ -218,6 +286,101 @@ export class ShipRenderer {
     }
 
     this.renderer.render(this.scene, this.camera);
+  }
+
+  private updateVisualState(): void {
+    if (!this.ship) {
+      return;
+    }
+
+    this.ship.rotation.z = this.motionState.bank;
+    const phase = this.reducedMotion ? "idle" : this.motionPhase;
+    const plumeIntensity = plumeIntensityForPhase(phase);
+
+    if (typeof this.ship.traverse !== "function") {
+      this.render();
+      return;
+    }
+
+    this.ship.traverse((child) => {
+      const materialOwner = child as THREE.Object3D & {
+        material?: THREE.Material | THREE.Material[];
+      };
+      if (!materialOwner.material) {
+        return;
+      }
+
+      const materials = Array.isArray(materialOwner.material)
+        ? materialOwner.material
+        : [materialOwner.material];
+      materials.forEach((material) => {
+        const emissiveMaterial = material as THREE.Material & {
+          emissiveIntensity?: unknown;
+        };
+        if (typeof emissiveMaterial.emissiveIntensity !== "number") {
+          return;
+        }
+
+        const baseIntensity =
+          this.baseEmissiveIntensity.get(material) ??
+          emissiveMaterial.emissiveIntensity;
+        this.baseEmissiveIntensity.set(material, baseIntensity);
+        emissiveMaterial.emissiveIntensity = baseIntensity * plumeIntensity;
+      });
+    });
+    this.render();
+  }
+
+  private scheduleAnimation(): void {
+    if (
+      this.disposed ||
+      this.reducedMotion ||
+      !this.ship ||
+      this.animationFrame !== undefined
+    ) {
+      return;
+    }
+
+    this.animationFrame = requestAnimationFrame(this.animate);
+  }
+
+  private readonly animate = (timestamp: number): void => {
+    this.animationFrame = undefined;
+    if (this.disposed || this.reducedMotion || !this.ship) {
+      return;
+    }
+
+    const dt =
+      this.previousFrameTime === undefined
+        ? 0
+        : Math.min(Math.max(timestamp - this.previousFrameTime, 0) / 1000, 0.1);
+    this.previousFrameTime = timestamp;
+    this.motionState = nextShipMotion(
+      this.motionState,
+      this.targetBank,
+      dt,
+      this.motionPhase,
+    );
+    this.updateVisualState();
+
+    const settled =
+      this.motionPhase === "idle" &&
+      Math.abs(this.motionState.bank) < 0.001 &&
+      Math.abs(this.motionState.bankVelocity) < 0.001;
+    if (settled) {
+      this.previousFrameTime = undefined;
+      return;
+    }
+
+    this.scheduleAnimation();
+  };
+
+  private cancelAnimation(): void {
+    if (this.animationFrame !== undefined) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = undefined;
+    }
+    this.previousFrameTime = undefined;
   }
 
   private resize(container: HTMLElement): void {

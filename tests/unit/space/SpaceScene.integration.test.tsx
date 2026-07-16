@@ -8,7 +8,11 @@ import {
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const renderer = vi.hoisted(() => ({ mount: vi.fn(), dispose: vi.fn() }));
+const renderer = vi.hoisted(() => ({
+  mount: vi.fn(),
+  dispose: vi.fn(),
+  setMotion: vi.fn(),
+}));
 const detection = vi.hoisted(() => ({ detectShipQuality: vi.fn() }));
 const capability = vi.hoisted(() => ({ canCreateWebGL: vi.fn(() => true) }));
 
@@ -19,6 +23,7 @@ vi.mock("@/components/islands/space/ShipRenderer", () => ({
   ShipRenderer: class {
     mount = renderer.mount;
     dispose = renderer.dispose;
+    setMotion = renderer.setMotion;
   },
 }));
 vi.mock("@/components/islands/space/shipQualityDetection", () => detection);
@@ -33,6 +38,7 @@ describe("SpaceScene travel integration", () => {
     detection.detectShipQuality.mockResolvedValue("low");
     renderer.mount.mockClear();
     renderer.dispose.mockClear();
+    renderer.setMotion.mockClear();
     capability.canCreateWebGL.mockClear();
     document.body.innerHTML =
       '<main><section id="experience" /><section id="projects" /><section id="contact" /></main>';
@@ -52,12 +58,20 @@ describe("SpaceScene travel integration", () => {
     const scrollIntoView = vi.fn();
     document.getElementById("projects")!.scrollIntoView = scrollIntoView;
     render(<SpaceScene webglSupported reducedMotion={false} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     const button = screen.getByRole("button", {
       name: "Travel to Projects station",
     });
     button.focus();
     fireEvent.click(button);
+
+    expect(renderer.setMotion).toHaveBeenCalledWith({
+      phase: "aim",
+      targetBank: 0.12,
+    });
 
     expect(screen.getByTestId("space-travel-status")).toHaveTextContent(
       "Travelling to Projects.",

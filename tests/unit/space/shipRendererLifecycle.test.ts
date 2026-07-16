@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
     | ((gltf: { scene: Record<string, unknown> }) => void),
   onError: undefined as undefined | ((error: unknown) => void),
   render: vi.fn(),
+  requestAnimationFrame: vi.fn(),
+  cancelAnimationFrame: vi.fn(),
+  rafCallback: undefined as undefined | ((timestamp: number) => void),
   renderListsDispose: vi.fn(),
   rendererDispose: vi.fn(),
   resizeObserve: vi.fn(),
@@ -95,6 +98,7 @@ describe("ShipRenderer lifecycle", () => {
     mocks.onLoad = undefined;
     mocks.onError = undefined;
     mocks.resizeCallback = undefined;
+    mocks.rafCallback = undefined;
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -111,14 +115,89 @@ describe("ShipRenderer lifecycle", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("renders the static ship without scheduling animation frames", () => {
-    const requestAnimationFrame = vi.fn();
-    vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+    vi.stubGlobal("requestAnimationFrame", mocks.requestAnimationFrame);
     const renderer = new ShipRenderer(shipAssets.low);
 
     renderer.mount(document.createElement("div"));
 
     expect(mocks.render).toHaveBeenCalledOnce();
-    expect(requestAnimationFrame).not.toHaveBeenCalled();
+    expect(mocks.requestAnimationFrame).not.toHaveBeenCalled();
+  });
+
+  it("animates a normal travel phase with bounded banking and stronger plume output", () => {
+    const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      mocks.rafCallback = callback;
+      return 1;
+    });
+    vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+    vi.stubGlobal("cancelAnimationFrame", mocks.cancelAnimationFrame);
+    const material = { emissiveIntensity: 2 };
+    const ship = {
+      position: { set: vi.fn() },
+      rotation: { x: 0, z: 0 },
+      scale: { setScalar: mocks.scaleSetScalar },
+      traverse: (callback: (child: unknown) => void) => callback({ material }),
+    };
+    const renderer = new ShipRenderer(shipAssets.low);
+    renderer.mount(document.createElement("div"));
+    mocks.onLoad?.({ scene: ship });
+
+    expect(material.emissiveIntensity).toBe(0.5);
+    renderer.setMotion({ phase: "warp", targetBank: 0.8 });
+    expect(requestAnimationFrame).toHaveBeenCalledOnce();
+    mocks.rafCallback?.(1000);
+    mocks.rafCallback?.(1016.67);
+
+    expect(ship.rotation.z).toBeGreaterThan(0);
+    expect(ship.rotation.z).toBeLessThanOrEqual(1);
+    expect(material.emissiveIntensity).toBe(2);
+
+    renderer.setMotion({ phase: "idle", targetBank: 0 });
+    expect(material.emissiveIntensity).toBe(0.5);
+  });
+
+  it("keeps reduced-motion travel static at idle plume intensity", () => {
+    vi.stubGlobal("requestAnimationFrame", mocks.requestAnimationFrame);
+    vi.stubGlobal("cancelAnimationFrame", mocks.cancelAnimationFrame);
+    const material = { emissiveIntensity: 2 };
+    const ship = {
+      position: { set: vi.fn() },
+      rotation: { x: 0, z: 0 },
+      scale: { setScalar: mocks.scaleSetScalar },
+      traverse: (callback: (child: unknown) => void) => callback({ material }),
+    };
+    const renderer = new ShipRenderer(shipAssets.low, undefined, undefined, {
+      reducedMotion: true,
+    });
+    renderer.mount(document.createElement("div"));
+    mocks.onLoad?.({ scene: ship });
+    renderer.setMotion({ phase: "warp", targetBank: 0.8 });
+
+    expect(mocks.requestAnimationFrame).not.toHaveBeenCalled();
+    expect(ship.rotation.z).toBe(0);
+    expect(material.emissiveIntensity).toBe(0.5);
+  });
+
+  it("cancels an active animation loop on disposal", () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      mocks.rafCallback = callback;
+      return 9;
+    });
+    vi.stubGlobal("cancelAnimationFrame", mocks.cancelAnimationFrame);
+    const renderer = new ShipRenderer(shipAssets.low);
+    renderer.mount(document.createElement("div"));
+    mocks.onLoad?.({
+      scene: {
+        position: { set: vi.fn() },
+        rotation: { x: 0, z: 0 },
+        scale: { setScalar: mocks.scaleSetScalar },
+        traverse: vi.fn(),
+      },
+    });
+    renderer.setMotion({ phase: "warp", targetBank: 0.4 });
+    renderer.dispose();
+
+    expect(mocks.cancelAnimationFrame).toHaveBeenCalledWith(9);
   });
 
   it("releases the static renderer resources on disposal", () => {

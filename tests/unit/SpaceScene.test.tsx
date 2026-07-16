@@ -13,6 +13,7 @@ const shipRenderer = vi.hoisted(() => ({
   dispose: vi.fn(),
   failures: [] as Array<((error: Error) => void) | undefined>,
   mount: vi.fn(),
+  setMotion: vi.fn(),
   successes: [] as Array<
     ((asset: { quality: string; url: string }) => void) | undefined
   >,
@@ -37,6 +38,7 @@ vi.mock("@/components/islands/space/ShipRenderer", () => ({
 
     mount = shipRenderer.mount;
     dispose = shipRenderer.dispose;
+    setMotion = shipRenderer.setMotion;
   },
 }));
 
@@ -55,6 +57,7 @@ describe("SpaceScene", () => {
     shipRenderer.assets.length = 0;
     shipRenderer.dispose.mockClear();
     shipRenderer.mount.mockClear();
+    shipRenderer.setMotion.mockClear();
     shipRenderer.failures.length = 0;
     shipRenderer.successes.length = 0;
   });

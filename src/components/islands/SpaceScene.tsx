@@ -31,6 +31,7 @@ export default function SpaceScene({
   reducedMotion,
 }: SpaceSceneProps = {}) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const shipRendererRef = useRef<ShipRenderer | undefined>(undefined);
   const arrivalTimerRef = useRef<number | undefined>(undefined);
   const warpTimerRef = useRef<number | undefined>(undefined);
   const [shipStatus, setShipStatus] = useState<"loading" | "ready" | "failed">(
@@ -76,6 +77,22 @@ export default function SpaceScene({
     window.addEventListener("cosmos:warp", handleWarp);
     return () => window.removeEventListener("cosmos:warp", handleWarp);
   }, []);
+
+  useEffect(() => {
+    shipRendererRef.current?.setMotion({
+      phase: warpPhase,
+      targetBank:
+        warpPhase === "warp"
+          ? -0.24
+          : warpPhase === "aim"
+            ? 0.12
+            : warpPhase === "flip"
+              ? 0.4
+              : warpPhase === "decel"
+                ? 0.08
+                : 0,
+    });
+  }, [warpPhase]);
 
   useEffect(() => {
     if (!hasWebGL) {
@@ -126,15 +143,20 @@ export default function SpaceScene({
           setActiveShipAsset(activeAsset);
           setShipStatus("ready");
         },
+        { reducedMotion: isReducedMotion },
       );
+      shipRendererRef.current = renderer;
       renderer.mount(overlay);
 
-      return () => renderer.dispose();
+      return () => {
+        shipRendererRef.current = undefined;
+        renderer.dispose();
+      };
     } catch {
       setShipStatus("failed");
       return undefined;
     }
-  }, [hasWebGL, shipAsset]);
+  }, [hasWebGL, isReducedMotion, shipAsset]);
 
   useEffect(
     () => () => {
