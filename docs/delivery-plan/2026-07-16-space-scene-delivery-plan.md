@@ -188,12 +188,12 @@ Expected: each GLB uses WebP textures and `EXT_meshopt_compression`; low remains
 
 **Files:** Create `src/components/islands/space/shipMotion.ts` and `tests/unit/space/shipMotion.test.ts`; modify `src/components/islands/space/ShipRenderer.ts`.
 
-- [ ] Write a failing unit test proving a one-frame response from bank `0` to target `0.8` is greater than `0` and less than `0.8`.
-- [ ] Write a failing unit test proving the `warp` plume value is greater than the `idle` plume value.
-- [ ] Implement `nextShipMotion(state, targetBank, dt, phase)` with a critically damped response: acceleration is `28 * (targetBank - bank) - 10.6 * bankVelocity`; update velocity and bank using `dt`.
-- [ ] Map plume values deterministically: `warp=1`, `decel=0.8`, `aim=0.45`, and `idle=0.25`.
-- [ ] Apply bank to the ship transform and plume to emissive/nozzle intensity. Run `npm run test -- tests/unit/space/shipMotion.test.ts`; expect PASS.
-- [ ] At 1440×900 and 390×844, verify a route change shows bounded bank lag and that warp/deceleration visibly exceed idle thrust. With reduced motion enabled, disable interpolation and use idle intensity. Commit with `feat: add inertial ship motion and thruster phases`.
+- [x] Write a failing unit test proving a one-frame response from bank `0` to target `0.8` is greater than `0` and less than `0.8`.
+- [x] Write a failing unit test proving the `warp` plume value is greater than the `idle` plume value.
+- [x] Implement `nextShipMotion(state, targetBank, dt, phase)` with a critically damped response: acceleration is `28 * (targetBank - bank) - 10.6 * bankVelocity`; update velocity and bank using `dt`.
+- [x] Map plume values deterministically: `warp=1`, `decel=0.8`, `aim=0.45`, and `idle=0.25`.
+- [x] Apply bank to the ship transform and plume to emissive/nozzle intensity. Run `npm run test -- tests/unit/space/shipMotion.test.ts`; expect PASS.
+- [x] At 1440×900, 768×1024, and 390×844, verify route changes show aim → warp → idle phases and bounded banking. With reduced motion enabled, disable interpolation and use idle intensity. Evidence is recorded in `docs/test-reports/2026-07-16-space-scene-phase-4.md`.
 
 ### Task 5 (Phase 3): Complete interaction, accessibility, and fallback parity
 
