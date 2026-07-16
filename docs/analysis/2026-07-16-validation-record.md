@@ -46,13 +46,49 @@ The earlier claim that the repository was already on Astro 7 and TypeScript 6 wa
 
 The rejection evidence for the Everspace-derived, CC BY-NC, and 540k-triangle entries was also confirmed from their respective current pages.
 
-## Runtime texture policy
+## Runtime texture and quality policy
 
-The original 4K texture source remains only in the ignored `resources/` conversion input. The runtime GLB deliberately ships one quality tier: four 1024×1024 WebP textures. This avoids the substantially higher decoded GPU/VRAM allocation of a 4K texture set and keeps the scene within the mobile-browser performance budget. The application must not add a 4K runtime asset or capability-based texture selection in this delivery; an adaptive high-quality tier needs separately budgeted scope, measurements, and acceptance criteria.
+The ignored source in `resources/spaceship/` retains the original 4K textures as
+conversion material only. Runtime delivery uses two Meshopt/WebP GLBs while
+preserving the uploaded mesh geometry (21,375 vertices):
+
+| Runtime asset                              |            Transfer size | Texture ceiling | Policy                                                         |
+| ------------------------------------------ | -----------------------: | --------------: | -------------------------------------------------------------- |
+| `sci-fi-aircraft-spaceship-fighter-1k.glb` | 441,852 bytes (0.42 MiB) |         1024 px | Data saver, low GPU tier, low-memory, or narrow/unknown device |
+| `sci-fi-aircraft-spaceship-fighter-2k.glb` | 896,768 bytes (0.85 MiB) |         2048 px | Capable GPU tier and wider viewport, unless visitor opts down  |
+
+The browser adapter uses GPU tier, `navigator.connection.saveData`, coarse
+`deviceMemory`, and viewport width. Visitors can override the result with the
+accessible quality selector. No 4K runtime tier is shipped because decoded
+texture memory would be substantially higher without a measured benefit on
+the supported mobile matrix.
+
+## Release measurements and phase evidence
+
+The feature-on preview's initial document/scripts/styles/fonts/images shell
+transferred **943,634 bytes (0.900 MiB)**, excluding the separately fetched
+ship GLB. This is below the 10 MiB initial-hero budget; the selected GLB adds
+0.42 MiB (1K) or 0.85 MiB (2K) when requested.
+
+Evidence is recorded in the phase reports:
+
+- [Phase 0](../test-reports/2026-07-16-space-scene-phase-0.md) — guarded rollout baseline.
+- [Phase 1](../test-reports/2026-07-16-space-scene-phase-1.md) — licensed optimized asset and credits.
+- [Phase 2](../test-reports/2026-07-16-space-scene-phase-2.md) — hybrid ship proof of concept.
+- [Phase 2.1](../test-reports/2026-07-16-space-scene-phase-2.1.md) — adaptive 1K/2K policy.
+- [Phase 3](../test-reports/2026-07-16-space-scene-phase-3.md) — interaction, accessibility, and fallback parity.
+- [Phase 4](../test-reports/2026-07-16-space-scene-phase-4.md) — inertia, thruster cues, and phase synchronization.
+- [Phase 5–6](../test-reports/2026-07-16-space-scene-phase-5-6.md) — release gates, rollback, and documentation.
 
 ## Implications
 
 1. The realism diagnosis remains sound: spatial integration and flight staging are the dominant gaps, not framework age.
 2. A full framework migration is not justified for a ship replacement. A ship-focused glTF proof of concept is the appropriate technical decision gate.
-3. The selected delivery asset is `Sci-Fi Aircraft | Spaceship Fighter` by `valterjherson1`. Its supplied GLB is the browser-oriented source input; Phase 1 will produce and measure a separately optimized GLB before it is added to the runtime payload.
+3. The selected delivery asset is `Sci-Fi Aircraft | Spaceship Fighter` by `valterjherson1`. Phase 1 produced the separately optimized browser GLBs now used by the runtime quality policy; the supplied GLB remains conversion input.
 4. Before publishing any CC BY model, include title, author, source URL, CC BY 4.0 URL, and an indication of any conversion or optimization. [Sketchfab's guidance](https://sketchfab.com/developers/download-api/guidelines) requires author and source attribution; [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) specifies the attribution, license-link, and change-indication obligations.
+
+The phase implementation now satisfies those asset, attribution, accessibility,
+fallback, and build gates. Physical Safari-device coverage and sustained
+50+ FPS measurements on an agreed mid-tier handset were not available in this
+Windows environment; they remain explicit follow-up validation before making
+that performance claim.

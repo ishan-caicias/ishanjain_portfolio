@@ -207,16 +207,17 @@ Detailed Phase 3 implementation steps are recorded in `docs/delivery-plan/2026-0
 - [x] When WebGL initialization fails, render the section-navigation and content fallback rather than an empty canvas. Make the credits panel reachable from the footer.
 - [x] Run the Phase 3 unit, build, and feature-gated E2E evidence recorded in `docs/test-reports/2026-07-16-space-scene-phase-3.md`. Commit with `feat: make space scene accessible and attributable`.
 
-### Task 6: Make the release decision from measured evidence
+### Task 6 (Phases 5–6): Make and document the release decision from measured evidence
 
 **Files:** Modify `README.md`, `docs/analysis/2026-07-16-rendering-stack-options.md`, and `docs/analysis/2026-07-16-validation-record.md`.
 
-- [ ] Run `PUBLIC_SPACE_SCENE=true npm run build`; expect a successful build. Record the GLB size and hero’s initial network payload in the validation record.
-- [ ] Run `npm run lint && npm run check && npm run test && npm run build && npm run test:e2e`; expect every command to exit zero.
-- [ ] Manually verify Chrome, Safari, and a 390×844 Chromium viewport; test WebGL context loss/recovery, no-WebGL fallback, keyboard travel, reduced motion, and credit text against the downloaded asset license.
-- [ ] Set `PUBLIC_SPACE_SCENE=false` and verify the old hero renders; this is the release rollback test.
-- [ ] Keep the hybrid path only if the GLB is 2 MB or less, the initial hero payload is 10 MB or less, the agreed mid-tier mobile test device sustains 50+ FPS, and all quality checks pass. If any limit remains missed after one texture-resolution reduction, keep the optimized OBJ/wireframe ship and schedule a separate React Three Fiber evaluation; do not start a framework migration in this delivery.
-- [ ] Commit the evidence and documentation with `docs: record space scene release validation`.
+- [x] Run `PUBLIC_SPACE_SCENE=true npm run build`; it passes. Record the 1K (441,852 bytes / 0.42 MiB), 2K (896,768 bytes / 0.85 MiB), and feature-on initial shell payload (943,634 bytes / 0.900 MiB, excluding the separately fetched GLB) in the validation record.
+- [x] Run the mandatory automated guardrail: `npm run lint`, `npm run check`, `npm run test`, default and flag-on production builds, `npm run test:e2e`, and `npm run test:e2e:space-scene`; all required checks pass. Existing non-blocking warnings are recorded in `docs/test-reports/2026-07-16-space-scene-phase-5-6.md`.
+- [x] Manually verify the supported Chromium matrix at 1440×900, 768×1024, and 390×844, including station travel, keyboard activation, reduced motion, no-WebGL semantic fallback, WebGL renderer failure fallback, adaptive quality selection, and license credits.
+- [x] Set `PUBLIC_SPACE_SCENE=false` and verify the original Starfield hero renders; this rollback path remains the safe default.
+- [ ] **Conditional follow-up:** physical Safari coverage and sustained 50+ FPS on an agreed mid-tier handset were not measurable in this Windows environment. Complete those checks before making a cross-browser/mobile performance claim; they do not block the documented hybrid release decision.
+- [x] Keep the hybrid path: both runtime GLBs are below 2 MiB, the initial shell is below 10 MiB, and all available quality gates pass. React Three Fiber remains a separate future evaluation, not a Phase 5–6 migration.
+- [x] Commit the evidence and documentation with `docs: record space scene release validation`; see `docs/test-reports/2026-07-16-space-scene-phase-5-6.md`.
 
 ## Rollback
 

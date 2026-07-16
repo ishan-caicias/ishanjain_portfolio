@@ -124,3 +124,23 @@ The practical sequence is:
 2. decide whether procedural animation is enough,
 3. if not, add glTF-friendly rendering support,
 4. only then consider a broader scene-graph migration.
+
+## Validated delivery decision (2026-07-16)
+
+The implemented scene validates **Option B**: retain Astro 5, the custom
+starfield renderer, and a Three.js ship-focused hybrid. The selected CC BY ship
+loads through the dedicated glTF renderer while the existing starfield remains
+the scene background and interaction authority. This preserves the current
+portfolio shell, enables procedural travel phases and adaptive 1K/2K assets,
+and keeps the flag-off Starfield route available for rollback.
+
+The hybrid path met the measured release limits: the largest runtime GLB is
+896,768 bytes (0.85 MiB), and the feature-on initial shell payload measured
+943,634 bytes (0.900 MiB), excluding the separately fetched GLB. Unit, type,
+build, accessibility, fallback, and Playwright viewport checks are recorded in
+the [Phase 5–6 report](../test-reports/2026-07-16-space-scene-phase-5-6.md).
+
+No React Three Fiber migration is justified by this evidence. Option C remains
+a future evaluation only if the hybrid renderer fails a later physical-device
+performance or scene-composition acceptance test; it is not part of this
+delivery.

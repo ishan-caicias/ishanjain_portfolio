@@ -63,6 +63,43 @@ See [docs/architecture.md](docs/architecture.md) for detailed architecture docum
 
 All interactive elements respect `prefers-reduced-motion` and are keyboard accessible.
 
+### Space scene rollout
+
+The constellation-debris travel scene is guarded by `PUBLIC_SPACE_SCENE`:
+
+```bash
+PUBLIC_SPACE_SCENE=true npm run dev
+```
+
+The default is `false`, which preserves the original Starfield hero for a safe
+rollback. Set the variable to `false` to return to that hero without removing
+the new scene code or assets.
+
+When enabled, visitors can activate the Experience, Projects, and Contact
+debris stations with a pointer, Enter, or Space. The scene announces departure
+and arrival through an accessible live region, scrolls to the selected section,
+and keeps focus on the activated station. Reduced-motion users receive the
+same semantic navigation with immediate travel and no interpolated animation.
+
+### Ship quality policy
+
+The ship keeps its original uploaded geometry while using two browser-ready
+GLBs selected from capability signals:
+
+- **1K** (`sci-fi-aircraft-spaceship-fighter-1k.glb`, about 0.42 MiB) for data
+  saver preferences, low GPU tiers, low-memory devices, and narrow/unknown
+  devices.
+- **2K** (`sci-fi-aircraft-spaceship-fighter-2k.glb`, about 0.85 MiB) for
+  capable GPU tiers and wider screens.
+
+Visitors can override the automatic choice with the **Ship visual quality**
+selector. The ignored source retains 4K textures for conversion only; no 4K
+runtime asset is shipped. If WebGL or the selected asset fails, the scene
+falls back to semantic station links without decorative canvases.
+
+The footer's **Space credits** disclosure identifies the ship title, author,
+source, CC BY 4.0 license, and the conversion/optimization change.
+
 ## Hubble Images
 
 The star modal uses a local dataset of real NASA/Hubble images. Images are public domain.
@@ -81,9 +118,10 @@ Set `PUBLIC_NASA_API_KEY` in a `.env` file to optionally fetch from NASA's Astro
 
 ## Environment Variables
 
-| Variable              | Required | Description                       |
-| --------------------- | -------- | --------------------------------- |
-| `PUBLIC_NASA_API_KEY` | No       | NASA API key for APOD integration |
+| Variable              | Required | Description                                                                                            |
+| --------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `PUBLIC_NASA_API_KEY` | No       | NASA API key for APOD integration                                                                      |
+| `PUBLIC_SPACE_SCENE`  | No       | Set to `true` to enable the constellation-debris travel scene; defaults to the original Starfield hero |
 
 ## Testing
 
@@ -104,6 +142,15 @@ npm run test:e2e       # Run Playwright tests
 ```
 
 Tests cover: navigation, star interaction, accessibility (axe-core scan).
+
+The feature-gated space-scene suite builds and tests the enabled experience:
+
+```bash
+npm run test:e2e:space-scene
+```
+
+It covers station travel, keyboard and reduced-motion behavior, adaptive ship
+quality, no-WebGL fallback, credits reachability, and the flag-off rollback.
 
 ### First-time E2E setup
 
