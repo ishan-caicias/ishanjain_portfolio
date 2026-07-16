@@ -8,6 +8,7 @@ import {
 const AUTO_QUALITY_CACHE_KEY = "ship-quality-auto-cache";
 const AUTO_QUALITY_CACHE_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const GPU_DETECTION_TIMEOUT_MS = 500;
+const GPU_BENCHMARKS_URL = "/space/ship-quality-benchmarks";
 
 interface NavigatorConnection {
   saveData?: boolean;
@@ -21,6 +22,16 @@ interface NavigatorWithDeviceMemory extends Navigator {
 interface CachedShipQuality {
   quality: ShipQuality;
   expiresAt: number;
+}
+
+interface GpuTierResult {
+  tier: number;
+  type: string;
+}
+
+interface GpuProbe {
+  context: WebGLRenderingContext;
+  release: () => void;
 }
 
 function readCachedAutomaticQuality(now: number): ShipQuality | undefined {
@@ -59,30 +70,86 @@ function writeCachedAutomaticQuality(quality: ShipQuality, now: number): void {
   }
 }
 
-async function getGpuTierWithinDeadline(): Promise<number | undefined> {
+function createGpuProbe(): GpuProbe | undefined {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("webgl", {
+    failIfMajorPerformanceCaveat: true,
+  });
+
+  if (!context) {
+    return undefined;
+  }
+
+  let released = false;
+  return {
+    context,
+    release: () => {
+      if (released) {
+        return;
+      }
+
+      released = true;
+      context.getExtension("WEBGL_lose_context")?.loseContext();
+      canvas.remove();
+    },
+  };
+}
+
+async function getGpuTierWithinDeadline(
+  signal?: AbortSignal,
+): Promise<GpuTierResult | undefined> {
+  const probe = createGpuProbe();
+  if (!probe) {
+    return undefined;
+  }
+
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let abortHandler: (() => void) | undefined;
 
   try {
-    const result = await Promise.race([
-      getGPUTier(),
+    const aborted = new Promise<undefined>((resolve) => {
+      if (!signal) {
+        return;
+      }
+
+      abortHandler = () => resolve(undefined);
+      if (signal.aborted) {
+        abortHandler();
+      } else {
+        signal.addEventListener("abort", abortHandler, { once: true });
+      }
+    });
+    const result: GpuTierResult | undefined = await Promise.race([
+      getGPUTier({
+        benchmarksURL: GPU_BENCHMARKS_URL,
+        failIfMajorPerformanceCaveat: true,
+        glContext: probe.context,
+      }),
       new Promise<undefined>((resolve) => {
         timeoutId = setTimeout(
           () => resolve(undefined),
           GPU_DETECTION_TIMEOUT_MS,
         );
       }),
+      aborted,
     ]);
-    return result?.tier;
+    return result;
   } catch {
     return undefined;
   } finally {
     if (timeoutId !== undefined) {
       clearTimeout(timeoutId);
     }
+    if (abortHandler) {
+      signal?.removeEventListener("abort", abortHandler);
+    }
+    probe.release();
   }
 }
 
-export async function detectShipQuality(): Promise<ShipQuality> {
+export async function detectShipQuality(
+  signal?: AbortSignal,
+): Promise<ShipQuality> {
   const preference = readShipQualityPreference();
   const browserNavigator = navigator as NavigatorWithDeviceMemory;
   const viewportIsWide = window.matchMedia("(min-width: 768px)").matches;
@@ -110,10 +177,13 @@ export async function detectShipQuality(): Promise<ShipQuality> {
     return cachedQuality;
   }
 
+  const gpuResult = await getGpuTierWithinDeadline(signal);
   const quality = selectShipQuality({
     ...baseInput,
-    gpuTier: await getGpuTierWithinDeadline(),
+    gpuTier: gpuResult?.tier,
   });
-  writeCachedAutomaticQuality(quality, now);
+  if (gpuResult?.type === "BENCHMARK") {
+    writeCachedAutomaticQuality(quality, now);
+  }
   return quality;
 }

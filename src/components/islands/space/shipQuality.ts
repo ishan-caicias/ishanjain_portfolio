@@ -75,13 +75,15 @@ export function readShipQualityPreference(): ShipQualityPreference {
 
 export function writeShipQualityPreference(
   preference: ShipQualityPreference,
-): void {
+): boolean {
   try {
     window.localStorage.setItem(
       SHIP_QUALITY_PREFERENCE_STORAGE_KEY,
       preference,
     );
+    return true;
   } catch {
     // Storage is optional: private browsing and restrictive browser settings may block it.
+    return false;
   }
 }

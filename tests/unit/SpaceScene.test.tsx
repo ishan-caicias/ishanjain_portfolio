@@ -153,14 +153,14 @@ describe("SpaceScene", () => {
     );
   });
 
-  it("persists a quality choice before selecting its next asset", async () => {
-    detection.detectShipQuality
-      .mockResolvedValueOnce("low")
-      .mockResolvedValueOnce("high");
+  it("saves a quality choice for the next page load without remounting the ship", async () => {
     render(<SpaceScene />);
 
     await waitFor(() =>
       expect(shipRenderer.assets.at(-1)?.quality).toBe("low"),
+    );
+    act(() =>
+      shipRenderer.successes.at(-1)?.({ quality: "low", url: "/low.glb" }),
     );
     fireEvent.change(screen.getByLabelText("Ship visual quality"), {
       target: { value: "high" },
@@ -171,8 +171,39 @@ describe("SpaceScene", () => {
         "high",
       ),
     );
-    await waitFor(() =>
-      expect(shipRenderer.assets.at(-1)?.quality).toBe("high"),
+    expect(
+      screen.getByText(
+        "Quality preference saved. It applies on your next page load.",
+      ),
+    ).toBeInTheDocument();
+    expect(shipRenderer.mount).toHaveBeenCalledOnce();
+    expect(shipRenderer.dispose).not.toHaveBeenCalled();
+    expect(screen.getByTestId("space-scene")).toHaveAttribute(
+      "data-ship-quality",
+      "low",
     );
+  });
+
+  it("keeps the shown preference unchanged when storage rejects a choice", async () => {
+    render(<SpaceScene />);
+
+    await waitFor(() => expect(shipRenderer.mount).toHaveBeenCalledOnce());
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("storage blocked");
+      });
+
+    fireEvent.change(screen.getByLabelText("Ship visual quality"), {
+      target: { value: "high" },
+    });
+
+    expect(screen.getByLabelText("Ship visual quality")).toHaveValue("auto");
+    expect(
+      screen.getByText("Quality preference could not be saved."),
+    ).toBeInTheDocument();
+    expect(shipRenderer.mount).toHaveBeenCalledOnce();
+
+    setItem.mockRestore();
   });
 });

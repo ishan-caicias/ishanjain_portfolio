@@ -23,6 +23,9 @@ export default function SpaceScene() {
   const [activeShipAsset, setActiveShipAsset] = useState<ShipAsset>();
   const [shipQualityPreference, setShipQualityPreference] =
     useState<ShipQualityPreference>("auto");
+  const [qualityPreferenceMessage, setQualityPreferenceMessage] = useState<
+    string | undefined
+  >();
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [warpPhase, setWarpPhase] = useState<WarpPhase>("idle");
 
@@ -49,10 +52,11 @@ export default function SpaceScene() {
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     setShipStatus("loading");
     setActiveShipAsset(undefined);
 
-    void detectShipQuality().then((quality) => {
+    void detectShipQuality(controller.signal).then((quality) => {
       if (!cancelled) {
         setShipAsset(shipAssets[quality]);
       }
@@ -60,8 +64,9 @@ export default function SpaceScene() {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [preferencesReady, shipQualityPreference]);
+  }, [preferencesReady]);
 
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -86,8 +91,15 @@ export default function SpaceScene() {
     event: React.ChangeEvent<HTMLSelectElement>,
   ) => {
     const preference = event.target.value as ShipQualityPreference;
-    writeShipQualityPreference(preference);
-    setShipQualityPreference(preference);
+    if (writeShipQualityPreference(preference)) {
+      setShipQualityPreference(preference);
+      setQualityPreferenceMessage(
+        "Quality preference saved. It applies on your next page load.",
+      );
+      return;
+    }
+
+    setQualityPreferenceMessage("Quality preference could not be saved.");
   };
 
   return (
@@ -118,6 +130,11 @@ export default function SpaceScene() {
           <option value="high">High quality</option>
           <option value="data-saver">Data saver</option>
         </select>
+        {qualityPreferenceMessage && (
+          <p role="status" className="mt-1 max-w-48 text-[11px]">
+            {qualityPreferenceMessage}
+          </p>
+        )}
       </div>
     </div>
   );

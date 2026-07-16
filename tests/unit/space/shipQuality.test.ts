@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   readShipQualityPreference,
   selectShipQuality,
@@ -71,9 +71,21 @@ describe("ship quality preference storage", () => {
   });
 
   it("writes a valid preference without requiring available storage", () => {
-    writeShipQualityPreference("data-saver");
+    expect(writeShipQualityPreference("data-saver")).toBe(true);
     expect(window.localStorage.getItem("ship-quality-preference")).toBe(
       "data-saver",
     );
+  });
+
+  it("reports when restrictive browser storage rejects a preference", () => {
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("storage blocked");
+      });
+
+    expect(writeShipQualityPreference("high")).toBe(false);
+
+    setItem.mockRestore();
   });
 });
