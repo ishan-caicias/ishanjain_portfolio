@@ -46,7 +46,7 @@ export default function SpaceStations({
               aria-current={selectedStation === station.id ? "true" : undefined}
               aria-label={station.accessibleName}
               onClick={() => onSelect(station.id)}
-              className="group flex min-h-11 w-full items-center gap-2 rounded-full border border-royal-500/50 bg-surface-elevated/85 px-3 py-2 text-left text-xs text-text-muted shadow-lg shadow-black/20 backdrop-blur-sm transition hover:border-gold-400 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-400 sm:w-auto sm:min-w-32 sm:justify-center"
+              className={`group ${station.visual} flex min-h-11 w-full items-center gap-2 rounded-full border border-royal-500/50 bg-surface-elevated/85 px-3 py-2 text-left text-xs text-text-muted shadow-lg shadow-black/20 backdrop-blur-sm transition hover:border-gold-400 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-400 sm:w-auto sm:min-w-32 sm:justify-center`}
             >
               <span
                 aria-hidden="true"
