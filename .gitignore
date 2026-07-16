@@ -150,3 +150,6 @@ playwright-report/
 
 # Downloaded source 3D assets; commit only optimized runtime assets under public/.
 resources/
+
+# Persisted visual-brainstorming companion sessions.
+.superpowers/
