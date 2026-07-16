@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
 
+test.skip(
+  process.env.PUBLIC_SPACE_SCENE !== "false",
+  "Legacy Starfield checks run only with PUBLIC_SPACE_SCENE=false.",
+);
+
 test.describe("Star Interaction", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");

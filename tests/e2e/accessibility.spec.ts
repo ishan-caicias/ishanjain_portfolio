@@ -62,6 +62,12 @@ test.describe("Accessibility", () => {
   });
 
   test("semantic landmarks are present", async ({ page }) => {
+    // The footer is hidden by design while the space scene's travel mode is
+    // active (default) - switch to classic view to check the full landmark
+    // set the way a scroll-mode visitor sees it. See PF-07 delivery plan
+    // Phase 4/5.
+    await page.getByRole("button", { name: /CLASSIC VIEW/ }).click();
+
     await expect(page.getByRole("banner")).toBeVisible(); // header
     await expect(page.getByRole("main")).toBeVisible(); // main
     await expect(page.getByRole("contentinfo")).toBeVisible(); // footer

@@ -1,0 +1,39 @@
+---
+title: Component Interaction Flow
+---
+sequenceDiagram
+    participant User
+    participant Header as Header Nav
+    participant Engine as space-engine (WebGL)
+    participant Scene as SpaceScene (React)
+    participant Overlay as SectionOverlay / CollectorCard
+
+    Note over Engine: 168K+ real Hipparcos/Gaia/SDSS objects<br/>streams in on load
+
+    User->>Header: Click "About"
+    Header->>Scene: document-level click delegation
+    Scene->>Engine: travelTo("st-about")
+    Engine->>Scene: dispatchEvent("cosmos:select", {id})
+    Engine->>Scene: dispatchEvent("cosmos:warp", {id, t, phase})
+    Note over Engine: Aim + warp animation<br/>(halved duration if prefers-reduced-motion)
+    Engine->>Scene: dispatchEvent("cosmos:arrive", {id})
+    Scene->>Overlay: open dossier for arrived section
+
+    User->>Overlay: Click close / Press Escape
+    Overlay->>Scene: onClose()
+    Scene->>Overlay: unmount dossier
+
+    rect rgb(26,35,46)
+        Note over Engine: Astronaut Mascot Flow
+        User->>User: Scroll to new section (classic view)
+        Note right of User: IntersectionObserver<br/>detects visible section
+        Note right of User: Astronaut drifts<br/>toward active section
+    end
+
+    rect rgb(26,35,46)
+        Note over Engine: No-WebGL Fallback
+        Engine->>Engine: getContext("webgl") fails
+        Engine->>Engine: _domFallback() - static CSS sky
+        Engine->>Scene: dispatchEvent("cosmos:ready")
+        Note over Scene: Navigation still works via<br/>the noGL branch of travelTo/goHome
+    end

@@ -23,6 +23,10 @@ export default [
       "playwright-report/",
       "resources/",
       "test-results/",
+      "gaia_datasets/",
+      "src/lib/space-engine.js",
+      "src/data/celestial/*.js",
+      ".superpowers/",
     ],
   },
 ];

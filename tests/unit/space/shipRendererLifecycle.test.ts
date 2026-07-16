@@ -5,8 +5,7 @@ const mocks = vi.hoisted(() => ({
   forceContextLoss: vi.fn(),
   loaderLoad: vi.fn(),
   onLoad: undefined as
-    | undefined
-    | ((gltf: { scene: Record<string, unknown> }) => void),
+    undefined | ((gltf: { scene: Record<string, unknown> }) => void),
   onError: undefined as undefined | ((error: unknown) => void),
   render: vi.fn(),
   requestAnimationFrame: vi.fn(),

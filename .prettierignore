@@ -1,8 +1,19 @@
 dist/
 node_modules/
 .astro/
+.claude/
+coverage/
 pnpm-lock.yaml
 package-lock.json
 
 # Third-party GPU benchmark data is copied verbatim for browser-side capability classification.
 public/space/ship-quality-benchmarks/
+
+# Untracked reference material (PF-07 prototype source + raw dataset pipeline)
+Interactive Outerspace Portfolio/
+gaia_datasets/
+
+# Verbatim ports kept byte-identical to their prototype source - see PF-07
+# delivery plan Phase 1
+src/lib/space-engine.js
+src/data/celestial/*.js

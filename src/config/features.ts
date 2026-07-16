@@ -1,5 +1,5 @@
 export function isSpaceSceneEnabled(value: string | undefined): boolean {
-  return value === "true";
+  return value !== "false";
 }
 
 export const features = {

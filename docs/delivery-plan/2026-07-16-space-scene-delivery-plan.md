@@ -214,14 +214,14 @@ Detailed Phase 3 implementation steps are recorded in `docs/delivery-plan/2026-0
 - [x] Run `PUBLIC_SPACE_SCENE=true npm run build`; it passes. Record the 1K (441,852 bytes / 0.42 MiB), 2K (896,768 bytes / 0.85 MiB), and feature-on initial shell payload (943,634 bytes / 0.900 MiB, excluding the separately fetched GLB) in the validation record.
 - [x] Run the mandatory automated guardrail: `npm run lint`, `npm run check`, `npm run test`, default and flag-on production builds, `npm run test:e2e`, and `npm run test:e2e:space-scene`; all required checks pass. Existing non-blocking warnings are recorded in `docs/test-reports/2026-07-16-space-scene-phase-5-6.md`.
 - [x] Manually verify the supported Chromium matrix at 1440×900, 768×1024, and 390×844, including station travel, keyboard activation, reduced motion, no-WebGL semantic fallback, WebGL renderer failure fallback, adaptive quality selection, and license credits.
-- [x] Set `PUBLIC_SPACE_SCENE=false` and verify the original Starfield hero renders; this rollback path remains the safe default.
+- [x] Set `PUBLIC_SPACE_SCENE=false` and verify the original Starfield hero renders; this remains the explicit rollback path while the PF-07 scene is the default.
 - [ ] **Conditional follow-up:** physical Safari coverage and sustained 50+ FPS on an agreed mid-tier handset were not measurable in this Windows environment. Complete those checks before making a cross-browser/mobile performance claim; they do not block the documented hybrid release decision.
 - [x] Keep the hybrid path: both runtime GLBs are below 2 MiB, the initial shell is below 10 MiB, and all available quality gates pass. React Three Fiber remains a separate future evaluation, not a Phase 5–6 migration.
 - [x] Commit the evidence and documentation with `docs: record space scene release validation`; see `docs/test-reports/2026-07-16-space-scene-phase-5-6.md`.
 
 ## Rollback
 
-Set `PUBLIC_SPACE_SCENE=false` to restore `Starfield` without deleting scene code or assets. Do not remove `Starfield.tsx` or `StarModal.tsx` until the flag-on version completes one release cycle with no critical accessibility, performance, or WebGL-recovery regression.
+Set `PUBLIC_SPACE_SCENE=false` to restore `Starfield` without deleting scene code or assets. Do not remove `Starfield.tsx` or `StarModal.tsx` until the PF-07 scene completes one release cycle with no critical accessibility, performance, or WebGL-recovery regression.
 
 ## Plan self-review
 

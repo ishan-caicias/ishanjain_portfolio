@@ -40,7 +40,14 @@ test.describe("Navigation", () => {
     ).toBeVisible();
   });
 
-  test("clicking nav link scrolls to section", async ({ page }) => {
+  test("clicking nav link scrolls to section in classic view", async ({
+    page,
+  }) => {
+    // The space scene defaults to travel mode (nav links warp to a station
+    // instead of scrolling) - switch to classic view first to exercise the
+    // plain-scroll navigation path. See PF-07 delivery plan Phase 4/5.
+    await page.getByRole("button", { name: /CLASSIC VIEW/ }).click();
+
     const experienceLink = page
       .getByRole("navigation")
       .locator("ul")

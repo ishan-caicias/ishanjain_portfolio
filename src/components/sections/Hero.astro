@@ -12,7 +12,7 @@ import { features } from "@/config/features";
   aria-label="Introduction"
   data-space-scene={String(features.spaceScene)}
 >
-  <!-- Starfield background -->
+  <!-- PF-07 interactive WebGL scene when enabled; retain the proven Starfield rollback. -->
   <div class="absolute inset-0 z-0">
     {
       features.spaceScene ? (
@@ -28,11 +28,10 @@ import { features } from "@/config/features";
     <AstronautMascot client:idle />
   </div>
 
-  <!-- Star Modal (renders when star is clicked) -->
-  <StarModal client:idle />
+  {!features.spaceScene && <StarModal client:idle />}
 
   <!-- Content -->
-  <div class="relative z-30 mx-auto max-w-3xl text-center">
+  <div id="ij-hero-copy" class="relative z-30 mx-auto max-w-3xl text-center">
     <div
       class="mb-6 inline-flex items-center gap-2 rounded-full border border-royal-700/50 bg-surface-elevated/80 px-4 py-1.5 text-sm text-text-muted backdrop-blur-sm"
     >
@@ -63,6 +62,18 @@ import { features } from "@/config/features";
       class="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-text-dim md:text-base"
     >
       C# / .NET · AWS · distributed systems · APIs · testing · safe delivery
+    </p>
+
+    <!-- Mobile touch hint (design_handoff_mobile_responsive): replaces the desktop drag/
+         keyboard instructions (which live in the now mobile-hidden HUD) with touch-appropriate
+         copy. Shown only on mobile while in travel mode - see the body.ij-travel rule in
+         global.css. -->
+    <p
+      id="ij-touch-hint"
+      class="mt-4 hidden font-mono text-[11px] tracking-[0.12em] text-royal-300"
+      aria-hidden="true"
+    >
+      DRAG TO LOOK AROUND · TAP A CRAFT TO TRAVEL
     </p>
 
     <div

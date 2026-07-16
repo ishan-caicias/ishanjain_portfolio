@@ -43,48 +43,90 @@ const navItems: NavItem[] = [
       }
     </ul>
 
-    <!-- Mobile menu toggle -->
-    <input
-      type="checkbox"
-      id="mobile-menu-toggle"
-      class="peer hidden"
-      aria-hidden="true"
-    />
-    <label
-      for="mobile-menu-toggle"
-      class="flex cursor-pointer flex-col gap-1.5 md:hidden"
-      aria-label="Toggle mobile menu"
-    >
-      <span
-        class="block h-0.5 w-6 bg-text-primary transition-transform peer-checked:translate-y-2 peer-checked:rotate-45"
-      ></span>
-      <span
-        class="block h-0.5 w-6 bg-text-primary transition-opacity peer-checked:opacity-0"
-      ></span>
-      <span
-        class="block h-0.5 w-6 bg-text-primary transition-transform peer-checked:-translate-y-2 peer-checked:-rotate-45"
-      ></span>
-    </label>
+    <!-- Mobile menu: checkbox + all reactive elements share this `group` ancestor so
+         `group-has-[:checked]:` reactions work regardless of nesting depth (Tailwind's
+         `peer-*` only reacts to a *direct* sibling, which the icon bars and anchored panel
+         below are not - confirmed empirically, `has-[:checked]` has no such restriction). -->
+    <div class="group relative md:hidden">
+      <input
+        type="checkbox"
+        id="mobile-menu-toggle"
+        class="hidden"
+        aria-hidden="true"
+      />
 
-    <!-- Mobile menu -->
-    <div
-      class="pointer-events-none fixed inset-x-0 top-16 max-h-0 overflow-hidden bg-surface/95 opacity-0 backdrop-blur-md transition-all duration-300 peer-checked:pointer-events-auto peer-checked:max-h-screen peer-checked:opacity-100 md:hidden"
-    >
-      <ul class="flex flex-col items-center gap-6 py-8" role="list">
-        {
-          navItems.map((item) => (
-            <li>
-              <a
-                href={item.href}
-                class="text-lg font-medium text-text-muted transition-colors hover:text-gold-400"
-                onclick="document.getElementById('mobile-menu-toggle').checked = false"
-              >
-                {item.label}
-              </a>
-            </li>
-          ))
-        }
-      </ul>
+      <!-- Outside-tap scrim: a <label> for the same checkbox, so a plain click anywhere on it
+           unchecks the box (closes the menu) with no JS needed. -->
+      <label
+        for="mobile-menu-toggle"
+        class="pointer-events-none fixed inset-0 hidden opacity-0 group-has-[:checked]:pointer-events-auto group-has-[:checked]:block"
+        aria-hidden="true"></label>
+
+      <label
+        for="mobile-menu-toggle"
+        id="mobile-menu-button"
+        role="button"
+        tabindex="0"
+        class="relative z-10 flex h-11 w-11 cursor-pointer items-center justify-center rounded-[10px] border border-royal-500/50 bg-royal-800/35"
+        aria-label="Open menu"
+        aria-expanded="false"
+        aria-controls="mobile-menu-panel"
+      >
+        <span class="flex flex-col gap-1.5">
+          <span
+            class="block h-0.5 w-5 bg-text-primary transition-transform group-has-[:checked]:translate-y-2 group-has-[:checked]:rotate-45"
+          ></span>
+          <span
+            class="block h-0.5 w-5 bg-text-primary transition-opacity group-has-[:checked]:opacity-0"
+          ></span>
+          <span
+            class="block h-0.5 w-5 bg-text-primary transition-transform group-has-[:checked]:-translate-y-2 group-has-[:checked]:-rotate-45"
+          ></span>
+        </span>
+      </label>
+
+      <!-- Mobile menu panel: anchored under the button -->
+      <div
+        id="mobile-menu-panel"
+        class="pointer-events-none absolute top-[calc(100%+12px)] right-0 z-10 flex w-[min(74vw,280px)] scale-95 flex-col gap-0.5 rounded-[14px] border border-royal-500/45 bg-surface/97 p-2.5 opacity-0 shadow-[0_24px_50px_rgba(0,0,0,0.55)] backdrop-blur-md transition-all duration-200 group-has-[:checked]:pointer-events-auto group-has-[:checked]:scale-100 group-has-[:checked]:opacity-100"
+      >
+        <ul class="flex flex-col gap-0.5" role="list">
+          {
+            navItems.map((item) => (
+              <li>
+                <a
+                  href={item.href}
+                  role="menuitem"
+                  class="block rounded-[9px] px-3.5 py-3 text-[15px] text-royal-100 transition-colors hover:bg-royal-800/50 hover:text-gold-400"
+                >
+                  {item.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+
+        <div class="my-1.5 mx-1 h-px bg-royal-500/30"></div>
+
+        <button
+          type="button"
+          role="menuitem"
+          data-mobile-menu-action="toggle-mode"
+          class="rounded-[9px] px-3.5 py-3 text-left font-mono text-xs tracking-[0.08em] text-royal-200 transition-colors hover:bg-royal-800/50 hover:text-gold-400"
+        >
+          <span class="ij-mode-label-scroll">◈ TRAVEL MODE</span>
+          <span class="ij-mode-label-travel hidden">◈ CLASSIC VIEW</span>
+        </button>
+
+        <button
+          type="button"
+          role="menuitem"
+          data-mobile-menu-action="credits"
+          class="rounded-[9px] px-3.5 py-3 text-left font-mono text-xs tracking-[0.08em] text-royal-300 transition-colors hover:bg-royal-800/50 hover:text-gold-400"
+        >
+          DATA &amp; LICENSES ▸
+        </button>
+      </div>
     </div>
   </nav>
 </header>
@@ -110,4 +152,52 @@ const navItems: NavItem[] = [
     },
     { passive: true },
   );
+
+  // Mobile menu enhancements (design_handoff_mobile_responsive) that a CSS-only checkbox
+  // toggle can't express on its own: real aria-expanded state, Escape-to-close, and closing
+  // on a breakpoint change so a resize never leaves it stuck open past `md:`.
+  const mobileMenuToggle = document.getElementById(
+    "mobile-menu-toggle",
+  ) as HTMLInputElement | null;
+  const mobileMenuButton = document.getElementById("mobile-menu-button");
+
+  if (mobileMenuToggle && mobileMenuButton) {
+    const closeMenu = () => {
+      mobileMenuToggle.checked = false;
+      mobileMenuButton.setAttribute("aria-expanded", "false");
+    };
+
+    mobileMenuToggle.addEventListener("change", () => {
+      mobileMenuButton.setAttribute(
+        "aria-expanded",
+        String(mobileMenuToggle.checked),
+      );
+    });
+
+    // A <label role="button"> gets the right semantics and is focusable (tabindex="0"),
+    // but - unlike a real <button> - doesn't get native Enter/Space activation for free.
+    mobileMenuButton.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        mobileMenuButton.click();
+      }
+    });
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && mobileMenuToggle.checked) closeMenu();
+    });
+
+    window.matchMedia("(min-width: 768px)").addEventListener("change", (e) => {
+      if (e.matches) closeMenu();
+    });
+
+    // Close on any menu item click (nav link or action button). Doesn't preventDefault/
+    // stopPropagation - SpaceScene's own document-level click delegate still needs to see
+    // and act on the same click (travel/scroll navigation, mode toggle, opening credits).
+    const panel = document.getElementById("mobile-menu-panel");
+    panel?.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      if (target.closest("a, button")) closeMenu();
+    });
+  }
 </script>

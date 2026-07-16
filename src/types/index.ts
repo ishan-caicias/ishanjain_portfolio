@@ -35,6 +35,11 @@ export interface HubbleEntry {
   sourceUrl: string;
 }
 
+export interface CredibilityItem {
+  title: string;
+  description: string;
+}
+
 export interface NavItem {
   label: string;
   href: string;
