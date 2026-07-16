@@ -93,6 +93,24 @@ describe("detectShipQuality", () => {
     expect(window.localStorage.getItem("ship-quality-auto-cache")).toBeNull();
   });
 
+  it("uses the viewport fallback instead of a failed benchmark tier", async () => {
+    detector.getGPUTier.mockResolvedValue({
+      tier: 1,
+      type: "BENCHMARK_FETCH_FAILED",
+    });
+
+    await expect(detectShipQuality()).resolves.toBe("high");
+    expect(window.localStorage.getItem("ship-quality-auto-cache")).toBeNull();
+
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: false })),
+    );
+    await expect(detectShipQuality()).resolves.toBe("low");
+    expect(detector.getGPUTier).toHaveBeenCalledTimes(2);
+    expect(window.localStorage.getItem("ship-quality-auto-cache")).toBeNull();
+  });
+
   it("re-evaluates the viewport fallback after a timeout without caching it", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(

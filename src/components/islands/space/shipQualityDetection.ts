@@ -180,7 +180,7 @@ export async function detectShipQuality(
   const gpuResult = await getGpuTierWithinDeadline(signal);
   const quality = selectShipQuality({
     ...baseInput,
-    gpuTier: gpuResult?.tier,
+    gpuTier: gpuResult?.type === "BENCHMARK" ? gpuResult.tier : undefined,
   });
   if (gpuResult?.type === "BENCHMARK") {
     writeCachedAutomaticQuality(quality, now);
