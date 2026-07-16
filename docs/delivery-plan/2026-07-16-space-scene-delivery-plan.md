@@ -17,6 +17,7 @@
 | 0     | Baseline and feature flag     | Existing tests, type check, lint, and production build pass unchanged           |
 | 1     | Licensed optimized ship asset | Attribution record exists; optimized glTF is 2 MB or less                       |
 | 2     | Hybrid proof of concept       | Textured ship renders camera-relative without breaking the custom star renderer |
+| 2.1   | Adaptive asset quality        | 1K/2K policy is GPU-tier aware, accessible, and fully regression-tested         |
 | 3     | Scene integration             | Travel, keyboard operation, reduced motion, and no-WebGL fallback work          |
 | 4     | Realism pass                  | Thruster, inertia, and arrival cues meet desktop and mobile acceptance criteria |
 | 5     | Release                       | Automated and manual quality gates pass; rollback is verified                   |
@@ -82,6 +83,106 @@ The report must state the exact commands, pass/fail results, browser and viewpor
 - [x] Implement `ShipRenderer` with camera-relative forward offset `3.2`, upward offset `-0.7`, and base pitch `-0.08` radians. It disposes loaded geometry, material textures, renderer, context, canvas, and observers. Responsive portrait scaling retains the required offsets while preserving CTA legibility.
 - [x] Mount Starfield and a ship-only canvas overlay in `SpaceScene`; the overlay computes `pointer-events: none`, preserving existing Starfield input. The renderer is intentionally static and on-demand until the later motion phase.
 - [x] Run flag-on build and dedicated flag-on E2E/manual regression. The existing Starfield has no free-look or warp controls to preserve at this phase; the validated event bridge is reserved for later interaction work. Full Phase 2 evidence is recorded in `docs/test-reports/2026-07-16-space-scene-phase-2.md`.
+
+### Task 3.1: Deliver adaptive 1K/2K ship quality
+
+**Files:** Create `src/components/islands/space/shipQuality.ts`, `src/components/islands/space/shipQualityDetection.ts`, and `tests/unit/space/shipQuality.test.ts`; modify `package.json`, `package-lock.json`, `scripts/optimize-ship.mjs`, `src/components/islands/SpaceScene.tsx`, `src/components/islands/space/ShipRenderer.ts`, `tests/unit/SpaceScene.test.tsx`, `tests/unit/space/shipRendererLifecycle.test.ts`, and `tests/e2e/space-scene-rollout.spec.ts`; create `public/space/ships/sci-fi-aircraft-spaceship-fighter-1k.glb` and `public/space/ships/sci-fi-aircraft-spaceship-fighter-2k.glb`; remove the superseded unqualified GLB.
+
+- [x] **Step 1: Write the failing selector tests.**
+
+```ts
+expect(
+  selectShipQuality({
+    preference: "auto",
+    saveData: false,
+    isNarrowViewport: true,
+    gpuTier: 3,
+  }),
+).toBe("high");
+expect(
+  selectShipQuality({
+    preference: "auto",
+    saveData: false,
+    isNarrowViewport: false,
+    gpuTier: 1,
+  }),
+).toBe("low");
+expect(
+  selectShipQuality({
+    preference: "auto",
+    saveData: true,
+    isNarrowViewport: false,
+  }),
+).toBe("low");
+expect(
+  selectShipQuality({
+    preference: "high",
+    saveData: true,
+    isNarrowViewport: true,
+  }),
+).toBe("high");
+```
+
+- [x] **Step 2: Run `npm run test -- tests/unit/space/shipQuality.test.ts`; confirm it fails because `shipQuality.ts` does not exist.**
+
+- [x] **Step 3: Implement the pure quality policy and preference persistence.**
+
+```ts
+export const shipAssets = {
+  low: {
+    quality: "low",
+    url: "/space/ships/sci-fi-aircraft-spaceship-fighter-1k.glb",
+  },
+  high: {
+    quality: "high",
+    url: "/space/ships/sci-fi-aircraft-spaceship-fighter-2k.glb",
+  },
+} as const;
+
+export function selectShipQuality(input: ShipQualityInput): ShipQuality {
+  if (input.preference === "high") return "high";
+  if (
+    input.preference === "data-saver" ||
+    input.saveData ||
+    (input.deviceMemory !== undefined && input.deviceMemory < 4)
+  )
+    return "low";
+  if (input.gpuTier !== undefined) return input.gpuTier >= 2 ? "high" : "low";
+  return input.isNarrowViewport ? "low" : "high";
+}
+```
+
+- [x] **Step 4: Run the focused selector tests and confirm PASS.**
+
+- [x] **Step 5: Add `@pmndrs/detect-gpu`, then write failing browser-adapter tests for an automatic tier-3 high decision, a 500 ms timeout fallback, and a valid 30-day cache.**
+
+```bash
+npm install @pmndrs/detect-gpu
+npm run test -- tests/unit/space/shipQuality.test.ts
+```
+
+- [x] **Step 6: Implement `detectShipQuality()` with `getGPUTier()`, `Promise.race()` against 500 ms, `matchMedia("(min-width: 768px)")`, `navigator.connection?.saveData`, optional `navigator.deviceMemory`, and expiry-based local-storage caching. Do not store the detected GPU string. Re-run focused tests and confirm PASS.**
+
+- [x] **Step 7: Write a failing renderer lifecycle test proving a high asset error loads the low asset exactly once, then implement an asset descriptor constructor argument and retry-once behavior. Run `npm run test -- tests/unit/space/shipRendererLifecycle.test.ts`; confirm PASS.**
+
+- [x] **Step 8: Write a failing `SpaceScene` test for `data-ship-quality`, the accessible quality selector, and a saved visitor override. Implement asynchronous selection before mounting `ShipRenderer`, render `<label><select aria-label="Ship visual quality">`, and persist changes. Run `npm run test -- tests/unit/SpaceScene.test.tsx`; confirm PASS.**
+
+- [x] **Step 9: Produce both assets and verify the delivery footprint.**
+
+```bash
+node scripts/optimize-ship.mjs --quality low
+node scripts/optimize-ship.mjs --quality high
+npx gltf-transform inspect public/space/ships/sci-fi-aircraft-spaceship-fighter-1k.glb
+npx gltf-transform inspect public/space/ships/sci-fi-aircraft-spaceship-fighter-2k.glb
+```
+
+Expected: each GLB uses WebP textures and `EXT_meshopt_compression`; low remains at or below 2 MiB and high remains at or below 3 MiB. Remove `public/space/ships/sci-fi-aircraft-spaceship-fighter.glb` only after both named assets exist.
+
+- [x] **Step 10: Extend flag-on Playwright coverage to assert an explicit `High quality` selection loads 2K and `Data saver` loads 1K. Run `npm run test:e2e:space-scene`; confirm PASS.**
+
+- [x] **Step 11: Run the mandatory Phase 2.1 guardrail: `npm run lint`, `npm run check`, `npm run test`, default and flag-on production builds, `npm run test:e2e`, and `npm run test:e2e:space-scene`. Manually test Auto, High quality, and Data saver at 1440×900, 768×1024, and 390×844, including keyboard operation and the high-to-low fallback. Record exact evidence in `docs/test-reports/2026-07-16-space-scene-phase-2.1.md`.**
+
+- [x] **Step 12: Commit the code, assets, amended policy, delivery plan, and Phase 2.1 report with `feat: adapt ship quality to GPU capability`.**
 
 ### Task 4: Add mass cues and real thruster phases
 
