@@ -26,6 +26,22 @@ export interface SpaceSceneProps {
   reducedMotion?: boolean;
 }
 
+function targetBankForPhase(phase: WarpPhase): number {
+  switch (phase) {
+    case "warp":
+      return -0.24;
+    case "aim":
+      return 0.12;
+    case "flip":
+      return 0.4;
+    case "decel":
+      return 0.08;
+    case "idle":
+    default:
+      return 0;
+  }
+}
+
 export default function SpaceScene({
   webglSupported,
   reducedMotion,
@@ -81,16 +97,7 @@ export default function SpaceScene({
   useEffect(() => {
     shipRendererRef.current?.setMotion({
       phase: warpPhase,
-      targetBank:
-        warpPhase === "warp"
-          ? -0.24
-          : warpPhase === "aim"
-            ? 0.12
-            : warpPhase === "flip"
-              ? 0.4
-              : warpPhase === "decel"
-                ? 0.08
-                : 0,
+      targetBank: targetBankForPhase(warpPhase),
     });
   }, [warpPhase]);
 
@@ -147,6 +154,10 @@ export default function SpaceScene({
       );
       shipRendererRef.current = renderer;
       renderer.mount(overlay);
+      renderer.setMotion({
+        phase: warpPhase,
+        targetBank: targetBankForPhase(warpPhase),
+      });
 
       return () => {
         shipRendererRef.current = undefined;
