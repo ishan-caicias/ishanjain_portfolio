@@ -136,6 +136,32 @@ describe("detectShipQuality", () => {
     expect(probe.loseContext).toHaveBeenCalledTimes(2);
   });
 
+  it("aborts the local benchmark request when GPU detection times out", async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn(() => new Promise(() => undefined));
+    vi.stubGlobal("fetch", fetch);
+    detector.getGPUTier.mockImplementation((options) => {
+      void options.override.loadBenchmarks("d-intel.json");
+      return new Promise(() => undefined);
+    });
+
+    const quality = detectShipQuality();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(500);
+
+    await expect(quality).resolves.toBe("high");
+    expect(fetch).toHaveBeenCalledWith(
+      "/space/ship-quality-benchmarks/d-intel.json",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    const [, options] = fetch.mock.calls.at(0) as unknown as [
+      string,
+      RequestInit,
+    ];
+    const signal = options.signal as AbortSignal;
+    expect(signal.aborted).toBe(true);
+  });
+
   it("releases its owned GPU probe when detection is cancelled", async () => {
     vi.useFakeTimers();
     detector.getGPUTier.mockImplementation(() => new Promise(() => undefined));

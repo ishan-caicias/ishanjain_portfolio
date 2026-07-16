@@ -1,4 +1,4 @@
-import { getGPUTier } from "@pmndrs/detect-gpu";
+import { getGPUTier, type ModelEntry } from "@pmndrs/detect-gpu";
 import {
   readShipQualityPreference,
   selectShipQuality,
@@ -95,6 +95,23 @@ function createGpuProbe(): GpuProbe | undefined {
   };
 }
 
+async function loadLocalBenchmarks(
+  file: string,
+  signal: AbortSignal,
+): Promise<ModelEntry[]> {
+  const response = await fetch(`${GPU_BENCHMARKS_URL}/${file}`, { signal });
+  if (!response.ok) {
+    throw new Error("Unable to load GPU benchmark data");
+  }
+
+  const data: unknown = await response.json();
+  if (!Array.isArray(data)) {
+    throw new Error("Invalid GPU benchmark data");
+  }
+
+  return data.slice(1) as ModelEntry[];
+}
+
 async function getGpuTierWithinDeadline(
   signal?: AbortSignal,
 ): Promise<GpuTierResult | undefined> {
@@ -105,6 +122,7 @@ async function getGpuTierWithinDeadline(
 
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let abortHandler: (() => void) | undefined;
+  const benchmarkController = new AbortController();
 
   try {
     const aborted = new Promise<undefined>((resolve) => {
@@ -112,7 +130,10 @@ async function getGpuTierWithinDeadline(
         return;
       }
 
-      abortHandler = () => resolve(undefined);
+      abortHandler = () => {
+        benchmarkController.abort();
+        resolve(undefined);
+      };
       if (signal.aborted) {
         abortHandler();
       } else {
@@ -124,16 +145,22 @@ async function getGpuTierWithinDeadline(
         benchmarksURL: GPU_BENCHMARKS_URL,
         failIfMajorPerformanceCaveat: true,
         glContext: probe.context,
+        override: {
+          loadBenchmarks: (file) =>
+            loadLocalBenchmarks(file, benchmarkController.signal),
+        },
       }),
       new Promise<undefined>((resolve) => {
-        timeoutId = setTimeout(
-          () => resolve(undefined),
-          GPU_DETECTION_TIMEOUT_MS,
-        );
+        timeoutId = setTimeout(() => {
+          benchmarkController.abort();
+          resolve(undefined);
+        }, GPU_DETECTION_TIMEOUT_MS);
       }),
       aborted,
     ]);
-    return result;
+    return benchmarkController.signal.aborted || signal?.aborted
+      ? undefined
+      : result;
   } catch {
     return undefined;
   } finally {
@@ -143,6 +170,7 @@ async function getGpuTierWithinDeadline(
     if (abortHandler) {
       signal?.removeEventListener("abort", abortHandler);
     }
+    benchmarkController.abort();
     probe.release();
   }
 }
