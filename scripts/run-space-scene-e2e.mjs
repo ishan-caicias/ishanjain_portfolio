@@ -6,7 +6,12 @@ const playwrightCli = fileURLToPath(
 );
 const child = spawn(
   process.execPath,
-  [playwrightCli, "test", "tests/e2e/space-scene-rollout.spec.ts"],
+  [
+    playwrightCli,
+    "test",
+    "tests/e2e/space-scene-rollout.spec.ts",
+    "tests/e2e/space-scene.integration.spec.ts",
+  ],
   {
     env: {
       ...process.env,

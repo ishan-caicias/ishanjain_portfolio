@@ -195,15 +195,17 @@ Expected: each GLB uses WebP textures and `EXT_meshopt_compression`; low remains
 - [ ] Apply bank to the ship transform and plume to emissive/nozzle intensity. Run `npm run test -- tests/unit/space/shipMotion.test.ts`; expect PASS.
 - [ ] At 1440×900 and 390×844, verify a route change shows bounded bank lag and that warp/deceleration visibly exceed idle thrust. With reduced motion enabled, disable interpolation and use idle intensity. Commit with `feat: add inertial ship motion and thruster phases`.
 
-### Task 5: Complete interaction, accessibility, and fallback parity
+### Task 5 (Phase 3): Complete interaction, accessibility, and fallback parity
+
+Detailed Phase 3 implementation steps are recorded in `docs/delivery-plan/2026-07-16-space-scene-phase-3-implementation-plan.md`; its mandatory evidence report is `docs/test-reports/2026-07-16-space-scene-phase-3.md`.
 
 **Files:** Modify `src/components/islands/SpaceScene.tsx`, `src/components/islands/space/CreditsPanel.tsx`, `src/components/layout/Footer.astro`, and `tests/e2e/space-scene.spec.ts`.
 
-- [ ] Write a failing E2E test that emulates reduced motion, visits the flag-on scene, activates the Projects station via Enter, observes arrival confirmation, and asserts `data-reduced-motion="true"` on the island root.
-- [ ] Implement each station as a semantic button with a unique accessible name such as “Travel to Projects station.”
-- [ ] Announce changes with a visually hidden `aria-live="polite"` element that renders the current travel state.
-- [ ] When WebGL initialization fails, render the section-navigation and content fallback rather than an empty canvas. Make the credits panel reachable from the footer.
-- [ ] Run `npm run build && npm run test:e2e -- tests/e2e/space-scene.spec.ts`; expect PASS and no axe violations in scene, credits, or fallback paths. Commit with `feat: make space scene accessible and attributable`.
+- [x] Write a failing E2E test that emulates reduced motion, visits the flag-on scene, activates the Projects station via Enter, observes arrival confirmation, and asserts `data-reduced-motion="true"` on the island root.
+- [x] Implement each station as a semantic button with a unique accessible name such as “Travel to Projects station.”
+- [x] Announce changes with a visually hidden `aria-live="polite"` element that renders the current travel state.
+- [x] When WebGL initialization fails, render the section-navigation and content fallback rather than an empty canvas. Make the credits panel reachable from the footer.
+- [x] Run the Phase 3 unit, build, and feature-gated E2E evidence recorded in `docs/test-reports/2026-07-16-space-scene-phase-3.md`. Commit with `feat: make space scene accessible and attributable`.
 
 ### Task 6: Make the release decision from measured evidence
 

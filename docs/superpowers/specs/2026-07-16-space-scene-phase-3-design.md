@@ -11,11 +11,11 @@ Turn the hero from a decorative ship scene into an accessible constellation-navi
 
 Use **constellation debris** inside the hero:
 
-| Destination | Target | Visual station object | Accessible name |
-| --- | --- | --- | --- |
-| Experience | `#experience` | Relay satellite | `Travel to Experience station` |
-| Projects | `#projects` | Cargo fragment | `Travel to Projects station` |
-| Contact | `#contact` | Communications buoy | `Travel to Contact station` |
+| Destination | Target        | Visual station object | Accessible name                |
+| ----------- | ------------- | --------------------- | ------------------------------ |
+| Experience  | `#experience` | Relay satellite       | `Travel to Experience station` |
+| Projects    | `#projects`   | Cargo fragment        | `Travel to Projects station`   |
+| Contact     | `#contact`    | Communications buoy   | `Travel to Contact station`    |
 
 The station objects occupy the clear space around the ship. They are not positioned over the headline or existing CTA links. The existing hero content remains visually and interactively dominant.
 

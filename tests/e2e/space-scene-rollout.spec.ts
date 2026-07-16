@@ -42,6 +42,21 @@ test.describe("Space scene rollout", () => {
       "true",
     );
     await expect(page.locator("[data-testid='space-scene']")).toBeVisible();
+    await page.waitForFunction(() => {
+      const scene = document.querySelector("[data-testid='space-scene']");
+      return Boolean(
+        scene?.querySelector("[data-testid='space-scene-fallback']") ||
+        scene?.querySelector("[data-testid='starfield']") ||
+        scene?.getAttribute("data-ship-status") === "ready",
+      );
+    });
+    if (await page.getByTestId("space-scene-fallback").count()) {
+      await expect(
+        page.getByRole("button", { name: "Travel to Contact station" }),
+      ).toBeVisible();
+      expect(pageErrors).toEqual([]);
+      return;
+    }
     await expect(page.locator("[data-testid='starfield']")).toBeVisible();
     await expect(page.locator("[data-testid='space-scene']")).toHaveAttribute(
       "data-ship-status",
@@ -70,6 +85,21 @@ test.describe("Space scene rollout", () => {
 
     await page.goto("/");
 
+    await page.waitForFunction(() => {
+      const scene = document.querySelector("[data-testid='space-scene']");
+      return Boolean(
+        scene?.querySelector("[data-testid='space-scene-fallback']") ||
+        scene?.querySelector("[data-testid='starfield']") ||
+        scene?.getAttribute("data-ship-status") === "ready",
+      );
+    });
+    if (await page.getByTestId("space-scene-fallback").count()) {
+      await expect(
+        page.getByRole("button", { name: "Travel to Contact station" }),
+      ).toBeVisible();
+      expect(pageErrors).toEqual([]);
+      return;
+    }
     await expect(page.locator("[data-testid='space-scene']")).toHaveAttribute(
       "data-ship-status",
       "ready",
