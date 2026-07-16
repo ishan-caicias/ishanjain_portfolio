@@ -21,7 +21,7 @@ test.describe("Space scene rollout", () => {
     await expect(page.locator("[data-testid='space-scene']")).toHaveCount(0);
   });
 
-  test("renders the hybrid starfield and ship scene when enabled", async ({
+  test("uses the high asset when high quality is saved before navigation", async ({
     page,
   }) => {
     test.skip(
@@ -31,6 +31,9 @@ test.describe("Space scene rollout", () => {
 
     const pageErrors: Error[] = [];
     page.on("pageerror", (error) => pageErrors.push(error));
+    await page.addInitScript(() => {
+      window.localStorage.setItem("ship-quality-preference", "high");
+    });
 
     await page.goto("/");
 
@@ -43,6 +46,37 @@ test.describe("Space scene rollout", () => {
     await expect(page.locator("[data-testid='space-scene']")).toHaveAttribute(
       "data-ship-status",
       "ready",
+    );
+    await expect(page.locator("[data-testid='space-scene']")).toHaveAttribute(
+      "data-ship-quality",
+      "high",
+    );
+    expect(pageErrors).toEqual([]);
+  });
+
+  test("uses the low asset when data saver is saved before navigation", async ({
+    page,
+  }) => {
+    test.skip(
+      !spaceSceneEnabled,
+      "Run this assertion with PUBLIC_SPACE_SCENE=true.",
+    );
+
+    const pageErrors: Error[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error));
+    await page.addInitScript(() => {
+      window.localStorage.setItem("ship-quality-preference", "data-saver");
+    });
+
+    await page.goto("/");
+
+    await expect(page.locator("[data-testid='space-scene']")).toHaveAttribute(
+      "data-ship-status",
+      "ready",
+    );
+    await expect(page.locator("[data-testid='space-scene']")).toHaveAttribute(
+      "data-ship-quality",
+      "low",
     );
     expect(pageErrors).toEqual([]);
   });

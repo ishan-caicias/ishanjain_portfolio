@@ -1,8 +1,11 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
+import {
+  shipAssets,
+  type ShipAsset,
+} from "@/components/islands/space/shipQuality";
 
-const SHIP_URL = "/space/ships/sci-fi-aircraft-spaceship-fighter.glb";
 const MAX_PIXEL_RATIO = 1.5;
 const CAMERA_FOV = 45;
 const HORIZONTAL_FRAME_USAGE = 0.85;
@@ -30,7 +33,7 @@ export function getResponsiveShipScale(aspect: number): number {
 }
 
 type ShipRendererFailureHandler = (error: Error) => void;
-type ShipRendererReadyHandler = () => void;
+type ShipRendererReadyHandler = (asset: ShipAsset) => void;
 
 function toError(reason: unknown): Error {
   return reason instanceof Error ? reason : new Error("Unable to render ship");
@@ -67,6 +70,7 @@ export class ShipRenderer {
     0.1,
     100,
   );
+  private currentAsset: ShipAsset;
   private readonly onFailure?: ShipRendererFailureHandler;
   private readonly onReady?: ShipRendererReadyHandler;
   private readonly scene = new THREE.Scene();
@@ -74,12 +78,15 @@ export class ShipRenderer {
   private disposed = false;
   private renderer?: THREE.WebGLRenderer;
   private resizeObserver?: ResizeObserver;
+  private retriedLowAsset = false;
   private ship?: THREE.Object3D;
 
   constructor(
+    asset: ShipAsset,
     onFailure?: ShipRendererFailureHandler,
     onReady?: ShipRendererReadyHandler,
   ) {
+    this.currentAsset = asset;
     this.onFailure = onFailure;
     this.onReady = onReady;
   }
@@ -113,14 +120,7 @@ export class ShipRenderer {
       this.resizeObserver = new ResizeObserver(() => this.resize(container));
       this.resizeObserver.observe(container);
 
-      const loader = new GLTFLoader();
-      loader.setMeshoptDecoder(MeshoptDecoder);
-      loader.load(
-        SHIP_URL,
-        (gltf) => this.addShip(gltf.scene),
-        undefined,
-        (error) => this.fail(error),
-      );
+      this.loadShip();
     } catch (error) {
       this.fail(error);
     }
@@ -157,6 +157,17 @@ export class ShipRenderer {
     this.camera.add(ambientLight, keyLight);
   }
 
+  private loadShip(): void {
+    const loader = new GLTFLoader();
+    loader.setMeshoptDecoder(MeshoptDecoder);
+    loader.load(
+      this.currentAsset.url,
+      (gltf) => this.addShip(gltf.scene),
+      undefined,
+      (error) => this.handleLoadError(error),
+    );
+  }
+
   private addShip(ship: THREE.Object3D): void {
     if (this.disposed) {
       disposeObject(ship);
@@ -173,7 +184,22 @@ export class ShipRenderer {
     this.camera.add(ship);
     this.ship = ship;
     this.render();
-    this.onReady?.();
+    this.onReady?.(this.currentAsset);
+  }
+
+  private handleLoadError(reason: unknown): void {
+    if (
+      !this.disposed &&
+      this.currentAsset.quality === "high" &&
+      !this.retriedLowAsset
+    ) {
+      this.retriedLowAsset = true;
+      this.currentAsset = shipAssets.low;
+      this.loadShip();
+      return;
+    }
+
+    this.fail(reason);
   }
 
   private fail(reason: unknown): void {

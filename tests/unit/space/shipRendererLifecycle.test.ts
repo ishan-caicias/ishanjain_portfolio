@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   onLoad: undefined as
     | undefined
     | ((gltf: { scene: Record<string, unknown> }) => void),
+  onError: undefined as undefined | ((error: unknown) => void),
   render: vi.fn(),
   renderListsDispose: vi.fn(),
   rendererDispose: vi.fn(),
@@ -66,9 +67,12 @@ vi.mock("three/addons/loaders/GLTFLoader.js", () => ({
     load = (
       url: string,
       onLoad: (gltf: { scene: Record<string, unknown> }) => void,
+      _onProgress: unknown,
+      onError: (error: unknown) => void,
     ) => {
       mocks.loaderLoad(url);
       mocks.onLoad = onLoad;
+      mocks.onError = onError;
     };
     setMeshoptDecoder = vi.fn();
   },
@@ -83,11 +87,13 @@ import {
   ShipRenderer,
   shipTransform,
 } from "@/components/islands/space/ShipRenderer";
+import { shipAssets } from "@/components/islands/space/shipQuality";
 
 describe("ShipRenderer lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.onLoad = undefined;
+    mocks.onError = undefined;
     mocks.resizeCallback = undefined;
     vi.stubGlobal(
       "ResizeObserver",
@@ -107,7 +113,7 @@ describe("ShipRenderer lifecycle", () => {
   it("renders the static ship without scheduling animation frames", () => {
     const requestAnimationFrame = vi.fn();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
-    const renderer = new ShipRenderer();
+    const renderer = new ShipRenderer(shipAssets.low);
 
     renderer.mount(document.createElement("div"));
 
@@ -117,7 +123,7 @@ describe("ShipRenderer lifecycle", () => {
 
   it("releases the static renderer resources on disposal", () => {
     const container = document.createElement("div");
-    const renderer = new ShipRenderer();
+    const renderer = new ShipRenderer(shipAssets.low);
     renderer.mount(container);
 
     renderer.dispose();
@@ -135,7 +141,7 @@ describe("ShipRenderer lifecycle", () => {
     vi.spyOn(container, "getBoundingClientRect").mockImplementation(
       () => dimensions,
     );
-    const renderer = new ShipRenderer();
+    const renderer = new ShipRenderer(shipAssets.low);
 
     renderer.mount(container);
 
@@ -159,5 +165,36 @@ describe("ShipRenderer lifecycle", () => {
     expect(mocks.scaleSetScalar).toHaveBeenLastCalledWith(
       shipTransform.modelScale,
     );
+  });
+
+  it("retries a failed high-quality load with the low asset exactly once", () => {
+    const onFailure = vi.fn();
+    const onReady = vi.fn();
+    const renderer = new ShipRenderer(shipAssets.high, onFailure, onReady);
+
+    renderer.mount(document.createElement("div"));
+    mocks.onError?.(new Error("high asset failed"));
+    mocks.onError?.(new Error("low asset failed"));
+
+    expect(mocks.loaderLoad).toHaveBeenNthCalledWith(1, shipAssets.high.url);
+    expect(mocks.loaderLoad).toHaveBeenNthCalledWith(2, shipAssets.low.url);
+    expect(mocks.loaderLoad).toHaveBeenCalledTimes(2);
+    expect(onFailure).toHaveBeenCalledOnce();
+  });
+
+  it("reports the active asset after it loads", () => {
+    const onReady = vi.fn();
+    const renderer = new ShipRenderer(shipAssets.low, undefined, onReady);
+
+    renderer.mount(document.createElement("div"));
+    mocks.onLoad?.({
+      scene: {
+        position: { set: vi.fn() },
+        rotation: { x: 0 },
+        scale: { setScalar: mocks.scaleSetScalar },
+      },
+    });
+
+    expect(onReady).toHaveBeenCalledWith(shipAssets.low);
   });
 });
