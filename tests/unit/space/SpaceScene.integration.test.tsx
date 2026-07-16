@@ -5,10 +5,12 @@ import {
   render,
   screen,
 } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const renderer = vi.hoisted(() => ({ mount: vi.fn(), dispose: vi.fn() }));
 const detection = vi.hoisted(() => ({ detectShipQuality: vi.fn() }));
+const capability = vi.hoisted(() => ({ canCreateWebGL: vi.fn(() => true) }));
 
 vi.mock("@/components/islands/Starfield", () => ({
   default: () => <canvas data-testid="starfield" />,
@@ -21,7 +23,7 @@ vi.mock("@/components/islands/space/ShipRenderer", () => ({
 }));
 vi.mock("@/components/islands/space/shipQualityDetection", () => detection);
 vi.mock("@/components/islands/space/webglSupport", () => ({
-  canCreateWebGL: vi.fn(() => true),
+  canCreateWebGL: capability.canCreateWebGL,
 }));
 
 import SpaceScene from "../../../src/components/islands/SpaceScene";
@@ -31,12 +33,19 @@ describe("SpaceScene travel integration", () => {
     detection.detectShipQuality.mockResolvedValue("low");
     renderer.mount.mockClear();
     renderer.dispose.mockClear();
+    capability.canCreateWebGL.mockClear();
     document.body.innerHTML =
       '<main><section id="experience" /><section id="projects" /><section id="contact" /></main>';
   });
 
   afterEach(() => {
     cleanup();
+  });
+
+  it("does not probe WebGL during SSR", () => {
+    renderToString(<SpaceScene />);
+
+    expect(capability.canCreateWebGL).not.toHaveBeenCalled();
   });
 
   it("announces normal travel and smooth-scrolls while preserving focus", async () => {

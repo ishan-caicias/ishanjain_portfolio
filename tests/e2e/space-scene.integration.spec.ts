@@ -16,12 +16,13 @@ test.describe("accessible constellation travel", () => {
     const station = page.getByRole("button", {
       name: "Travel to Projects station",
     });
-    await station.press("Enter");
-
     await expect(page.getByTestId("space-scene")).toHaveAttribute(
       "data-reduced-motion",
       "true",
     );
+    await expect(station).toBeEnabled();
+    await station.press("Enter");
+
     await expect(page.getByTestId("space-travel-status")).toHaveText(
       "Arrived at Projects.",
     );

@@ -54,7 +54,7 @@ export default function SpaceScene({
     if (typeof webglSupported === "boolean") {
       return webglSupported;
     }
-    return typeof window === "undefined" ? undefined : canCreateWebGL();
+    return undefined;
   });
 
   useEffect(() => {
@@ -62,10 +62,8 @@ export default function SpaceScene({
       setHasWebGL(webglSupported);
       return;
     }
-    if (hasWebGL === undefined) {
-      setHasWebGL(canCreateWebGL());
-    }
-  }, [hasWebGL, webglSupported]);
+    setHasWebGL(canCreateWebGL());
+  }, [webglSupported]);
 
   useEffect(() => {
     const handleWarp = (event: Event) => {
