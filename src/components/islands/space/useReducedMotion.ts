@@ -14,9 +14,7 @@ function readReducedMotionPreference(): MediaQueryList | undefined {
 }
 
 export function useReducedMotion(): boolean {
-  const [reducedMotion, setReducedMotion] = useState(
-    () => readReducedMotionPreference()?.matches ?? false,
-  );
+  const [reducedMotion, setReducedMotion] = useState(false);
 
   useEffect(() => {
     const mediaQuery = readReducedMotionPreference();
@@ -31,8 +29,12 @@ export function useReducedMotion(): boolean {
       }
     };
 
-    if (typeof mediaQuery.addEventListener === "function") {
+    if (
+      typeof mediaQuery.addEventListener === "function" &&
+      typeof mediaQuery.removeEventListener === "function"
+    ) {
       mediaQuery.addEventListener("change", listener);
+      setReducedMotion(mediaQuery.matches);
       return () => {
         mounted = false;
         mediaQuery.removeEventListener("change", listener);
@@ -44,6 +46,7 @@ export function useReducedMotion(): boolean {
       removeListener?: (callback: (event: MediaQueryListEvent) => void) => void;
     };
     legacyMediaQuery.addListener?.(listener);
+    setReducedMotion(mediaQuery.matches);
     return () => {
       mounted = false;
       legacyMediaQuery.removeListener?.(listener);

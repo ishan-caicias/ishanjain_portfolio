@@ -116,4 +116,13 @@ describe("useReducedMotion", () => {
       expect.any(Function),
     );
   });
+
+  it("syncs the current preference from the effect's media query", () => {
+    const currentQuery = createMediaQuery(false);
+    matchMedia.mockReturnValue(currentQuery);
+
+    const { result } = renderHook(() => useReducedMotion());
+
+    expect(result.current).toBe(false);
+  });
 });
