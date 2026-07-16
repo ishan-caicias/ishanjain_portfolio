@@ -120,17 +120,22 @@ export default function SpaceScene({
       return;
     }
 
-    const renderer = new ShipRenderer(
-      shipAsset,
-      () => setShipStatus("failed"),
-      (activeAsset) => {
-        setActiveShipAsset(activeAsset);
-        setShipStatus("ready");
-      },
-    );
-    renderer.mount(overlay);
+    try {
+      const renderer = new ShipRenderer(
+        shipAsset,
+        () => setShipStatus("failed"),
+        (activeAsset) => {
+          setActiveShipAsset(activeAsset);
+          setShipStatus("ready");
+        },
+      );
+      renderer.mount(overlay);
 
-    return () => renderer.dispose();
+      return () => renderer.dispose();
+    } catch {
+      setShipStatus("failed");
+      return undefined;
+    }
   }, [hasWebGL, shipAsset]);
 
   useEffect(
