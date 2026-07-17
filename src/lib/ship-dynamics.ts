@@ -169,6 +169,124 @@ export function buildPlumeVertices(
   return out;
 }
 
+/* ---------- PF-08 F1: quaternion flight state ---------- */
+
+/** [x, y, z, w] quaternion. */
+export type Quat = [number, number, number, number];
+
+export const QUAT_IDENTITY: Quat = [0, 0, 0, 1];
+
+/** Shortest-arc rotation taking unit vector `a` onto unit vector `b`. */
+export function quatFromUnitVectors(
+  a: readonly number[],
+  b: readonly number[],
+): Quat {
+  const d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  if (d > 0.99999) return [0, 0, 0, 1];
+  if (d < -0.99999) {
+    // opposite: rotate 180° around any axis ⟂ a
+    const ax = Math.abs(a[0]) > 0.9 ? [0, 1, 0] : [1, 0, 0];
+    const cx = a[1] * ax[2] - a[2] * ax[1];
+    const cy = a[2] * ax[0] - a[0] * ax[2];
+    const cz = a[0] * ax[1] - a[1] * ax[0];
+    const l = Math.hypot(cx, cy, cz);
+    return [cx / l, cy / l, cz / l, 0];
+  }
+  const cx = a[1] * b[2] - a[2] * b[1];
+  const cy = a[2] * b[0] - a[0] * b[2];
+  const cz = a[0] * b[1] - a[1] * b[0];
+  const q: Quat = [cx, cy, cz, 1 + d];
+  const l = Math.hypot(q[0], q[1], q[2], q[3]);
+  return [q[0] / l, q[1] / l, q[2] / l, q[3] / l];
+}
+
+export function quatSlerp(a: Quat, b: Quat, t: number): Quat {
+  let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+  const bb: Quat = d < 0 ? [-b[0], -b[1], -b[2], -b[3]] : [...b];
+  if (d < 0) d = -d;
+  if (d > 0.9995) {
+    const o: Quat = [
+      a[0] + (bb[0] - a[0]) * t,
+      a[1] + (bb[1] - a[1]) * t,
+      a[2] + (bb[2] - a[2]) * t,
+      a[3] + (bb[3] - a[3]) * t,
+    ];
+    const l = Math.hypot(o[0], o[1], o[2], o[3]);
+    return [o[0] / l, o[1] / l, o[2] / l, o[3] / l];
+  }
+  const th = Math.acos(d);
+  const s = Math.sin(th);
+  const wa = Math.sin((1 - t) * th) / s;
+  const wb = Math.sin(t * th) / s;
+  return [
+    a[0] * wa + bb[0] * wb,
+    a[1] * wa + bb[1] * wb,
+    a[2] * wa + bb[2] * wb,
+    a[3] * wa + bb[3] * wb,
+  ];
+}
+
+/** Frame-rate-independent slerp damping toward `target` (lambda ≈ turn rate). */
+export function quatDamp(
+  current: Quat,
+  target: Quat,
+  lambda: number,
+  dt: number,
+): Quat {
+  return quatSlerp(current, target, 1 - Math.exp(-lambda * dt));
+}
+
+/** Column-major mat4 from a unit quaternion (rotation only). */
+export function quatToMat4(q: Quat): number[] {
+  const [x, y, z, w] = q;
+  const x2 = x + x,
+    y2 = y + y,
+    z2 = z + z;
+  const xx = x * x2,
+    xy = x * y2,
+    xz = x * z2,
+    yy = y * y2,
+    yz = y * z2,
+    zz = z * z2,
+    wx = w * x2,
+    wy = w * y2,
+    wz = w * z2;
+  return [
+    1 - (yy + zz),
+    xy + wz,
+    xz - wy,
+    0,
+    xy - wz,
+    1 - (xx + zz),
+    yz + wx,
+    0,
+    xz + wy,
+    yz - wx,
+    1 - (xx + yy),
+    0,
+    0,
+    0,
+    0,
+    1,
+  ];
+}
+
+/** Rest pose: the classic hero attitude (pitch −0.42 about X). */
+export function restPoseQuat(pitch = -0.42): Quat {
+  return [Math.sin(pitch / 2), 0, 0, Math.cos(pitch / 2)];
+}
+
+/** Ship turn rate for orientation damping (rad/s-ish; higher = snappier). */
+export const SHIP_TURN_LAMBDA = 4.5;
+
+/** Engine-glow intensity cast onto the rear hull, by plume phase (PF-08 F0). */
+export function engineGlowIntensity(p: PlumeParams): number {
+  if (p.burning) return 1.3;
+  if (p.coasting) return 0.1;
+  if (p.parked) return 0.25;
+  return 0.4;
+}
+
 /* ---------- P3: arrival presence (realism audit fix #4) ---------- */
 
 /** Rim-light colors: cool starlight in flight, warm beacon-gold when parked. */

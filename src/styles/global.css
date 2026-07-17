@@ -321,3 +321,48 @@ body.ij-warping #ij-hero-copy {
     transition: none;
   }
 }
+
+/* PF-08 F0 (TR-022): landing loading choreography. body.ij-loading ships in
+   the SSR HTML; SpaceScene removes it once the star stream + craft are ready
+   (with grace/fallback timers). The hero copy and WHERE-TO bar fade in. */
+#ij-mission-bar {
+  transition:
+    opacity 0.7s ease,
+    top 0.6s ease,
+    bottom 0.6s ease;
+}
+body.ij-loading #ij-hero-copy,
+body.ij-loading #ij-mission-bar {
+  opacity: 0;
+  pointer-events: none;
+}
+/* WHERE-TO docks between the ship and the title at the home vista */
+body.ij-travel.ij-at-home #ij-mission-bar {
+  bottom: auto;
+  top: 54vh;
+}
+@media (prefers-reduced-motion: reduce) {
+  #ij-mission-bar {
+    transition: none;
+  }
+}
+
+/* PF-08 F0: in travel mode the WHERE-TO bar occupies the badge's slot between
+   ship and title — the location badge is redundant there (the HUD shows
+   ORIGIN · SOL-3) and hiding it clears the overlap. */
+body.ij-travel #ij-hero-badge {
+  display: none;
+}
+
+/* No-JS/failed-hydration failsafe: even if SpaceScene never clears ij-loading,
+   the content self-reveals after 9s via CSS animation alone. */
+@keyframes ij-unhide {
+  to {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+body.ij-loading #ij-hero-copy,
+body.ij-loading #ij-mission-bar {
+  animation: ij-unhide 0.6s ease 9s forwards;
+}

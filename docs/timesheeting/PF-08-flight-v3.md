@@ -9,22 +9,22 @@ Plan: [docs/delivery-plan/PF-08-flight-v3.md](../delivery-plan/PF-08-flight-v3.m
     "deliveryPlan": "PF-08-flight-v3",
     "phase": "F0 — Visual fidelity foundation",
     "detail": "sRGB/tone pipeline (shipped early as TR-021), relight, engine-glow on hull, star bloom",
-    "status": "inprogress",
+    "status": "complete",
     "start": "2026-07-18T01:10:00Z",
-    "end": null,
+    "end": "2026-07-18T03:30:00Z",
     "llmStrategy": "docs/llm/llm-strategy-scorecard-5milestone.md",
-    "notes": "Start approximate. The sRGB/Reinhard pipeline landed ahead of the plan as the TR-021 hotfix (owner-reported bleached hull, diagnosed by texture measurement). Remaining F0: relight pass, engine-glow cast on rear hull, optional star bloom, owner real-GPU sign-off."
+    "notes": "Start approximate. The sRGB/Reinhard pipeline landed ahead of the plan as the TR-021 hotfix (owner-reported bleached hull, diagnosed by texture measurement). COMPLETE (TR-022, timestamps approximate): owner-directed landing amendment delivered (loading choreography with CSS failsafe, ship-first hero, WHERE-TO dock, 1-line/2-line copy), engine-glow-on-hull. Star bloom deferred as optional; owner real-GPU sign-off pending."
   },
   {
     "project": "ishanjain-portfolio",
     "deliveryPlan": "PF-08-flight-v3",
     "phase": "F1 — Ship flight state",
     "detail": "Orientation quaternion, thrust vector, velocity integration; turn-then-burn toward real RA/Dec directions",
-    "status": "planned",
-    "start": null,
-    "end": null,
-    "llmStrategy": null,
-    "notes": "Inverts the v2 model: ship owns flight, camera observes. Integrator to be unit-tested in ship-dynamics.ts."
+    "status": "complete",
+    "start": "2026-07-18T02:30:00Z",
+    "end": "2026-07-18T03:30:00Z",
+    "llmStrategy": "docs/llm/llm-strategy-scorecard-5milestone.md",
+    "notes": "COMPLETE (TR-022, timestamps approximate): quaternion math in ship-dynamics.ts (+4 unit tests), scripted pitch/flip replaced by slerp-damped orientation onto the view-space travel vector, emergent retro flip. Velocity-integration/chase-camera aspects continue in F2. 51/51 unit, 44/44 E2E."
   },
   {
     "project": "ishanjain-portfolio",

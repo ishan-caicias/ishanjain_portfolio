@@ -8,7 +8,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPlumeVertices,
+  engineGlowIntensity,
   ndcToView,
+  quatDamp,
+  quatFromUnitVectors,
+  quatToMat4,
+  restPoseQuat,
+  type Quat,
   plumeAlpha,
   plumeFlareLength,
   rimColorAt,
@@ -175,6 +181,76 @@ describe("P3 exhaust plume", () => {
         expect(tipMatches).toBe(true); // cold verts sit exactly at nozzle+flare
       }
     }
+  });
+});
+
+describe("PF-08 F1 quaternion flight state", () => {
+  const apply = (q: readonly number[], v: readonly number[]) => {
+    const m = quatToMat4(q as Quat);
+    return [
+      m[0] * v[0] + m[4] * v[1] + m[8] * v[2],
+      m[1] * v[0] + m[5] * v[1] + m[9] * v[2],
+      m[2] * v[0] + m[6] * v[1] + m[10] * v[2],
+    ];
+  };
+
+  it("quatFromUnitVectors rotates a onto b (including the antipodal case)", () => {
+    const cases: [number[], number[]][] = [
+      [
+        [0, 0, -1],
+        [1, 0, 0],
+      ],
+      [
+        [0, 0, -1],
+        [0, 1, 0],
+      ],
+      [
+        [0, 0, -1],
+        [0, 0, 1],
+      ], // 180° flip
+    ];
+    for (const [a, b] of cases) {
+      const out = apply(quatFromUnitVectors(a, b), a);
+      for (let i = 0; i < 3; i++) expect(out[i]).toBeCloseTo(b[i], 5);
+    }
+  });
+
+  it("quatDamp converges the nose onto the target direction", () => {
+    let q = restPoseQuat();
+    const target = quatFromUnitVectors([0, 0, -1], [1, 0, 0]);
+    for (let i = 0; i < 200; i++) q = quatDamp(q, target, 4.5, 1 / 60);
+    const nose = apply(q, [0, 0, -1]);
+    expect(nose[0]).toBeCloseTo(1, 3);
+    expect(Math.abs(nose[1])).toBeLessThan(1e-3);
+  });
+
+  it("restPoseQuat matches the engine's rotX(pitch) convention", () => {
+    const m = quatToMat4(restPoseQuat(-0.42));
+    const cP = Math.cos(-0.42),
+      sP = Math.sin(-0.42);
+    // engine rx (column-major): [1,0,0,0, 0,cP,sP,0, 0,-sP,cP,0, ...]
+    expect(m[5]).toBeCloseTo(cP, 10);
+    expect(m[6]).toBeCloseTo(sP, 10);
+    expect(m[9]).toBeCloseTo(-sP, 10);
+  });
+
+  it("engine glow follows the plume phase ordering", () => {
+    const base = {
+      burning: false,
+      coasting: false,
+      parked: false,
+      reduced: false,
+      t: 0,
+    };
+    expect(engineGlowIntensity({ ...base, burning: true })).toBeGreaterThan(
+      engineGlowIntensity(base),
+    );
+    expect(engineGlowIntensity(base)).toBeGreaterThan(
+      engineGlowIntensity({ ...base, parked: true }),
+    );
+    expect(engineGlowIntensity({ ...base, parked: true })).toBeGreaterThan(
+      engineGlowIntensity({ ...base, coasting: true }),
+    );
   });
 });
 

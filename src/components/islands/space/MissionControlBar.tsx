@@ -32,7 +32,10 @@ export default function MissionControlBar({
   onHome,
 }: MissionControlBarProps) {
   return (
-    <div className="pointer-events-auto fixed bottom-8 left-1/2 z-[62] w-[min(520px,calc(100vw-28px))] -translate-x-1/2">
+    <div
+      id="ij-mission-bar"
+      className="pointer-events-auto fixed bottom-8 left-1/2 z-[62] w-[min(520px,calc(100vw-28px))] -translate-x-1/2"
+    >
       <div className="relative">
         <div className="flex items-center gap-2.5 rounded-xl border border-[#2e7d32]/40 bg-[#070914]/85 px-3.5 py-2.5 backdrop-blur-md">
           <span className="flex-shrink-0 font-mono text-xs tracking-wider text-[#43a047]">

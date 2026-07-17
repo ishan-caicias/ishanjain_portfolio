@@ -136,6 +136,46 @@ export default function SpaceScene({
     document.body.classList.toggle("ij-warping", !!state.warp);
   }, [state.warp]);
 
+  // PF-08 F0 (TR-022): landing loading choreography. body.ij-loading (set
+  // server-side) hides the hero copy + WHERE-TO bar; cleared when the star
+  // stream AND the craft are ready. Grace paths: 2.5 s after stars if the
+  // craft never reports (opt-out/no-WebGL), 8 s absolute, instant outside
+  // travel mode (mobile scroll default must never wait).
+  useEffect(() => {
+    const clear = () => document.body.classList.remove("ij-loading");
+    if (!isTravel || (state.ready && state.craftDone)) {
+      clear();
+      return;
+    }
+    const grace = state.ready ? setTimeout(clear, 2500) : undefined;
+    const hard = setTimeout(clear, 8000);
+    return () => {
+      clearTimeout(grace);
+      clearTimeout(hard);
+    };
+  }, [isTravel, state.ready, state.craftDone]);
+
+  // PF-08 F0: the WHERE-TO bar docks between the ship and the title while at
+  // the home vista (global.css repositions #ij-mission-bar under ij-at-home).
+  useEffect(() => {
+    document.body.classList.toggle(
+      "ij-at-home",
+      isTravel &&
+        !state.warp &&
+        !state.arrivedId &&
+        !state.sectionOpen &&
+        !state.cardId &&
+        !state.vista,
+    );
+  }, [
+    isTravel,
+    state.warp,
+    state.arrivedId,
+    state.sectionOpen,
+    state.cardId,
+    state.vista,
+  ]);
+
   const dispatchRoute = useCallback(() => {
     const en = engineEl();
     if (!en || !desiredBodyRef.current) return;
@@ -215,6 +255,10 @@ export default function SpaceScene({
     on("cosmos:progress", ((e: CustomEvent) =>
       patch({ progress: e.detail })) as EventListener);
     on("cosmos:ready", (() => patch({ ready: true })) as EventListener);
+    on("cosmos:craft", ((e: CustomEvent) => {
+      const st = e.detail?.state;
+      if (st === "ready" || st === "error") patch({ craftDone: true });
+    }) as EventListener);
     on("cosmos:aim", ((e: CustomEvent) =>
       patch({ aim: e.detail })) as EventListener);
     on("cosmos:hover", ((e: CustomEvent) => {

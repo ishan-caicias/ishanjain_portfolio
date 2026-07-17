@@ -80,6 +80,17 @@ Plan: [docs/delivery-plan/PF-07-spaceship-v2.md](../delivery-plan/PF-07-spaceshi
     "end": "2026-07-18T01:45:00Z",
     "llmStrategy": "docs/llm/llm-strategy-scorecard-5milestone.md",
     "notes": "Timestamps approximate. Diagnosed by measurement (hull texture means 71-79/255 — dark blue-gray, not white): the P1/P3 tone curve lit sRGB values directly and compressed midtones to 0.63-0.95, bleaching texture contrast — exposed at the P5 2.5x scale. Fixed with decode(x²)→linear lighting→Reinhard→encode(sqrt). Verified: build 0, unit 47/47, E2E 44/44, capture shows restored gold-brown/gray panel detail. Owner real-GPU confirmation pending; further fidelity is PF-08 F0."
+  },
+  {
+    "project": "ishanjain-portfolio",
+    "deliveryPlan": "PF-07-spaceship-v2",
+    "phase": "Post-delivery hotfix — wireframe flash on load (TR-023)",
+    "detail": "Owner regression: gold wireframe rendered while the GLB loaded, then swapped",
+    "status": "complete",
+    "start": "2026-07-18T04:00:00Z",
+    "end": "2026-07-18T04:25:00Z",
+    "llmStrategy": "docs/llm/llm-strategy-scorecard-5milestone.md",
+    "notes": "Timestamps approximate. Latent since the P5 default-on flip. Fix: _drawShip suppresses ship/plume/glow while a craft is expected-but-pending (_craftFailed flag preserves off/error wireframe paths). Deterministically reproduced via Playwright GLB route-delay; verified no-wireframe capture in the window. 51/51 unit, 44/44 E2E, lint 0."
   }
 ]
 ```

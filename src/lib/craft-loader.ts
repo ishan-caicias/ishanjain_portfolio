@@ -382,6 +382,8 @@ precision mediump float;
 uniform sampler2D uBase, uEmi, uNrmTex, uMR;
 uniform float uFade, uEmiBoost;
 uniform vec3 uRimCol; // P3: arrival-tinted rim (cool in flight, warm parked)
+uniform vec3 uRearDir; // PF-08 F0: ship's rear axis (same space as vN)
+uniform float uEngineGlow; // PF-08 F0: plume-phase glow intensity
 varying vec3 vN; varying vec3 vT; varying float vTw; varying vec2 vUv;
 void main(){
   vec3 n = normalize(vN);
@@ -403,7 +405,10 @@ void main(){
   float occ = texture2D(uMR, vUv).r;
   vec3 emi = texture2D(uEmi, vUv).rgb;
   emi *= emi;
-  vec3 lin = base * (0.35 + 1.45 * diff) * occ * 1.35 + emi * uEmiBoost + rim * uRimCol * 0.55;
+  // engine glow: warm light on rear-facing surfaces, scaled by burn phase
+  float rear = pow(max(dot(N, uRearDir), 0.0), 2.0);
+  vec3 lin = base * (0.35 + 1.45 * diff) * occ * 1.35 + emi * uEmiBoost + rim * uRimCol * 0.55
+    + base * rear * uEngineGlow * vec3(1.0, 0.42, 0.13) * 2.2;
   lin = lin / (lin + 1.0);
   vec3 col = sqrt(lin);
   // fade drives presence, not raw exposure: the opaque hull dims gently
@@ -480,6 +485,8 @@ export class CraftShip {
       "uFade",
       "uEmiBoost",
       "uRimCol",
+      "uRearDir",
+      "uEngineGlow",
     ]) {
       u[name] = gl.getUniformLocation(p, name);
     }
@@ -567,6 +574,7 @@ export class CraftShip {
     rot: ArrayLike<number>,
     fade: number,
     rimColor: readonly [number, number, number] = [0.55, 0.66, 0.92],
+    engineGlow = 0,
   ) {
     const P = this.program;
     if (!P || !this.vbo || !this.textures || !this.texturesReady) return;
@@ -588,6 +596,9 @@ export class CraftShip {
     gl.uniform1f(P.u.uFade, fade);
     gl.uniform1f(P.u.uEmiBoost, 2.0); // emissive is linearized in-shader now (TR-021)
     gl.uniform3f(P.u.uRimCol, rimColor[0], rimColor[1], rimColor[2]);
+    // rear axis = ship-local +Z through the same rotation the normals use
+    gl.uniform3f(P.u.uRearDir, n[6], n[7], n[8]);
+    gl.uniform1f(P.u.uEngineGlow, engineGlow);
     const texUnits: ["base", "emissive", "normal", "mr"] = [
       "base",
       "emissive",

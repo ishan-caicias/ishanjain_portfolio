@@ -28,6 +28,12 @@ import {
   plumeAlpha,
   rimColorAt,
   PLUME_VERTEX_COUNT,
+  quatFromUnitVectors,
+  quatDamp,
+  quatToMat4,
+  restPoseQuat,
+  engineGlowIntensity,
+  SHIP_TURN_LAMBDA,
 } from "./ship-dynamics";
 (function () {
   "use strict";
@@ -553,11 +559,15 @@ import {
       this.craft = null;
       this.craftTier = "off";
       this._craftLoading = null;
+      this._craftFailed = false;
       // ship-v2 P2: spring velocities + last integration time for the
       // world-space flight dynamics (ship-dynamics.ts).
       this._shipVel = { x: 0, y: 0 };
       this._shipT = 0;
       this._rimK = 0; // P3: 0 = cool in-flight rim, 1 = warm arrived rim
+      // PF-08 F1: ship orientation quaternion (view space), slerp-damped
+      // toward the real travel vector during warp, rest pose otherwise.
+      this._shipQuat = restPoseQuat();
     }
     attributeChangedCallback(k, _o, v) {
       if (k === "density")
@@ -1216,6 +1226,7 @@ import {
       const tier = this.craftTier;
       if (!this.gl || tier === "off" || this._craftLoading === tier) return;
       this._craftLoading = tier;
+      this._craftFailed = false;
       this.dataset.craftState = "loading";
       emit("cosmos:craft", { state: "loading", tier });
       try {
@@ -1237,6 +1248,7 @@ import {
         console.warn("[space-engine] craft model failed, keeping wireframe", e);
         this.craft = null;
         this._craftLoading = null;
+        this._craftFailed = true; // TR-023: re-enables the wireframe fallback
         this.dataset.craftState = "error";
         emit("cosmos:craft", { state: "error", tier });
       }
@@ -2315,12 +2327,12 @@ import {
         ts = 0.72;
         ta = 0.58;
       } else {
-        // hero: center stage at 2.5× (owner sign-off 2026-07-17, TR-020) —
-        // ty 0.20 lands the ship at screen center once SHIP_NDC_Y_OFFSET folds in
+        // hero (PF-08 F0 landing layout): ship dominates the upper viewport,
+        // with the WHERE-TO bar and copy stacked below it
         tx = 0;
-        ty = 0.2;
-        ts = 1.125;
-        ta = 0.52;
+        ty = 0.5;
+        ts = 1.3;
+        ta = 0.55;
       }
       // P2 flight dynamics: springs toward the station targets (overshoot +
       // settle = perceptible mass), with look-lag so the ship trails view
@@ -2366,17 +2378,38 @@ import {
       );
       const cA = Math.cos(bank),
         sA = Math.sin(bank);
-      const pitch = -0.42 + (this.warp.mode === "warp" ? -0.06 : 0);
-      const cP = Math.cos(pitch),
-        sP = Math.sin(pitch);
-      // column-major: scale * rotX(pitch) * rotY(flip-and-burn) * rotZ(bank)
-      const fA = Math.PI * this._shipFlip;
-      const cY = Math.cos(fA),
-        sY = Math.sin(fA);
-      const ry = [cY, 0, -sY, 0, 0, 1, 0, 0, sY, 0, cY, 0, 0, 0, 0, 1];
       const rz = [cA, sA, 0, 0, -sA, cA, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-      const rx = [1, 0, 0, 0, 0, cP, sP, 0, 0, -sP, cP, 0, 0, 0, 0, 1];
-      const rot = mul(rx, mul(ry, rz));
+      // PF-08 F1: orientation is a damped quaternion. During warp the nose
+      // aligns to the REAL travel vector transformed into view space — so the
+      // flip-and-burn happens on the true 3D route, and free-look drag orbits
+      // around a ship that keeps pointing where it is actually going. At rest
+      // it settles into the classic hero attitude.
+      let targetQ;
+      if (this.warp.mode === "warp") {
+        const ld = [
+          Math.cos(this.pitch) * Math.cos(this.yaw),
+          Math.cos(this.pitch) * Math.sin(this.yaw),
+          Math.sin(this.pitch),
+        ];
+        const V = viewFrom(ld);
+        const wd = this._warpDir;
+        let fx = V[0] * wd[0] + V[4] * wd[1] + V[8] * wd[2];
+        let fy = V[1] * wd[0] + V[5] * wd[1] + V[9] * wd[2];
+        let fz = V[2] * wd[0] + V[6] * wd[1] + V[10] * wd[2];
+        const fl = Math.hypot(fx, fy, fz) || 1;
+        // accel: nose along the route; decel: retrograde (flip emerges from the damp)
+        const retro = this.warp.t >= 0.5 ? -1 : 1;
+        fx = (fx / fl) * retro;
+        fy = (fy / fl) * retro;
+        fz = (fz / fl) * retro;
+        targetQ = quatFromUnitVectors([0, 0, -1], [fx, fy, fz]);
+      } else {
+        targetQ = restPoseQuat();
+      }
+      this._shipQuat = this.reduced
+        ? targetQ
+        : quatDamp(this._shipQuat, targetQ, SHIP_TURN_LAMBDA, dt);
+      const rot = mul(quatToMat4(this._shipQuat), rz);
       const S = sh.s * shipScaleFactor();
       let m = rot.map((v) => v * S);
       m[15] = 1;
@@ -2399,10 +2432,29 @@ import {
       const parked = !!this.arrivedId && this.warp.mode === "idle";
       this._rimK +=
         ((parked ? 1 : 0) - this._rimK) * (this.reduced ? 1 : 0.045);
+      // TR-023: while the textured craft is expected but still loading, draw
+      // NOTHING for the ship (no wireframe flash, no orphaned plume/glow) —
+      // flight state above keeps integrating so the craft pops in mid-pose.
+      // The wireframe remains the renderer for ?craft=off and load failures.
+      if (
+        this.craftTier !== "off" &&
+        !this._craftFailed &&
+        !(this.craft && this.craft.ready)
+      ) {
+        return;
+      }
+      // PF-08 F0: engine glow cast onto the rear hull, driven by plume phase
+      const glowNow = engineGlowIntensity({
+        burning,
+        coasting: this.warp.mode === "warp" && !burning,
+        parked,
+        reduced: this.reduced,
+        t,
+      });
       if (this.craft && this.craft.ready) {
         // ship-v2 textured craft: identical placement chain, textured triangles
         // instead of gold lines (craft-loader handles its own depth/blend state).
-        this.craft.draw(gl, mvp, rot, fade, rimColorAt(this._rimK));
+        this.craft.draw(gl, mvp, rot, fade, rimColorAt(this._rimK), glowNow);
       } else {
         gl.useProgram(P.prog);
         gl.uniformMatrix4fv(P.u.uMVP, false, mvp);

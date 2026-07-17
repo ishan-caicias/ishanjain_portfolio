@@ -34,6 +34,8 @@ export interface SceneState {
   dispOverride: SectionDisplayMode | null;
   progress: { loaded: number; total: number };
   ready: boolean;
+  /** PF-08 F0: craft load resolved (ready or error→wireframe) — landing gate. */
+  craftDone: boolean;
   aim: { ra: number; dec: number };
   cmd: string;
   mcOpen: boolean;
@@ -54,6 +56,7 @@ export const INITIAL_SCENE_STATE: SceneState = {
   dispOverride: null,
   progress: { loaded: 0, total: 168883 },
   ready: false,
+  craftDone: false,
   aim: { ra: 45, dec: -8 },
   cmd: "",
   mcOpen: false,

@@ -1,7 +1,7 @@
 # PF-08 Flight v3 — True 360° Flight Model & Graphics Fidelity
 
 **Date:** 2026-07-18
-**Status:** PLANNED (owner-directed, from post-v2 review feedback)
+**Status:** IN PROGRESS — F0+F1 complete ([TR-022](../test-reports/TR-022.md), incl. owner-directed landing-experience amendment) · F2/F3 next
 **Baseline:** PF-07 ship-v2 DELIVERED ([plan](PF-07-spaceship-v2.md), TR-014…TR-021) —
 custom WebGL1 engine, zero runtime deps (ADR 0002), textured craft default-on, 47 unit /
 44 E2E green.
@@ -30,6 +30,7 @@ sRGB/tone pipeline (✅ delivered early as TR-021 hotfix) · key/fill/rim religh
 restored linear pipeline · engine-glow light cast onto the rear hull (cheap point-light term
 fed by plume phase) · optional star-bloom behind the ship.
 **Exit:** owner sign-off on hull fidelity at 2.5× on a real GPU.
+**Outcome (2026-07-18, TR-022):** ✅ Amended + delivered — landing/loading choreography (ship-first reveal, WHERE-TO docked, 1-line title / 2-line copy), engine-glow-on-hull. Star bloom deferred (optional). Owner GPU sign-off pending.
 
 ### F1 — Ship flight state
 
@@ -39,6 +40,7 @@ toward the destination's real RA/Dec direction, then burn; flip-and-burn happens
 travel vector, not screen-space. Unit-test the integrator (orientation convergence, energy
 boundedness, reduced-motion snap).
 **Exit:** ship visibly yaws/pitches/rolls toward any 3D target before thrusting; suite green.
+**Outcome (2026-07-18, TR-022):** ✅ Delivered — damped-quaternion orientation onto the view-space travel vector; emergent flip; 51/51 unit · 44/44 E2E.
 
 ### F2 — 360° travel choreography + chase camera
 

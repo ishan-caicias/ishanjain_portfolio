@@ -5,7 +5,7 @@ import AstronautMascot from "@/components/islands/AstronautMascot";
 
 <section
   id="hero"
-  class="relative flex min-h-screen items-center justify-center overflow-hidden px-6"
+  class="relative flex min-h-screen flex-col items-center justify-end overflow-hidden px-6"
   aria-label="Introduction"
 >
   <!-- Interactive WebGL space scene: 168,959 real Hipparcos/Gaia/SDSS objects, warp travel
@@ -19,9 +19,16 @@ import AstronautMascot from "@/components/islands/AstronautMascot";
   </div>
 
   <!-- Content -->
-  <div id="ij-hero-copy" class="relative z-10 mx-auto max-w-3xl text-center">
+  <!-- PF-08 F0 landing layout (TR-022): the ship owns the upper viewport; the
+       copy sits below it in a wide, two-line-max band. Hidden while
+       body.ij-loading (SpaceScene clears it when the scene is ready). -->
+  <div
+    id="ij-hero-copy"
+    class="relative z-10 mx-auto mt-auto max-w-6xl pb-14 text-center"
+  >
     <div
-      class="mb-6 inline-flex items-center gap-2 rounded-full border border-royal-700/50 bg-surface-elevated/80 px-4 py-1.5 text-sm text-text-muted backdrop-blur-sm"
+      id="ij-hero-badge"
+      class="mb-4 inline-flex items-center gap-2 rounded-full border border-royal-700/50 bg-surface-elevated/80 px-4 py-1.5 text-sm text-text-muted backdrop-blur-sm"
     >
       <span
         class="inline-block h-2 w-2 rounded-full bg-pine-500 animate-pulse"
@@ -30,20 +37,17 @@ import AstronautMascot from "@/components/islands/AstronautMascot";
     </div>
 
     <h1
-      class="font-heading text-4xl font-bold leading-tight text-text-primary md:text-6xl"
+      class="font-heading text-3xl font-bold leading-tight text-text-primary md:whitespace-nowrap md:text-5xl"
     >
-      Reliable systems,
-      <span class="block text-gold-400">thoughtful products.</span>
+      Reliable systems, <span class="text-gold-400">thoughtful products.</span>
     </h1>
 
     <p
-      class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-text-muted md:text-xl"
+      class="mx-auto mt-4 max-w-4xl text-lg leading-relaxed text-text-muted md:text-xl"
     >
-      I’m a Sydney-based software engineer with a product mindset specializing
-      in .NET, event-driven architectures, and distributed systems. Recently, my
-      focus has been in orchestrating high-stakes backend systems, with a domain
-      drive approach whilst optimizing databases, building fault-tolerant
-      microservices, and keeping production rock-solid.
+      Sydney-based software engineer with a product mindset — .NET, event-driven
+      architectures, and distributed systems. I build fault-tolerant backends
+      and keep production rock-solid.
     </p>
 
     <p
