@@ -10,6 +10,12 @@ package-lock.json
 Interactive Outerspace Portfolio/
 gaia_datasets/
 
+# Untracked local-only working dirs: resources/ is reference material (prototype
+# source, raw datasets, 3D model exports); .superpowers/ is tool scratch. Neither
+# is tracked or shipped, so neither is ours to format.
+resources/
+.superpowers/
+
 # Verbatim ports kept byte-identical to their prototype source - see PF-07
 # delivery plan Phase 1
 src/lib/space-engine.js

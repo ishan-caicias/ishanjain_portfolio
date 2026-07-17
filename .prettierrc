@@ -3,6 +3,7 @@
   "singleQuote": false,
   "tabWidth": 2,
   "trailingComma": "all",
+  "endOfLine": "auto",
   "plugins": ["prettier-plugin-astro"],
   "overrides": [
     {
