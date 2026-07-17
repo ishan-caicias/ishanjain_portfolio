@@ -158,6 +158,10 @@ export default function SpaceScene({
     el.setAttribute("density", String(density));
     el.setAttribute("constellations", constellations ? "on" : "off");
     el.setAttribute("ship", ship ? "on" : "off");
+    // ship-v2 (ADR-0002) rollout flag: ?craft=1k|2k enables the textured GLB
+    // craft. Absent → the original wireframe path, untouched.
+    const craft = new URLSearchParams(window.location.search).get("craft");
+    if (craft === "1k" || craft === "2k") el.setAttribute("craft", craft);
   }, [engineReady, density, constellations, ship]);
 
   const goSection = useCallback(

@@ -17,8 +17,8 @@ resources/
 .superpowers/
 
 # Verbatim ports kept byte-identical to their prototype source - see PF-07
-# delivery plan Phase 1
-src/lib/space-engine.js
+# delivery plan Phase 1. (space-engine.js left this list on 2026-07-17 —
+# forked for ship-v2 per ADR-0002 and formatted/linted like normal source.)
 src/data/celestial/*.js
 
 # Rendered report snapshots (self-contained HTML artifacts; reformatting could

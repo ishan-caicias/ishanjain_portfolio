@@ -2,9 +2,10 @@
 
 Security reviews, threat models, and hardening records for the portfolio.
 
-| Document                                                                           | Date       | Scope                                                                                 | Outcome                       |
-| ---------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------- | ----------------------------- |
-| [2026-07-13-owasp-audit-and-hardening.md](2026-07-13-owasp-audit-and-hardening.md) | 2026-07-13 | OWASP Top 10 audit of the static site + implemented hardening (CSP, security headers) | Passed; A05/A06 fixed; 0 CVEs |
+| Document                                                                           | Date       | Scope                                                                                                        | Outcome                       |
+| ---------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| [2026-07-13-owasp-audit-and-hardening.md](2026-07-13-owasp-audit-and-hardening.md) | 2026-07-13 | OWASP Top 10 audit of the static site + implemented hardening (CSP, security headers)                        | Passed; A05/A06 fixed; 0 CVEs |
+| [2026-07-17-csp-addendum.md](2026-07-17-csp-addendum.md)                           | 2026-07-17 | CSP changes: `'wasm-unsafe-eval'` (ADR 0002), frame-ancestors meta removal, inline-style rule for components | Posture updated; TR-016       |
 
 ## Standing security posture
 

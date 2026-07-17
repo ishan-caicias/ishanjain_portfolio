@@ -1,16 +1,20 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect } from "react";
 
+/**
+ * Floating astronaut mascot that drifts toward the section in view.
+ *
+ * CSP note (TR-016): this component must not render a `style` attribute or an
+ * inline <style> element — the site's hash-based CSP blocks both (hashes only
+ * cover Astro's own bundled styles). The static position/transition/keyframes
+ * live in global.css (`.astronaut-mascot`, `.astronaut-float`), and the dynamic
+ * `top` is written post-hydration as a style *property*, which CSP permits.
+ */
 export default function AstronautMascot() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({ x: 80, y: 200 });
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
 
   useEffect(() => {
-    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setPrefersReducedMotion(motionQuery.matches);
-    const handler = (e: MediaQueryListEvent) =>
-      setPrefersReducedMotion(e.matches);
-    motionQuery.addEventListener("change", handler);
+    const el = containerRef.current;
+    if (!el) return;
 
     // Track which section is in view and drift toward it
     const sections = document.querySelectorAll("section[id]");
@@ -21,10 +25,7 @@ export default function AstronautMascot() {
             const rect = entry.target.getBoundingClientRect();
             // Position astronaut near the top-right of the visible section
             const targetY = Math.max(100, rect.top + window.scrollY - 50);
-            setPosition((prev) => ({
-              x: prev.x,
-              y: Math.min(targetY, window.innerHeight * 0.7),
-            }));
+            el.style.top = `${Math.min(targetY, window.innerHeight * 0.7)}px`;
           }
         }
       },
@@ -32,24 +33,16 @@ export default function AstronautMascot() {
     );
 
     sections.forEach((section) => observer.observe(section));
-
-    return () => {
-      observer.disconnect();
-      motionQuery.removeEventListener("change", handler);
-    };
+    return () => observer.disconnect();
   }, []);
 
   return (
     <div
       ref={containerRef}
-      className="pointer-events-none fixed right-8 z-40 lg:right-16"
-      style={{
-        top: `${position.y}px`,
-        transition: prefersReducedMotion ? "none" : "top 2s ease-in-out",
-      }}
+      className="astronaut-mascot pointer-events-none fixed right-8 z-40 lg:right-16"
       aria-hidden="true"
     >
-      <div className={prefersReducedMotion ? "" : "animate-float"}>
+      <div className="astronaut-float">
         <svg
           width="64"
           height="80"
@@ -201,18 +194,6 @@ export default function AstronautMascot() {
           <circle cx="32" cy="2" r="1.5" fill="#ffd54f" opacity="0.8" />
         </svg>
       </div>
-
-      <style>{`
-        @keyframes float {
-          0%, 100% { transform: translateY(0px) rotate(-2deg); }
-          25% { transform: translateY(-8px) rotate(0deg); }
-          50% { transform: translateY(-4px) rotate(2deg); }
-          75% { transform: translateY(-12px) rotate(0deg); }
-        }
-        .animate-float {
-          animation: float 8s ease-in-out infinite;
-        }
-      `}</style>
     </div>
   );
 }

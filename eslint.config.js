@@ -15,9 +15,11 @@ export default [
   {
     // "Interactive Outerspace Portfolio/" and "gaia_datasets/" are untracked
     // reference material (PF-07 prototype source + raw dataset pipeline, not
-    // shipped app code). The celestial-*.js/space-engine.js files are verbatim
-    // ports kept byte-identical to that source - see PF-07 delivery plan
-    // Phase 1 - so they're excluded from lint rather than reformatted.
+    // shipped app code). The celestial data files are verbatim ports kept
+    // byte-identical to that source - see PF-07 delivery plan Phase 1.
+    // space-engine.js was formerly in this list; the ship-v2 plan (ADR-0002)
+    // deliberately forks it from the prototype, so it is linted like any other
+    // source file since 2026-07-17.
     // These two use a "**/" prefix because ESLint flat-config ignores are
     // anchored to the config directory, unlike the gitignore-style patterns in
     // .gitignore/.prettierignore that match at any depth. Without it, moving
@@ -30,7 +32,6 @@ export default [
       "coverage/",
       "**/Interactive Outerspace Portfolio/",
       "**/gaia_datasets/",
-      "src/lib/space-engine.js",
       "src/data/celestial/*.js",
     ],
   },

@@ -14,6 +14,13 @@ export default defineConfig({
   // X-Frame-Options header in public/_headers.
   security: {
     csp: {
+      // 'wasm-unsafe-eval' (ship-v2, ADR-0002): permits WebAssembly compilation
+      // only — NOT JS eval(). Required by the meshopt decoder that decompresses
+      // the craft GLB geometry. Browsers without this keyword simply keep the
+      // wireframe ship (the engine's craft-error fallback).
+      scriptDirective: {
+        resources: ["'self'", "'wasm-unsafe-eval'"],
+      },
       directives: [
         "default-src 'self'",
         "img-src 'self' data: blob:",
@@ -24,7 +31,9 @@ export default defineConfig({
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
-        "frame-ancestors 'none'",
+        // frame-ancestors deliberately absent: browsers ignore it in a <meta>
+        // CSP (and log a console error for it). Anti-framing is delivered by
+        // the X-Frame-Options: DENY header in public/_headers instead (TR-016).
         "upgrade-insecure-requests",
       ],
     },

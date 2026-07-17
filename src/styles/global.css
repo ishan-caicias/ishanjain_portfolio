@@ -287,3 +287,23 @@ space-engine:focus-visible {
     transform: translateY(-12px) rotate(0deg);
   }
 }
+
+/* AstronautMascot (TR-016): position, transition, and float moved here from the
+   component's former inline style attribute + <style> element, both of which the
+   hash-based CSP blocked (hashes only cover Astro's own bundled styles). The
+   dynamic `top` is set post-hydration as a style property. */
+.astronaut-mascot {
+  top: 200px;
+  transition: top 2s ease-in-out;
+}
+.astronaut-float {
+  animation: ij-float 8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .astronaut-mascot {
+    transition: none;
+  }
+  .astronaut-float {
+    animation: none;
+  }
+}

@@ -16,3 +16,6 @@
 | [TR-012](TR-012.md) | 2026-07-17 | Strict LF Enforcement (.gitattributes)                       | READY TO PROCEED                    |
 | [TR-013](TR-013.md) | 2026-07-17 | Playwright webServer Windows Spawn Fix                       | READY TO PROCEED                    |
 | [TR-014](TR-014.md) | 2026-07-17 | PF-07 Ship-v2 Phase 0: Craft Asset Pipeline                  | READY TO PROCEED                    |
+| [TR-015](TR-015.md) | 2026-07-17 | PF-07 Ship-v2 Phase 1: In-Engine GLB Ship Renderer           | READY TO PROCEED                    |
+| [TR-016](TR-016.md) | 2026-07-17 | Page-Load Console Hygiene (CSP styles, 0-byte fonts)         | READY TO PROCEED                    |
+| [TR-017](TR-017.md) | 2026-07-17 | PF-07 Ship-v2 Phase 2: World-Space Flight Staging            | READY TO PROCEED                    |

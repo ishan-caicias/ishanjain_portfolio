@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-17
 **Branch:** `feature/PF-07/background-spaceship-v2`
-**Status:** IN PROGRESS — P0 complete ([TR-014](../test-reports/TR-014.md)), P1 next
+**Status:** IN PROGRESS — P0 ([TR-014](../test-reports/TR-014.md)) · P1 ([TR-015](../test-reports/TR-015.md), [ADR 0002](../adr/0002-in-engine-glb-ship-renderer.md)) · P2 ([TR-017](../test-reports/TR-017.md)) complete · P3 next
 **Inputs:** [Codex analysis audit](../analysis/2026-07-17-codex-analysis-audit.md) ·
 [Motion realism audit](../analysis/2026-07-16-space-motion-realism-audit.md) ·
 [Ship survey](../analysis/2026-07-16-sketchfab-ship-survey.md)
@@ -59,6 +59,11 @@ emissive + simplified directional/rim lighting, tone-mapped to match the scene. 
 (same query-param rollback pattern as PF-07): flag off → wireframe path untouched.
 **Exit:** textured ship renders at parity positions/scale at 60 fps desktop; flag-off is
 pixel-identical to today; full suite green. **This is the Option B gate.**
+**Outcome (2026-07-17, TR-015):** ✅ Delivered per ADR 0002 — Option B gate **not triggered**.
+Craft renders textured/normal-mapped at parity placement behind `?craft=1k|2k`; flag-off path
+untouched (33 pre-existing E2E green); +5 unit +3 E2E; CSP gained `'wasm-unsafe-eval'`;
+`space-engine.js` forked under lint. Owner visual sign-off and formal 60 fps instrumentation
+carry into P2/P4.
 
 ### Phase 2 — World-space flight staging
 
@@ -67,6 +72,11 @@ scroll-state targets (home / parked / corner escort) as world-space poses. Add c
 overshoot, and settle (fix #3).
 **Exit:** ship occupies the star scene's space; motion has perceptible mass; E2E travel and
 mobile-mode specs still pass.
+**Outcome (2026-07-17, TR-017):** ✅ Delivered — `ship-dynamics.ts` (pure spring/NDC↔view math,
+8 unit tests), `_drawShip` re-placed under the scene projection with FOV-breathing, look-lag,
+and velocity banking. Screen composition preserved via legacy-parity constants (test-proven).
+30/30 unit · 39/39 E2E. Perspective is now genuinely wide-lens; `SHIP_VIEW_DEPTH` is the
+flatness knob if the owner prefers.
 
 ### Phase 3 — Thrusters and arrival presence
 
