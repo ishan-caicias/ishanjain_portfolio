@@ -7,12 +7,22 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  buildPlumeVertices,
   ndcToView,
+  plumeAlpha,
+  plumeFlareLength,
+  rimColorAt,
   shipScaleFactor,
   springStep,
+  PLUME_ENGINES,
+  PLUME_VERTEX_COUNT,
+  PLUME_VERTEX_FLOATS,
+  RIM_ARRIVED,
+  RIM_COOL,
   SHIP_BASE_FOV,
   SHIP_NDC_Y_OFFSET,
   SHIP_VIEW_DEPTH,
+  type PlumeParams,
   type SpringState,
 } from "@/lib/ship-dynamics";
 
@@ -93,5 +103,88 @@ describe("legacy screen-composition parity", () => {
 
   it("reproduces the P1 vertical model offset in NDC", () => {
     expect(SHIP_NDC_Y_OFFSET).toBeCloseTo(-0.201, 3);
+  });
+});
+
+describe("P3 exhaust plume", () => {
+  const base: PlumeParams = {
+    burning: false,
+    coasting: false,
+    parked: false,
+    reduced: false,
+    t: 1.234,
+  };
+
+  it("orders flare length by phase: burn > idle > parked > coast", () => {
+    const burn = plumeFlareLength({ ...base, burning: true });
+    const idle = plumeFlareLength(base);
+    const parked = plumeFlareLength({ ...base, parked: true });
+    const coast = plumeFlareLength({ ...base, coasting: true });
+    expect(burn).toBeGreaterThan(idle);
+    expect(idle).toBeGreaterThan(parked);
+    expect(parked).toBeGreaterThan(coast);
+  });
+
+  it("burn jitters over time; reduced motion is time-invariant", () => {
+    const a = plumeFlareLength({ ...base, burning: true, t: 0.1 });
+    const b = plumeFlareLength({ ...base, burning: true, t: 0.14 });
+    expect(a).not.toBe(b);
+    const ra = plumeFlareLength({
+      ...base,
+      burning: true,
+      reduced: true,
+      t: 0.1,
+    });
+    const rb = plumeFlareLength({
+      ...base,
+      burning: true,
+      reduced: true,
+      t: 9.9,
+    });
+    expect(ra).toBe(rb);
+  });
+
+  it("brightness follows the same phase ordering", () => {
+    expect(plumeAlpha({ ...base, burning: true })).toBeGreaterThan(
+      plumeAlpha(base),
+    );
+    expect(plumeAlpha(base)).toBeGreaterThan(
+      plumeAlpha({ ...base, parked: true }),
+    );
+    expect(plumeAlpha({ ...base, parked: true })).toBeGreaterThan(
+      plumeAlpha({ ...base, coasting: true }),
+    );
+  });
+
+  it("builds the expected geometry: hot nozzles, transparent tips at nozzle+flare", () => {
+    const flare = 0.4;
+    const v = buildPlumeVertices(flare);
+    expect(v).toHaveLength(PLUME_VERTEX_COUNT * PLUME_VERTEX_FLOATS);
+    // Float32Array storage rounds to f32 — compare via Math.fround.
+    const nozzleZs = new Set(PLUME_ENGINES.map(([, , z]) => Math.fround(z)));
+    for (let i = 0; i < v.length; i += PLUME_VERTEX_FLOATS) {
+      const z = v[i + 2];
+      const a = v[i + 3];
+      if (a === 1) {
+        expect(nozzleZs.has(z)).toBe(true); // hot verts sit exactly at a nozzle
+      } else {
+        expect(a).toBe(0);
+        const tipMatches = PLUME_ENGINES.some(
+          ([, , ez]) => Math.abs(z - Math.fround(ez + flare)) < 1e-6,
+        );
+        expect(tipMatches).toBe(true); // cold verts sit exactly at nozzle+flare
+      }
+    }
+  });
+});
+
+describe("P3 arrival rim tint", () => {
+  it("interpolates cool → arrived and clamps outside [0,1]", () => {
+    expect(rimColorAt(0)).toEqual([...RIM_COOL]);
+    expect(rimColorAt(1)).toEqual([...RIM_ARRIVED]);
+    expect(rimColorAt(-5)).toEqual([...RIM_COOL]);
+    expect(rimColorAt(9)).toEqual([...RIM_ARRIVED]);
+    const mid = rimColorAt(0.5);
+    expect(mid[0]).toBeCloseTo((RIM_COOL[0] + RIM_ARRIVED[0]) / 2, 10);
   });
 });

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-17
 **Branch:** `feature/PF-07/background-spaceship-v2`
-**Status:** IN PROGRESS — P0 ([TR-014](../test-reports/TR-014.md)) · P1 ([TR-015](../test-reports/TR-015.md), [ADR 0002](../adr/0002-in-engine-glb-ship-renderer.md)) · P2 ([TR-017](../test-reports/TR-017.md)) complete · P3 next
+**Status:** ✅ **DELIVERED** (2026-07-18) — P0 ([TR-014](../test-reports/TR-014.md)) · P1 ([TR-015](../test-reports/TR-015.md), [ADR 0002](../adr/0002-in-engine-glb-ship-renderer.md)) · P2 ([TR-017](../test-reports/TR-017.md)) · P3 ([TR-018](../test-reports/TR-018.md)) · P4 ([TR-019](../test-reports/TR-019.md)) · P5 ([TR-020](../test-reports/TR-020.md)). Default-on, 2.5× center-stage hero per owner sign-off. Post-deploy checks: [validation checklist](../validation-checklist/2026-07-18-ship-v2-release.md).
 **Inputs:** [Codex analysis audit](../analysis/2026-07-17-codex-analysis-audit.md) ·
 [Motion realism audit](../analysis/2026-07-16-space-motion-realism-audit.md) ·
 [Ship survey](../analysis/2026-07-16-sketchfab-ship-survey.md)
@@ -84,6 +84,10 @@ Layered exhaust: bright nozzle core + cone/billboard plume + phase-dependent fla
 acceleration jitter (fix #2). Arrival cues: target-tinted rim light, plume response, quieter
 overlays during travel (fixes #4–5), honouring `prefers-reduced-motion`.
 **Exit:** warp in/out reads as thrust events; overlays no longer dominate travel; a11y specs pass.
+**Outcome (2026-07-17, TR-018):** ✅ Delivered — pure plume system + dedicated additive cone
+pass (phase-driven flare/jitter), rim tint warms while parked (`uRimCol`), hero copy dims under
+`body.ij-warping` (stations verified already-quiet during warp, pre-existing). Latent P1
+glow-attrib defect fixed. 35/35 unit · 39/39 E2E at phase close.
 
 ### Phase 4 — Adaptive quality and fallback parity
 
@@ -91,6 +95,10 @@ overlays during travel (fixes #4–5), honouring `prefers-reduced-motion`.
 override (the audited policy design was sound; the rolled-back implementation is not reused).
 No-WebGL DOM fallback and reduced-motion behaviour verified unchanged.
 **Exit:** both tiers exercised in tests; fallback parity confirmed.
+**Outcome (2026-07-17, TR-019):** ✅ Delivered — `craft-tier.ts` policy chain (URL → stored
+override → auto device policy → off-until-P5 default), accessible persistent quality selector
+in Data & Licenses with live tier switching, no-WebGL fallback parity E2E-proven. 46/46 unit ·
+43/43 E2E.
 
 ### Phase 5 — Verify, harden, release
 

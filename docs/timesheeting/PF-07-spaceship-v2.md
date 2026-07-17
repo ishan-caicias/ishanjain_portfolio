@@ -42,11 +42,44 @@ Plan: [docs/delivery-plan/PF-07-spaceship-v2.md](../delivery-plan/PF-07-spaceshi
     "deliveryPlan": "PF-07-spaceship-v2",
     "phase": "Phase 3 — Thrusters and arrival presence",
     "detail": "Layered exhaust (core + plume + phase flare + accel jitter); target-tinted rim light; quieter overlays in travel",
-    "status": "planned",
-    "start": null,
-    "end": null,
-    "llmStrategy": null,
-    "notes": "Realism-audit fixes #2, #4, #5. Tuning knobs staged in ship-dynamics.ts and the craft shader uniforms (uEmiBoost, rim term)."
+    "status": "complete",
+    "start": "2026-07-17T14:10:00Z",
+    "end": "2026-07-17T15:20:00Z",
+    "llmStrategy": "docs/llm/llm-strategy-scorecard-5milestone.md",
+    "notes": "Timestamps approximate (turn segments). TR-018: pure plume system in ship-dynamics.ts (+5 unit tests) + dedicated additive cone pass in the engine; rim uniform uRimCol warms while parked; hero copy dims via body.ij-warping (stations verified already-quiet pre-existing — recorded, not re-implemented). Latent P1 defect fixed (glow attrib enable). Suite destabilization root-caused to 8 parallel SwiftShader workers — bounded to 4 locally, CI untouched; per-frame plume allocation eliminated. Verified: build 0, unit 35/35, E2E 39/39, burn-plume + hero-dim screenshots. Rim tint unit-tested but not isolated in a screenshot — owner eyeball item."
+  },
+  {
+    "project": "ishanjain-portfolio",
+    "deliveryPlan": "PF-07-spaceship-v2",
+    "phase": "Phase 4 — Adaptive quality and fallback parity",
+    "detail": "craft-tier policy (URL → stored override → auto device signals → off default), accessible quality selector, fallback parity",
+    "status": "complete",
+    "start": "2026-07-17T15:20:00Z",
+    "end": "2026-07-17T16:05:00Z",
+    "llmStrategy": "docs/llm/llm-strategy-scorecard-5milestone.md",
+    "notes": "Timestamps approximate. TR-019: craft-tier.ts pure policy (+11 unit tests incl. full precedence matrix), Ship-model-quality selector card in Data & Licenses (persists to localStorage, live tier swap via attributeChangedCallback), 4 new E2E (auto→2k desktop, auto→1k narrow, stored override flag-less, no-WebGL fallback with flag). Craft default remains OFF until P5 rollout — deliberate phase gating, not partial completion. Strict console spec hardened: readiness timeout 25s + file retries:2 after capturing that its one recurring failure was the readiness precondition, never a console error. Verified: build 0, unit 46/46, E2E 43/43."
+  },
+  {
+    "project": "ishanjain-portfolio",
+    "deliveryPlan": "PF-07-spaceship-v2",
+    "phase": "Phase 5 — Verify, harden, release",
+    "detail": "Owner hero revision (2.5x center stage), default-on rollout, credits CC-BY row, hardening + rollback docs",
+    "status": "complete",
+    "start": "2026-07-17T23:30:00Z",
+    "end": "2026-07-18T00:20:00Z",
+    "llmStrategy": "docs/llm/llm-strategy-scorecard-5milestone.md",
+    "notes": "Timestamps approximate. Owner sign-off received with revision: hero station 2.5x scale + center stage (parked 2x, escort 1.5x — proportionate interpretation, stated for redirect); re-captured and verified. TR-020: default-on via auto policy (two deliberately-named test flips), CC-BY-4.0 credits row, rollback runbook, release validation checklist with post-deploy section. Hardening: shell 0.997 MiB vs 10 MiB budget (GLB lazy 0.412/1.019 MiB), npm audit 0 vulns, SwiftShader frame probe 115.9ms EMA recorded as non-representative. Verified: build 0, unit 47/47, E2E 44/44 incl. default-on + opt-out specs. Plan DELIVERED. Owner actions remaining: commit batch, push/PR, deploy, run post-deploy checklist (Netlify GLB binary check, real-device perf)."
+  },
+  {
+    "project": "ishanjain-portfolio",
+    "deliveryPlan": "PF-07-spaceship-v2",
+    "phase": "Post-delivery hotfix — hull shading (TR-021)",
+    "detail": "Owner-reported bleached-white hull → sRGB/Reinhard shading pipeline in CRAFT_FS",
+    "status": "complete",
+    "start": "2026-07-18T01:10:00Z",
+    "end": "2026-07-18T01:45:00Z",
+    "llmStrategy": "docs/llm/llm-strategy-scorecard-5milestone.md",
+    "notes": "Timestamps approximate. Diagnosed by measurement (hull texture means 71-79/255 — dark blue-gray, not white): the P1/P3 tone curve lit sRGB values directly and compressed midtones to 0.63-0.95, bleaching texture contrast — exposed at the P5 2.5x scale. Fixed with decode(x²)→linear lighting→Reinhard→encode(sqrt). Verified: build 0, unit 47/47, E2E 44/44, capture shows restored gold-brown/gray panel detail. Owner real-GPU confirmation pending; further fidelity is PF-08 F0."
   }
 ]
 ```

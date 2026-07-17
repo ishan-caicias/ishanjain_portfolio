@@ -7,8 +7,75 @@ import { iconPaths } from "@/content/icons";
 import { LINKEDIN_URL, GITHUB_URL } from "@/content/links";
 import { STATIONS, SECTION_TITLES } from "./types";
 import type { SectionDisplayMode } from "./types";
+import { useState } from "react";
+import {
+  parseStoredQuality,
+  readTierSignals,
+  resolveCraftTier,
+  CRAFT_QUALITY_STORAGE_KEY,
+  type CraftQuality,
+} from "@/lib/craft-tier";
+
+/**
+ * ship-v2 P4 (TR-019): accessible craft-quality override. Persists to
+ * localStorage and applies to the live <space-engine> immediately — the
+ * engine's attributeChangedCallback swaps tiers (or restores the wireframe)
+ * without a reload. Renders client-side only (inside the credits dialog), so
+ * localStorage access in the initializer is safe.
+ */
+function CraftQualityControl({ cardClass }: { cardClass: string }) {
+  const [quality, setQuality] = useState<CraftQuality>(
+    () =>
+      parseStoredQuality(localStorage.getItem(CRAFT_QUALITY_STORAGE_KEY)) ??
+      "auto",
+  );
+
+  const apply = (next: CraftQuality) => {
+    setQuality(next);
+    localStorage.setItem(CRAFT_QUALITY_STORAGE_KEY, next);
+    const en = document.querySelector("space-engine");
+    if (!en) return;
+    const tier =
+      next === "auto" ? resolveCraftTier(readTierSignals(window)) : next;
+    if (tier === "off") en.removeAttribute("craft");
+    else en.setAttribute("craft", tier);
+  };
+
+  return (
+    <div className={cardClass}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label
+          htmlFor="ij-craft-quality"
+          className="font-heading text-[14.5px] font-semibold text-gold-400"
+        >
+          Ship model quality
+        </label>
+        <select
+          id="ij-craft-quality"
+          value={quality}
+          onChange={(e) => apply(e.target.value as CraftQuality)}
+          className="rounded border border-[#3f51b5] bg-[#0d1126] px-2 py-1 font-mono text-[11px] tracking-wider text-[#c5cae9]"
+        >
+          <option value="auto">Auto — pick for my device</option>
+          <option value="2k">High — 2K textures</option>
+          <option value="1k">Lite — smaller download</option>
+          <option value="off">Off — classic wireframe</option>
+        </select>
+      </div>
+      <p className="mt-1.5 text-xs leading-relaxed text-[#9fa8da]">
+        Applies immediately and is remembered on this device. Auto uses your
+        connection, memory, and screen size to choose.
+      </p>
+    </div>
+  );
+}
 
 const CREDIT_ROWS: { name: string; meta: string; lic: string }[] = [
+  {
+    name: "Sci-Fi Aircraft | Spaceship Fighter",
+    meta: "Ship model · valterjherson1 · CC-BY-4.0",
+    lic: "This work is based on “Sci-Fi Aircraft | Spaceship Fighter” (sketchfab.com/3d-models/sci-fi-aircraft-spaceship-fighter-99c1d15965c74f3aa7b5999e2d4e42e1) by valterjherson1 (sketchfab.com/valterjherson1), licensed under CC-BY-4.0 (creativecommons.org/licenses/by/4.0). Converted and optimized: meshopt-compressed geometry, WebP textures in 1K/2K tiers.",
+  },
   {
     name: "Hipparcos (new reduction)",
     meta: "117,955 stars · F. van Leeuwen 2007",
@@ -453,6 +520,7 @@ export default function SectionOverlay({
               FULL DATASET INDEX · gaiasky.space/resources/datasets · GAIA SKY
               BY TONI SAGRISTÀ, ZAH · UNIVERSITÄT HEIDELBERG
             </p>
+            <CraftQualityControl cardClass={v.card} />
           </div>
         )}
 

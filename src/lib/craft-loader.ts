@@ -381,6 +381,7 @@ const CRAFT_FS = `
 precision mediump float;
 uniform sampler2D uBase, uEmi, uNrmTex, uMR;
 uniform float uFade, uEmiBoost;
+uniform vec3 uRimCol; // P3: arrival-tinted rim (cool in flight, warm parked)
 varying vec3 vN; varying vec3 vT; varying float vTw; varying vec2 vUv;
 void main(){
   vec3 n = normalize(vN);
@@ -392,12 +393,19 @@ void main(){
   // forbids non-constant const initializers, and ANGLE enforces that)
   const vec3 L = vec3(-0.3713, 0.6059, 0.7036);
   float diff = max(dot(N, L), 0.0);
-  float rim = pow(1.0 - max(N.z, 0.0), 2.4) * 0.42;  // cool starlight rim toward screen edges
-  vec4 base = texture2D(uBase, vUv);
+  float rim = pow(1.0 - max(N.z, 0.0), 2.4);  // starlight rim toward screen edges
+  // TR-021: proper-ish sRGB pipeline. The old curve lit sRGB values directly
+  // and pushed the whole midtone band toward white, bleaching the hull's
+  // texture detail. Decode (x²) → light in linear → Reinhard (never clips)
+  // → encode (sqrt) keeps the dark blue-gray hull and its panel contrast.
+  vec3 base = texture2D(uBase, vUv).rgb;
+  base *= base;
   float occ = texture2D(uMR, vUv).r;
   vec3 emi = texture2D(uEmi, vUv).rgb;
-  vec3 col = base.rgb * (0.40 + 1.10 * diff) * occ + emi * uEmiBoost + rim * vec3(0.55, 0.66, 0.92);
-  col = col / (col + 0.55) * 1.5;  // soft filmic-ish rolloff, matched to the scene by eye
+  emi *= emi;
+  vec3 lin = base * (0.35 + 1.45 * diff) * occ * 1.35 + emi * uEmiBoost + rim * uRimCol * 0.55;
+  lin = lin / (lin + 1.0);
+  vec3 col = sqrt(lin);
   // fade drives presence, not raw exposure: the opaque hull dims gently
   // (sqrt), unlike the old additive wireframe where fade was blend alpha.
   gl_FragColor = vec4(col * sqrt(uFade), 1.0);
@@ -471,6 +479,7 @@ export class CraftShip {
       "uMR",
       "uFade",
       "uEmiBoost",
+      "uRimCol",
     ]) {
       u[name] = gl.getUniformLocation(p, name);
     }
@@ -557,6 +566,7 @@ export class CraftShip {
     mvp: ArrayLike<number>,
     rot: ArrayLike<number>,
     fade: number,
+    rimColor: readonly [number, number, number] = [0.55, 0.66, 0.92],
   ) {
     const P = this.program;
     if (!P || !this.vbo || !this.textures || !this.texturesReady) return;
@@ -576,7 +586,8 @@ export class CraftShip {
     gl.uniformMatrix4fv(P.u.uMVP, false, new Float32Array(mvpFinal));
     gl.uniformMatrix3fv(P.u.uNrm, false, n);
     gl.uniform1f(P.u.uFade, fade);
-    gl.uniform1f(P.u.uEmiBoost, 1.55);
+    gl.uniform1f(P.u.uEmiBoost, 2.0); // emissive is linearized in-shader now (TR-021)
+    gl.uniform3f(P.u.uRimCol, rimColor[0], rimColor[1], rimColor[2]);
     const texUnits: ["base", "emissive", "normal", "mr"] = [
       "base",
       "emissive",

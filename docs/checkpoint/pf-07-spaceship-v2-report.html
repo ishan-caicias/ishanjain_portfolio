@@ -424,23 +424,23 @@
   <canvas id="stars" aria-hidden="true"></canvas>
   <div class="head-inner">
     <p class="eyebrow">Mission Briefing · PF-07 Spaceship v2</p>
-    <h1>Codex Analysis Audit &amp; Refined Implementation Plan</h1>
+    <h1>Delivered: Textured Craft, Flight Dynamics &amp; the Road to v3</h1>
     <p class="sub">
-      Claim-by-claim audit of the five GPT Codex 5.4 analysis documents, the root cause of the
-      rolled-back implementation, and the corrected phased plan for replacing the wireframe ship
-      with the textured CC-BY fighter.
+      The full record: the Codex analysis audit that reset this feature, the six delivered
+      phases (TR-014…TR-020) plus the hull-shading hotfix (TR-021), and the owner-directed
+      PF-08 Flight&nbsp;v3 roadmap — a true 360° flight model and richer exhaust.
     </p>
     <div class="chips">
       <span class="chip">branch <b>feature/PF-07/background-spaceship-v2</b></span>
-      <span class="chip">audited <b>2026-07-17</b></span>
-      <span class="chip">ship <b>Sci-Fi Aircraft | Spaceship Fighter</b></span>
-      <span class="chip">license <b>CC-BY-4.0</b></span>
+      <span class="chip">status <b>DELIVERED 2026-07-18</b></span>
+      <span class="chip">ship <b>Sci-Fi Aircraft | Spaceship Fighter</b> · CC-BY-4.0</span>
+      <span class="chip">next <b>PF-08 Flight v3</b></span>
     </div>
     <div class="stats">
-      <div class="stat"><span class="k">Root cause</span><span class="v void">Wrong branch analyzed</span></div>
-      <div class="stat"><span class="k">Docs audited</span><span class="v">5 + README</span></div>
-      <div class="stat"><span class="k">Survive audit</span><span class="v valid">2 full · 2 partial</span></div>
-      <div class="stat"><span class="k">Rendering path</span><span class="v accent">In-engine GLB</span></div>
+      <div class="stat"><span class="k">Delivery</span><span class="v valid">6/6 phases · TR-014…021</span></div>
+      <div class="stat"><span class="k">Suite</span><span class="v valid">47 unit · 44 E2E green</span></div>
+      <div class="stat"><span class="k">Shell payload</span><span class="v">0.997 MiB / 10 MiB budget</span></div>
+      <div class="stat"><span class="k">Rendering path</span><span class="v accent">In-engine GLB · default-on</span></div>
     </div>
   </div>
 </header>
@@ -453,6 +453,7 @@
     <a href="#decision">Decision</a>
     <a href="#plan">Plan</a>
     <a href="#roadmap">Roadmap</a>
+    <a href="#v3">Flight v3</a>
     <a href="#license">Attribution</a>
   </div>
 </nav>
@@ -606,10 +607,16 @@
   </section>
 
   <section id="plan">
-    <p class="sec-eyebrow">05 · Implementation plan</p>
-    <h2>Six phases, each with a hard exit gate</h2>
+    <p class="sec-eyebrow">05 · Implementation record</p>
+    <h2>Six phases planned — six delivered, every exit gate passed</h2>
     <p class="lede">
-      Full detail in <code>docs/delivery-plan/PF-07-spaceship-v2.md</code>. Click a phase to expand.
+      All complete: P0 <span class="pill valid">TR-014</span> · P1 <span class="pill valid">TR-015 + ADR-0002</span>
+      · P2 <span class="pill valid">TR-017</span> · P3 <span class="pill valid">TR-018</span>
+      · P4 <span class="pill valid">TR-019</span> · P5 <span class="pill valid">TR-020</span>,
+      plus the post-delivery hull-shading hotfix <span class="pill valid">TR-021</span>.
+      Highlights along the way: meshopt adopted at P0's measurement gate, four defects caught by
+      the new E2E during P1, the owner's 2.5× center-stage revision at P5, and the default-on
+      rollout with an accessible quality selector. Original phase specs preserved below.
     </p>
 
     <details class="phase" open>
@@ -688,20 +695,54 @@
         <span class="t">PF-07 scene + stack upgrade</span>
         <div class="d">TR-001…TR-012 · Astro 7 · 8 unit + 30 E2E green</div>
       </div>
-      <div class="road-step">
-        <span class="k">This plan</span>
-        <span class="t">Ship v2 · P0 → P5</span>
-        <div class="d">Textured GLB, world-space flight, thrusters, adaptive tiers</div>
+      <div class="road-step done">
+        <span class="k">Delivered</span>
+        <span class="t">Ship v2 · P0 → P5 + hotfix</span>
+        <div class="d">Textured GLB default-on, world-space flight, thrusters, adaptive tiers, sRGB fix (TR-014…021)</div>
       </div>
       <div class="road-step">
-        <span class="k">Release</span>
-        <span class="t">Single PR → main</span>
-        <div class="d">PF-07 + upgrade + ship v2 ship together</div>
+        <span class="k">You are here</span>
+        <span class="t">Commit · PR → main · Deploy</span>
+        <div class="d">Owner actions; then the post-deploy checklist (Netlify GLB binary check, real-device perf)</div>
       </div>
       <div class="road-step">
-        <span class="k">Follow-up</span>
-        <span class="t">Physical-device validation</span>
-        <div class="d">Safari + mid-tier Android, sustained 50+ fps — not measurable in this environment</div>
+        <span class="k">Next build</span>
+        <span class="t">PF-08 Flight v3</span>
+        <div class="d">True 360° flight model, chase camera, realistic exhaust — see section 08</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="v3">
+    <p class="sec-eyebrow">08 · Next — PF-08 Flight v3</p>
+    <h2>From choreographed hero prop to a ship that truly flies</h2>
+    <p class="lede">
+      Owner direction after the v2 review: travel still reads as linear — the camera flies
+      while the ship holds screen stations. v3 inverts the model: the <em>ship</em> gets
+      orientation, thrust, and velocity in the scene's real 360° coordinate space, and the
+      camera becomes a chase observer. Plus a realistic layered exhaust and further hull
+      fidelity. Full plan: <code>docs/delivery-plan/PF-08-flight-v3.md</code>.
+    </p>
+    <div class="cards">
+      <div class="card">
+        <span class="tag">F0 · fidelity foundation</span>
+        <h3>Hull &amp; light</h3>
+        <p>sRGB/tone pipeline ✓ shipped early as the TR-021 hotfix (the "opaque white" hull was a tone-curve bleaching bug — texture means measured 71–79/255, a dark blue-gray). Next: relight, engine-glow cast on the rear hull, star bloom.</p>
+      </div>
+      <div class="card">
+        <span class="tag">F1 · flight state</span>
+        <h3>The ship gets physics</h3>
+        <p>Orientation quaternion + angular velocity, thrust vector, integrated velocity — the ship turns toward a destination's real RA/Dec direction and burns along it. Flip-and-burn happens on the true travel vector.</p>
+      </div>
+      <div class="card">
+        <span class="tag">F2 · 360° choreography</span>
+        <h3>Chase camera</h3>
+        <p>During warp the camera detaches and chases with spring offset and look-ahead; free-look drag stays live mid-flight. Arrivals become decelerating orbit-ins, from any direction to any direction.</p>
+      </div>
+      <div class="card">
+        <span class="tag">F3 · exhaust realism</span>
+        <h3>Real propulsion</h3>
+        <p>Noise-scrolled plume texture, white-hot core in a diesel-orange sheath, turbulence from acceleration, heat shimmer, ember particles on burn transitions. Tier-gated so mobile keeps the light version.</p>
       </div>
     </div>
   </section>
@@ -718,9 +759,11 @@
   </section>
 
   <p class="foot">
-    Audit &amp; plan: Orion session, 2026-07-17 · Sources on disk:
+    Audit, delivery &amp; v3 plan: Orion sessions, 2026-07-17 → 2026-07-18 · Sources on disk:
     <code>docs/analysis/2026-07-17-codex-analysis-audit.md</code> ·
-    <code>docs/delivery-plan/PF-07-spaceship-v2.md</code>
+    <code>docs/delivery-plan/PF-07-spaceship-v2.md</code> ·
+    <code>docs/delivery-plan/PF-08-flight-v3.md</code> ·
+    TR-014…TR-021 in <code>docs/test-reports/</code>
   </p>
 </div>
 

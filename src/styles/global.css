@@ -307,3 +307,17 @@ space-engine:focus-visible {
     animation: none;
   }
 }
+
+/* ship-v2 P3 (TR-018): hero copy steps back during warp so the flight reads
+   as the primary event; SpaceScene toggles body.ij-warping from warp state. */
+#ij-hero-copy {
+  transition: opacity 0.6s ease;
+}
+body.ij-warping #ij-hero-copy {
+  opacity: 0.12;
+}
+@media (prefers-reduced-motion: reduce) {
+  #ij-hero-copy {
+    transition: none;
+  }
+}

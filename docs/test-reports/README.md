@@ -19,3 +19,7 @@
 | [TR-015](TR-015.md) | 2026-07-17 | PF-07 Ship-v2 Phase 1: In-Engine GLB Ship Renderer           | READY TO PROCEED                    |
 | [TR-016](TR-016.md) | 2026-07-17 | Page-Load Console Hygiene (CSP styles, 0-byte fonts)         | READY TO PROCEED                    |
 | [TR-017](TR-017.md) | 2026-07-17 | PF-07 Ship-v2 Phase 2: World-Space Flight Staging            | READY TO PROCEED                    |
+| [TR-018](TR-018.md) | 2026-07-17 | PF-07 Ship-v2 Phase 3: Thrusters and Arrival Presence        | READY TO PROCEED                    |
+| [TR-019](TR-019.md) | 2026-07-17 | PF-07 Ship-v2 Phase 4: Adaptive Quality and Fallback Parity  | READY TO PROCEED                    |
+| [TR-020](TR-020.md) | 2026-07-18 | PF-07 Ship-v2 Phase 5: Hero Revision, Rollout & Hardening    | READY TO PROCEED                    |
+| [TR-021](TR-021.md) | 2026-07-18 | Craft Shader Hotfix: Bleached-White Hull (sRGB pipeline)     | READY TO PROCEED                    |

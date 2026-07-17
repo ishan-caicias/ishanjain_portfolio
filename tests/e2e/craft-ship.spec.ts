@@ -52,16 +52,103 @@ test("warp travel completes with the craft active (P2 world-space staging)", asy
     .first()
     .getByRole("link", { name: "About" })
     .click();
+
+  // P3: while warping, the hero copy steps back so the flight dominates.
+  await expect(page.locator("body.ij-warping")).toBeAttached({ timeout: 5000 });
+  await expect
+    .poll(
+      async () =>
+        page
+          .locator("#ij-hero-copy")
+          .evaluate((el) => Number(getComputedStyle(el).opacity)),
+      { timeout: 5000 },
+    )
+    .toBeLessThan(0.5);
+
   await expect(page.getByRole("dialog", { name: "What I Do" })).toBeVisible({
+    timeout: 15000,
+  });
+  // arrival: warp class released, hero copy restored
+  await expect(page.locator("body.ij-warping")).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
+});
+
+test("?craft=on auto-resolves to the 2k tier on a capable desktop (P4)", async ({
+  page,
+}) => {
+  await page.goto("/?craft=on");
+  await page.waitForSelector('space-engine[data-craft-state="ready"]', {
+    timeout: 20000,
+  });
+  await expect(page.locator("space-engine")).toHaveAttribute("craft", "2k");
+});
+
+test("?craft=on picks the 1k tier on a narrow viewport (P4)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/?craft=on");
+  await page.waitForSelector('space-engine[data-craft-state="ready"]', {
+    timeout: 20000,
+  });
+  await expect(page.locator("space-engine")).toHaveAttribute("craft", "1k");
+});
+
+test("stored quality override applies without any URL flag (P4)", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("ij-craft-quality", "1k");
+  });
+  await page.goto("/");
+  await page.waitForSelector('space-engine[data-craft-state="ready"]', {
+    timeout: 20000,
+  });
+  await expect(page.locator("space-engine")).toHaveAttribute("craft", "1k");
+});
+
+test("no-WebGL fallback still works with the craft flag on (P4 parity)", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const orig = HTMLCanvasElement.prototype.getContext;
+    // @ts-expect-error - intentionally narrowing to force the no-WebGL path
+    HTMLCanvasElement.prototype.getContext = function (
+      type: string,
+      ...rest: unknown[]
+    ) {
+      if (type.indexOf("webgl") !== -1) return null;
+      return orig.call(this, type, ...rest);
+    };
+  });
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message));
+  await page.goto("/?craft=2k");
+  await page.waitForSelector("space-engine");
+  await expect(page.getByText(/ONLINE ·.*LIVE SOURCES/)).toBeVisible({
     timeout: 15000,
   });
   expect(pageErrors).toEqual([]);
 });
 
-test("without the flag, the craft path never engages", async ({ page }) => {
+// Deliberately replaced at the P5 rollout (TR-020): the pre-P5 spec asserted
+// the default page NEVER engaged the craft. Default-on is now the release
+// behaviour; the opt-out below carries the old guarantee.
+test("default page loads the craft via the auto policy (P5 rollout)", async ({
+  page,
+}) => {
   await page.goto("/");
+  await page.waitForSelector('space-engine[data-craft-state="ready"]', {
+    timeout: 20000,
+  });
+  await expect(page.locator("space-engine")).toHaveAttribute("craft", "2k");
+});
+
+test("?craft=off restores the wireframe (rollout opt-out)", async ({
+  page,
+}) => {
+  await page.goto("/?craft=off");
   await page.waitForSelector("space-engine");
-  // give the engine ample time to mount and (wrongly) start a craft load
   await page.waitForTimeout(1500);
   expect(await page.locator("space-engine[data-craft-state]").count()).toBe(0);
 });

@@ -81,3 +81,106 @@ export const SHIP_LAG_PITCH = 1.6;
 /** Max dt fed into the springs — frames can be skipped (scroll throttle) or
  * the tab can sleep; a clamped step keeps the integration stable. */
 export const SHIP_MAX_DT = 0.05;
+
+/* ---------- P3: layered thruster exhaust (realism audit fix #2) ---------- */
+
+/** Nozzle anchor points in unit-ship space (nose −Z; matches the legacy glow
+ * sprite positions, which read correctly against both ship meshes). */
+export const PLUME_ENGINES: readonly [number, number, number][] = [
+  [0, -0.09, 0.28],
+  [-0.05, -0.07, 0.24],
+  [0.05, -0.07, 0.24],
+];
+
+export interface PlumeParams {
+  /** Acceleration or deceleration burn segment of a warp. */
+  burning: boolean;
+  /** Mid-warp coast/flip segment (engines cut). */
+  coasting: boolean;
+  /** Parked at an arrived body, engines idling low. */
+  parked: boolean;
+  /** prefers-reduced-motion: fixed lengths, no jitter or breathing. */
+  reduced: boolean;
+  /** Seconds — drives jitter and idle breathing. */
+  t: number;
+}
+
+/** Phase-dependent flare length (unit-ship space, extends along +Z). */
+export function plumeFlareLength(p: PlumeParams): number {
+  if (p.burning) return p.reduced ? 0.55 : 0.55 + Math.sin(p.t * 47) * 0.06;
+  if (p.coasting) return 0.07;
+  if (p.parked) return p.reduced ? 0.1 : 0.1 + Math.sin(p.t * 2.1) * 0.015;
+  return p.reduced ? 0.16 : 0.16 + Math.sin(p.t * 2.1) * 0.03;
+}
+
+/** Plume brightness per phase (multiplied by ship fade at draw time). */
+export function plumeAlpha(p: PlumeParams): number {
+  if (p.burning) return 0.9;
+  if (p.coasting) return 0.15;
+  if (p.parked) return 0.3;
+  return 0.42;
+}
+
+const PLUME_W_NOZZLE = 0.028;
+const PLUME_W_TIP = 0.06;
+/** Floats per plume vertex: x, y, z, alpha. */
+export const PLUME_VERTEX_FLOATS = 4;
+/** 3 engines × 2 crossed quads × 2 triangles × 3 vertices. */
+export const PLUME_VERTEX_COUNT = PLUME_ENGINES.length * 2 * 2 * 3;
+
+/**
+ * Cone-ish exhaust geometry: per engine, two quads crossed at 90° (X-plane and
+ * Y-plane), tapering from PLUME_W_NOZZLE (alpha 1) at the nozzle to
+ * PLUME_W_TIP (alpha 0) at nozzle.z + flare. Interleaved [x,y,z,a].
+ * Pass `target` to reuse a scratch buffer — this runs every frame, so the
+ * engine avoids a per-frame allocation.
+ */
+export function buildPlumeVertices(
+  flare: number,
+  target?: Float32Array,
+): Float32Array {
+  const out =
+    target ?? new Float32Array(PLUME_VERTEX_COUNT * PLUME_VERTEX_FLOATS);
+  let o = 0;
+  const put = (x: number, y: number, z: number, a: number) => {
+    out[o++] = x;
+    out[o++] = y;
+    out[o++] = z;
+    out[o++] = a;
+  };
+  for (const [ex, ey, ez] of PLUME_ENGINES) {
+    const tip = ez + flare;
+    // quad in the XZ orientation (spans local X), then YZ (spans local Y)
+    for (const axis of [0, 1] as const) {
+      const nx = axis === 0 ? PLUME_W_NOZZLE : 0;
+      const ny = axis === 0 ? 0 : PLUME_W_NOZZLE;
+      const txw = axis === 0 ? PLUME_W_TIP : 0;
+      const tyw = axis === 0 ? 0 : PLUME_W_TIP;
+      // tri 1: nozzle-left, nozzle-right, tip-right
+      put(ex - nx, ey - ny, ez, 1);
+      put(ex + nx, ey + ny, ez, 1);
+      put(ex + txw, ey + tyw, tip, 0);
+      // tri 2: nozzle-left, tip-right, tip-left
+      put(ex - nx, ey - ny, ez, 1);
+      put(ex + txw, ey + tyw, tip, 0);
+      put(ex - txw, ey - tyw, tip, 0);
+    }
+  }
+  return out;
+}
+
+/* ---------- P3: arrival presence (realism audit fix #4) ---------- */
+
+/** Rim-light colors: cool starlight in flight, warm beacon-gold when parked. */
+export const RIM_COOL: readonly [number, number, number] = [0.55, 0.66, 0.92];
+export const RIM_ARRIVED: readonly [number, number, number] = [1.0, 0.84, 0.45];
+
+/** Smoothed rim tint for the craft shader: k=0 cool → k=1 arrived. */
+export function rimColorAt(k: number): [number, number, number] {
+  const c = Math.max(0, Math.min(1, k));
+  return [
+    RIM_COOL[0] + (RIM_ARRIVED[0] - RIM_COOL[0]) * c,
+    RIM_COOL[1] + (RIM_ARRIVED[1] - RIM_COOL[1]) * c,
+    RIM_COOL[2] + (RIM_ARRIVED[2] - RIM_COOL[2]) * c,
+  ];
+}

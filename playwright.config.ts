@@ -5,7 +5,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Local worker bound (TR-018): unbounded (= cores/2 = 8 here) saturates
+  // SwiftShader once ~40 specs each run the full WebGL scene — random
+  // timeout failures on heavy specs. 4 is stable; CI stays at 1.
+  workers: process.env.CI ? 1 : 4,
   reporter: process.env.CI ? "github" : "html",
   use: {
     baseURL: "http://localhost:4321",

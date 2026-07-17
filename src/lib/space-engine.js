@@ -23,6 +23,11 @@ import {
   shipScaleFactor,
   ndcToView,
   springStep,
+  buildPlumeVertices,
+  plumeFlareLength,
+  plumeAlpha,
+  rimColorAt,
+  PLUME_VERTEX_COUNT,
 } from "./ship-dynamics";
 (function () {
   "use strict";
@@ -449,6 +454,18 @@ import {
     gl_FragColor = vec4(col*uFade, 1.0);
   }`;
 
+  // P3 (TR-018): layered exhaust plume — crossed-quad cones per engine,
+  // vertex alpha runs 1 (nozzle) → 0 (tip); additive blending does the glow.
+  const PLUME_VS = `
+  attribute vec4 aPos; uniform mat4 uMVP; varying float vA;
+  void main(){ gl_Position = uMVP * vec4(aPos.xyz, 1.0); vA = aPos.w; }`;
+  const PLUME_FS = `
+  precision mediump float; uniform float uAlpha; varying float vA;
+  void main(){
+    vec3 col = mix(vec3(1.0, 0.45, 0.15), vec3(1.0, 0.93, 0.78), vA);
+    gl_FragColor = vec4(col, vA * uAlpha);
+  }`;
+
   function compile(gl, vsSrc, fsSrc) {
     const mk = (type, src) => {
       const s = gl.createShader(type);
@@ -540,6 +557,7 @@ import {
       // world-space flight dynamics (ship-dynamics.ts).
       this._shipVel = { x: 0, y: 0 };
       this._shipT = 0;
+      this._rimK = 0; // P3: 0 = cool in-flight rim, 1 = warm arrived rim
     }
     attributeChangedCallback(k, _o, v) {
       if (k === "density")
@@ -595,6 +613,7 @@ import {
       this.pFlat = compile(gl, FLAT_VS, FLAT_FS);
       this.pPhoto = compile(gl, PHOTO_VS, PHOTO_FS);
       this.pBand = compile(gl, BAND_VS, BAND_FS);
+      this.pPlume = compile(gl, PLUME_VS, PLUME_FS);
       const gp = this.pPhoto;
       gp.aCenter = gl.getAttribLocation(gp.prog, "aCenter");
       gp.aCorner = gl.getAttribLocation(gp.prog, "aCorner");
@@ -612,6 +631,7 @@ import {
         glow: gl.createBuffer(),
         photo: gl.createBuffer(),
         band: gl.createBuffer(),
+        plume: gl.createBuffer(),
       };
       gl.bindBuffer(gl.ARRAY_BUFFER, this.buf.band);
       gl.bufferData(
@@ -1764,6 +1784,7 @@ import {
       this.pFlat = compile(gl, FLAT_VS, FLAT_FS);
       this.pPhoto = compile(gl, PHOTO_VS, PHOTO_FS);
       this.pBand = compile(gl, BAND_VS, BAND_FS);
+      this.pPlume = compile(gl, PLUME_VS, PLUME_FS);
       const gp = this.pPhoto;
       gp.aCenter = gl.getAttribLocation(gp.prog, "aCenter");
       gp.aCorner = gl.getAttribLocation(gp.prog, "aCorner");
@@ -1781,6 +1802,7 @@ import {
         glow: gl.createBuffer(),
         photo: gl.createBuffer(),
         band: gl.createBuffer(),
+        plume: gl.createBuffer(),
       };
       gl.bindBuffer(gl.ARRAY_BUFFER, this.buf.band);
       gl.bufferData(
@@ -2281,19 +2303,23 @@ import {
       const sy = window.scrollY || 0;
       let tx, ty, ts, ta;
       if (sy > innerHeight * 0.55) {
+        // corner escort while reading page content (modest 1.5× bump)
         tx = 0.72;
         ty = -0.6;
-        ts = 0.27;
+        ts = 0.4;
         ta = 0.42;
       } else if (this.arrivedId) {
+        // parked at a body (2× bump — featured under the dossier)
         tx = 0;
         ty = -0.16;
-        ts = 0.36;
+        ts = 0.72;
         ta = 0.58;
       } else {
+        // hero: center stage at 2.5× (owner sign-off 2026-07-17, TR-020) —
+        // ty 0.20 lands the ship at screen center once SHIP_NDC_Y_OFFSET folds in
         tx = 0;
-        ty = 0.74;
-        ts = 0.45;
+        ty = 0.2;
+        ts = 1.125;
         ta = 0.52;
       }
       // P2 flight dynamics: springs toward the station targets (overshoot +
@@ -2368,10 +2394,15 @@ import {
       );
       const T = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, vpx, vpy, vpz, 1];
       const mvp = mul(proj, mul(T, m));
+      // P3 arrival presence: rim light warms toward beacon-gold while parked
+      // at a body, cools back in flight. Reduced motion snaps.
+      const parked = !!this.arrivedId && this.warp.mode === "idle";
+      this._rimK +=
+        ((parked ? 1 : 0) - this._rimK) * (this.reduced ? 1 : 0.045);
       if (this.craft && this.craft.ready) {
         // ship-v2 textured craft: identical placement chain, textured triangles
         // instead of gold lines (craft-loader handles its own depth/blend state).
-        this.craft.draw(gl, mvp, rot, fade);
+        this.craft.draw(gl, mvp, rot, fade, rimColorAt(this._rimK));
       } else {
         gl.useProgram(P.prog);
         gl.uniformMatrix4fv(P.u.uMVP, false, mvp);
@@ -2384,7 +2415,32 @@ import {
         if (P.aMeta >= 0) gl.disableVertexAttribArray(P.aMeta);
         gl.drawArrays(gl.LINES, 0, this.nShip);
       }
-      // engine glow points (both ship paths)
+      // P3 layered exhaust: phase-driven cone plumes (ship-dynamics.ts builds
+      // the crossed-quad geometry; additive blending is already active).
+      const coasting = this.warp.mode === "warp" && !burning;
+      const plumeP = {
+        burning,
+        coasting,
+        parked,
+        reduced: this.reduced,
+        t,
+      };
+      const pp = this.pPlume;
+      gl.useProgram(pp.prog);
+      gl.uniformMatrix4fv(pp.u.uMVP, false, mvp);
+      gl.uniform1f(pp.u.uAlpha, plumeAlpha(plumeP) * fade);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.buf.plume);
+      if (!this._plumeVerts) this._plumeVerts = buildPlumeVertices(0);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        buildPlumeVertices(plumeFlareLength(plumeP), this._plumeVerts),
+        gl.DYNAMIC_DRAW,
+      );
+      gl.enableVertexAttribArray(pp.aPos);
+      gl.vertexAttribPointer(pp.aPos, 4, gl.FLOAT, false, 16, 0);
+      if (pp.aMeta >= 0) gl.disableVertexAttribArray(pp.aMeta);
+      gl.drawArrays(gl.TRIANGLES, 0, PLUME_VERTEX_COUNT);
+      // engine glow points — the hot nozzle cores (both ship paths)
       gl.useProgram(P.prog);
       gl.uniformMatrix4fv(P.u.uMVP, false, mvp);
       const glowA = burning
@@ -2397,6 +2453,10 @@ import {
       ]);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.buf.glow);
       gl.bufferData(gl.ARRAY_BUFFER, g, gl.DYNAMIC_DRAW);
+      // enable explicitly: the craft path disables all its attrib arrays, so
+      // this pass must not depend on the wireframe path's leftover state
+      // (latent since P1 — glow points were degenerate with the craft on).
+      gl.enableVertexAttribArray(P.aPos);
       gl.vertexAttribPointer(P.aPos, 3, gl.FLOAT, false, 12, 0);
       gl.uniform4f(P.u.uColor, 1.0, 0.7, 0.25, glowA * fade);
       gl.uniform1f(P.u.uRound, 1);

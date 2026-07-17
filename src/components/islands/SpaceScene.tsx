@@ -12,6 +12,12 @@ import type {
 import HUD from "./space/HUD";
 import HoverTooltip from "./space/HoverTooltip";
 import type { HoverTooltipData } from "./space/HoverTooltip";
+import {
+  parseStoredQuality,
+  readTierSignals,
+  resolveCraftAttribute,
+  CRAFT_QUALITY_STORAGE_KEY,
+} from "@/lib/craft-tier";
 import MissionControlBar from "./space/MissionControlBar";
 import type { CommandSuggestion } from "./space/MissionControlBar";
 import WarpOverlay from "./space/WarpOverlay";
@@ -123,6 +129,13 @@ export default function SpaceScene({
     if (isTravel) window.scrollTo(0, 0);
   }, [isTravel]);
 
+  // ship-v2 P3 (TR-018): during warp the hero copy steps back (global.css dims
+  // #ij-hero-copy under body.ij-warping) so the flight reads as the primary
+  // event; content returns on arrival.
+  useEffect(() => {
+    document.body.classList.toggle("ij-warping", !!state.warp);
+  }, [state.warp]);
+
   const dispatchRoute = useCallback(() => {
     const en = engineEl();
     if (!en || !desiredBodyRef.current) return;
@@ -158,10 +171,16 @@ export default function SpaceScene({
     el.setAttribute("density", String(density));
     el.setAttribute("constellations", constellations ? "on" : "off");
     el.setAttribute("ship", ship ? "on" : "off");
-    // ship-v2 (ADR-0002) rollout flag: ?craft=1k|2k enables the textured GLB
-    // craft. Absent → the original wireframe path, untouched.
-    const craft = new URLSearchParams(window.location.search).get("craft");
-    if (craft === "1k" || craft === "2k") el.setAttribute("craft", craft);
+    // ship-v2 craft tier resolution (default-on since P5, TR-020): URL param
+    // (dev/rollback) → stored user override (Data & Licenses selector) → auto
+    // device policy. ?craft=off / the selector's Off restore the wireframe.
+    const tier = resolveCraftAttribute(
+      new URLSearchParams(window.location.search).get("craft"),
+      parseStoredQuality(localStorage.getItem(CRAFT_QUALITY_STORAGE_KEY)),
+      readTierSignals(window),
+    );
+    if (tier) el.setAttribute("craft", tier);
+    else el.removeAttribute("craft");
   }, [engineReady, density, constellations, ship]);
 
   const goSection = useCallback(

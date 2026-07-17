@@ -10,6 +10,12 @@
  */
 import { expect, test } from "@playwright/test";
 
+// Retries mirror CI's global retries:2 (TR-019). This absorbs only
+// nondeterministic infra noise (SwiftShader contention starving the star-stream
+// readiness wait) — a real console error fails deterministically on every
+// attempt, so nothing this spec exists to catch can slip through.
+test.describe.configure({ retries: 2 });
+
 test("page load produces zero console errors from navigation start", async ({
   page,
 }) => {
@@ -20,8 +26,10 @@ test("page load produces zero console errors from navigation start", async ({
   });
 
   await page.goto("/");
+  // readiness precondition (not the assertion under test): generous timeout —
+  // star streaming can be slow under parallel-suite GPU contention
   await expect(page.getByText(/ONLINE ·.*LIVE SOURCES/)).toBeVisible({
-    timeout: 15000,
+    timeout: 25000,
   });
 
   expect(errors).toEqual([]);

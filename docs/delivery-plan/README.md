@@ -7,4 +7,5 @@ implementation hints. Test reports verifying each phase are in
 | Plan                                                             | Scope                                                | Status                    |
 | ---------------------------------------------------------------- | ---------------------------------------------------- | ------------------------- |
 | [PF-07-space-portfolio-webgl.md](PF-07-space-portfolio-webgl.md) | Interactive WebGL space portfolio (islands + engine) | Delivered (TR-001…TR-009) |
-| [PF-07-spaceship-v2.md](PF-07-spaceship-v2.md)                   | Textured hero ship (GLB) + flight realism            | Planned                   |
+| [PF-07-spaceship-v2.md](PF-07-spaceship-v2.md)                   | Textured hero ship (GLB) + flight realism            | Delivered (TR-014…021)    |
+| [PF-08-flight-v3.md](PF-08-flight-v3.md)                         | True 360° flight model + graphics fidelity           | Planned                   |
