@@ -16,7 +16,8 @@
     "test:coverage": "vitest run --coverage",
     "test:coverage:report": "vitest run --coverage && node scripts/coverage-report.mjs",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "assets:craft": "node scripts/build-craft-assets.mjs --verify"
   },
   "dependencies": {
     "@astrojs/react": "^6.0.1",
@@ -28,6 +29,9 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
+    "@gltf-transform/core": "^4.4.1",
+    "@gltf-transform/extensions": "^4.4.1",
+    "@gltf-transform/functions": "^4.4.1",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.2",
     "@testing-library/jest-dom": "^6.9.1",
@@ -39,8 +43,10 @@
     "eslint": "^10.7.0",
     "eslint-plugin-astro": "^1.7.0",
     "jsdom": "^29.1.1",
+    "meshoptimizer": "^1.2.0",
     "prettier": "^3.9.5",
     "prettier-plugin-astro": "^0.14.1",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.3.2",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.63.0",

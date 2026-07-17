@@ -20,3 +20,7 @@ resources/
 # delivery plan Phase 1
 src/lib/space-engine.js
 src/data/celestial/*.js
+
+# Rendered report snapshots (self-contained HTML artifacts; reformatting could
+# alter whitespace inside pre-wrap blocks)
+docs/checkpoint/*.html

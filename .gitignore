@@ -158,3 +158,8 @@ gaia_datasets/
 # §1). Was accidentally committed once (42MB, since stripped from history) - kept gitignored so a
 # plain `git add -A`/`git add .` can never pull it back in.
 Interactive Outerspace Portfolio/
+
+# PF-07 ship-v2 source asset downloads (Sketchfab originals, ~255MB: raw GLB/glTF/USDZ +
+# 4K texture exports). Conversion input for scripts/build-craft-assets.mjs, which produces
+# the committed runtime GLBs in public/assets/craft/. Never commit the originals.
+resources/

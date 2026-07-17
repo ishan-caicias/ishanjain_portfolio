@@ -18,7 +18,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run preview",
+    // Invoke astro's bin through node directly rather than "npm run preview":
+    // spawning through the npm.cmd shim intermittently crashes on Windows with
+    // STATUS_STACK_BUFFER_OVERRUN (0xC0000409) before the server starts. See
+    // docs/test-reports/TR-013.md.
+    command: "node ./node_modules/astro/bin/astro.mjs preview",
     url: "http://localhost:4321",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

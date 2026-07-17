@@ -13,3 +13,6 @@
 | [TR-009](TR-009.md) | 2026-07-09 | Mobile Responsive Pass (design_handoff_mobile_responsive)    | READY TO PROCEED                    |
 | [TR-010](TR-010.md) | 2026-07-13 | Dependency + Framework Upgrade & OWASP Hardening             | READY TO PROCEED                    |
 | [TR-011](TR-011.md) | 2026-07-17 | Build Green: Lint/Format Scope Fixes                         | READY TO PROCEED                    |
+| [TR-012](TR-012.md) | 2026-07-17 | Strict LF Enforcement (.gitattributes)                       | READY TO PROCEED                    |
+| [TR-013](TR-013.md) | 2026-07-17 | Playwright webServer Windows Spawn Fix                       | READY TO PROCEED                    |
+| [TR-014](TR-014.md) | 2026-07-17 | PF-07 Ship-v2 Phase 0: Craft Asset Pipeline                  | READY TO PROCEED                    |
