@@ -25,3 +25,6 @@
 | [TR-021](TR-021.md) | 2026-07-18 | Craft Shader Hotfix: Bleached-White Hull (sRGB pipeline)        | READY TO PROCEED                    |
 | [TR-022](TR-022.md) | 2026-07-18 | PF-08 F0+F1: Landing Experience, Engine Glow, Quaternion Flight | READY TO PROCEED                    |
 | [TR-023](TR-023.md) | 2026-07-18 | Wireframe-Flash Regression on Page Load                         | READY TO PROCEED                    |
+| [TR-024](TR-024.md) | 2026-07-18 | PF-08 F2: 360° Travel Choreography + Chase Camera               | READY TO PROCEED                    |
+| [TR-025](TR-025.md) | 2026-07-18 | F2 Amendments: 30° Thruster Chase & Ship-Turns Launch           | READY TO PROCEED                    |
+| [TR-026](TR-026.md) | 2026-07-18 | PF-08 F3: Exhaust Realism (Layered Noise Plume + Embers)        | READY TO PROCEED                    |

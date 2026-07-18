@@ -1,7 +1,7 @@
 # PF-08 Flight v3 — True 360° Flight Model & Graphics Fidelity
 
 **Date:** 2026-07-18
-**Status:** IN PROGRESS — F0+F1 complete ([TR-022](../test-reports/TR-022.md), incl. owner-directed landing-experience amendment) · F2/F3 next
+**Status:** ✅ DELIVERED — F0+F1 ([TR-022](../test-reports/TR-022.md), incl. owner-directed landing-experience amendment) · F2 ([TR-024](../test-reports/TR-024.md), amended [TR-025](../test-reports/TR-025.md)) · F3 ([TR-026](../test-reports/TR-026.md)). 67 unit / 48 E2E green. Next: PF-09 Babylon+Havok rebuild ([evaluation](../architecture/2026-07-18-graphics-physics-engine-evaluation.md)).
 **Baseline:** PF-07 ship-v2 DELIVERED ([plan](PF-07-spaceship-v2.md), TR-014…TR-021) —
 custom WebGL1 engine, zero runtime deps (ADR 0002), textured craft default-on, 47 unit /
 44 E2E green.
@@ -50,6 +50,16 @@ drag stays live mid-flight (the existing 360° look). Arrival = decelerating orb
 than a screen-station snap.
 **Exit:** a full journey reads as: turn → burn → cruise with parallax → flip → brake →
 arrive, from any start to any destination direction; E2E travel specs extended.
+**Outcome (2026-07-18, TR-024):** ✅ Delivered — ship owns the route (`_shipWorld`), camera
+chases through a waypoint choreography (side departure → behind-above cruise → wide flip →
+opposite-flank orbit-in) with wrap-aware damped look-ahead; drag stays authoritative via the
+`_dragging` gate; both curve ends sit exactly astern so `cam(1) ≡ warp.to` (no arrival snap).
+61/61 unit · 47/47 E2E. Owner sign-off on choreography feel pending (waypoint table is the knob).
+**Amendment (2026-07-18, TR-025):** owner feedback — v1 read as top-view. Retuned to a single
+behind-the-thruster chase held exactly 30° above the thrust axis (`CHASE_ELEVATION`), panning
+out through cruise/flip; and the camera pre-aim removed — the SHIP now turns toward the
+clicked object's screen position during aim, the chase look pans after it during the burn.
+62/62 unit · 48/48 E2E.
 
 ### F3 — Exhaust realism
 
@@ -59,6 +69,12 @@ heat-shimmer offset pass behind the nozzle, ember particles on burn start/stop r
 engine's point-sprite infrastructure.
 **Exit:** burn/coast/brake are visually distinct and read as propulsion, not sprites; owner
 sign-off.
+**Outcome (2026-07-18, TR-026):** ✅ Delivered — layered noise flame (generated 128² fbm
+turbulence scrolled along the axis; white-hot core over diesel-orange sheath), throttle-driven
+turbulence/brightness (`plumeThrottle`), lightweight two-tap shimmer, and ember bursts on
+burn start/stop (`stepEmber`, three-bucket fade). Right-sized vs the imminent PF-09 rebuild:
+full refraction heat-shimmer deferred to Babylon. 67/67 unit · 48/48 E2E · glError 0. Owner
+GPU sign-off pending.
 
 ## Constraints Carried Forward
 

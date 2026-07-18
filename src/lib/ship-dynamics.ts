@@ -123,15 +123,18 @@ export function plumeAlpha(p: PlumeParams): number {
 
 const PLUME_W_NOZZLE = 0.028;
 const PLUME_W_TIP = 0.06;
-/** Floats per plume vertex: x, y, z, alpha. */
-export const PLUME_VERTEX_FLOATS = 4;
+/** Floats per plume vertex: x, y, z, axial (1 nozzle → 0 tip), side (−1..+1).
+ * PF-08 F3 added `side` so the fragment shader can sample scrolling noise
+ * across the plume for a turbulent, layered flame instead of a flat cone. */
+export const PLUME_VERTEX_FLOATS = 5;
 /** 3 engines × 2 crossed quads × 2 triangles × 3 vertices. */
 export const PLUME_VERTEX_COUNT = PLUME_ENGINES.length * 2 * 2 * 3;
 
 /**
  * Cone-ish exhaust geometry: per engine, two quads crossed at 90° (X-plane and
- * Y-plane), tapering from PLUME_W_NOZZLE (alpha 1) at the nozzle to
- * PLUME_W_TIP (alpha 0) at nozzle.z + flare. Interleaved [x,y,z,a].
+ * Y-plane), tapering from PLUME_W_NOZZLE (axial 1) at the nozzle to
+ * PLUME_W_TIP (axial 0) at nozzle.z + flare. Interleaved [x,y,z,axial,side]
+ * where `side` ∈ {−1,+1} is the across-axis coordinate (F3 noise UV).
  * Pass `target` to reuse a scratch buffer — this runs every frame, so the
  * engine avoids a per-frame allocation.
  */
@@ -142,11 +145,12 @@ export function buildPlumeVertices(
   const out =
     target ?? new Float32Array(PLUME_VERTEX_COUNT * PLUME_VERTEX_FLOATS);
   let o = 0;
-  const put = (x: number, y: number, z: number, a: number) => {
+  const put = (x: number, y: number, z: number, a: number, side: number) => {
     out[o++] = x;
     out[o++] = y;
     out[o++] = z;
     out[o++] = a;
+    out[o++] = side;
   };
   for (const [ex, ey, ez] of PLUME_ENGINES) {
     const tip = ez + flare;
@@ -157,16 +161,61 @@ export function buildPlumeVertices(
       const txw = axis === 0 ? PLUME_W_TIP : 0;
       const tyw = axis === 0 ? 0 : PLUME_W_TIP;
       // tri 1: nozzle-left, nozzle-right, tip-right
-      put(ex - nx, ey - ny, ez, 1);
-      put(ex + nx, ey + ny, ez, 1);
-      put(ex + txw, ey + tyw, tip, 0);
+      put(ex - nx, ey - ny, ez, 1, -1);
+      put(ex + nx, ey + ny, ez, 1, 1);
+      put(ex + txw, ey + tyw, tip, 0, 1);
       // tri 2: nozzle-left, tip-right, tip-left
-      put(ex - nx, ey - ny, ez, 1);
-      put(ex + txw, ey + tyw, tip, 0);
-      put(ex - txw, ey - tyw, tip, 0);
+      put(ex - nx, ey - ny, ez, 1, -1);
+      put(ex + txw, ey + tyw, tip, 0, 1);
+      put(ex - txw, ey - tyw, tip, 0, -1);
     }
   }
   return out;
+}
+
+/* ---------- PF-08 F3: layered noise plume + ember particles ---------- */
+
+/** Inner white-hot core and outer diesel-orange sheath. Exported for shader
+ * parity (the fragment shader hardcodes the same two colors). */
+export const PLUME_CORE: readonly [number, number, number] = [1.0, 0.95, 0.85];
+export const PLUME_SHEATH: readonly [number, number, number] = [
+  1.0, 0.42, 0.12,
+];
+
+/**
+ * Flame intensity 0..1 driving turbulence + brightness in the plume shader
+ * (distinct from `plumeAlpha`, which is the phase base-opacity). Burn flickers
+ * over time for a live flame; reduced motion is steady. Ordering mirrors the
+ * other plume phase functions: burn > idle > parked > coast.
+ */
+export function plumeThrottle(p: PlumeParams): number {
+  if (p.burning) return p.reduced ? 0.85 : 0.85 + Math.sin(p.t * 41) * 0.15;
+  if (p.coasting) return 0.06;
+  if (p.parked) return p.reduced ? 0.18 : 0.18 + Math.sin(p.t * 2.0) * 0.04;
+  return p.reduced ? 0.3 : 0.3 + Math.sin(p.t * 1.7) * 0.05;
+}
+
+/** A single ember spark: unit-ship space position, velocity, and 1→0 life. */
+export interface Ember {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  life: number;
+}
+
+/** Ember life decay per second (≈0.6–1.2 s visible lifespan). */
+export const EMBER_DECAY = 1.6;
+
+/** Advance one ember by dt (drift + decay). Returns whether it is still alive. */
+export function stepEmber(e: Ember, dt: number): boolean {
+  e.x += e.vx * dt;
+  e.y += e.vy * dt;
+  e.z += e.vz * dt;
+  e.life -= EMBER_DECAY * dt;
+  return e.life > 0;
 }
 
 /* ---------- PF-08 F1: quaternion flight state ---------- */
@@ -278,6 +327,120 @@ export function restPoseQuat(pitch = -0.42): Quat {
 
 /** Ship turn rate for orientation damping (rad/s-ish; higher = snappier). */
 export const SHIP_TURN_LAMBDA = 4.5;
+
+/* ---------- PF-08 F2: chase camera + 360° travel choreography ---------- */
+
+/**
+ * Orthonormal basis perpendicular to a unit travel direction: `right` and
+ * `up`, with `up` biased toward celestial north (+Z) like the engine's
+ * viewFrom(). Near-polar routes fall back to +X as the reference up.
+ */
+export function travelFrame(dir: readonly number[]): {
+  right: [number, number, number];
+  up: [number, number, number];
+} {
+  const ref = Math.abs(dir[2]) > 0.999 ? [1, 0, 0] : [0, 0, 1];
+  let rx = dir[1] * ref[2] - dir[2] * ref[1];
+  let ry = dir[2] * ref[0] - dir[0] * ref[2];
+  let rz = dir[0] * ref[1] - dir[1] * ref[0];
+  const rl = Math.hypot(rx, ry, rz) || 1;
+  rx /= rl;
+  ry /= rl;
+  rz /= rl;
+  return {
+    right: [rx, ry, rz],
+    up: [
+      ry * dir[2] - rz * dir[1],
+      rz * dir[0] - rx * dir[2],
+      rx * dir[1] - ry * dir[0],
+    ],
+  };
+}
+
+/** Chase offset expressed in the travel frame: [right, up, back]. */
+export type ChaseOffset = [number, number, number];
+
+/** Rest/reduced-motion chase offset: straight astern at ship depth. */
+export const CHASE_OFFSET_REST: ChaseOffset = [0, 0, SHIP_VIEW_DEPTH];
+
+/** Chase elevation above the thrust axis (owner-directed, 2026-07-18). */
+export const CHASE_ELEVATION = Math.PI / 6; // 30°
+
+/* Camera height that puts the view exactly CHASE_ELEVATION above the thrust
+ * axis at chase distance b (negative u = camera above the ship). */
+const elev = (b: number) => -Math.tan(CHASE_ELEVATION) * b;
+
+/* Waypoints [k, right, up, back] for the journey choreography. Both ends sit
+ * exactly astern so cam(0) = warp.from and cam(1) = warp.to — every post-warp
+ * invariant (arrival framing, parked look direction) is preserved. Owner
+ * retune (2026-07-18, replacing the v1 flank-swing table): one consistent
+ * behind-the-thruster view elevated 30° above the thrust axis, panning OUT
+ * through cruise/flip and closing back in for arrival. Because u = −tan30°·b
+ * at every interior waypoint, the interpolated elevation holds 30° exactly
+ * across k ∈ [0.10, 0.92]. A whisper of lateral offset at the flip keeps a
+ * depth cue without reading as a side view. */
+const CHASE_WAYPOINTS: readonly [number, number, number, number][] = [
+  [0.0, 0, 0, SHIP_VIEW_DEPTH],
+  [0.1, 0, elev(2.6), 2.6],
+  [0.35, 0, elev(4.5), 4.5],
+  [0.55, 0.6, elev(5.3), 5.3],
+  [0.8, 0.3, elev(3.5), 3.5],
+  [0.92, 0, elev(2.2), 2.2],
+  [1.0, 0, 0, SHIP_VIEW_DEPTH],
+];
+
+/** Smoothstep-interpolated chase offset at journey progress k ∈ [0,1]. */
+export function chaseOffsetAt(k: number): ChaseOffset {
+  const c = Math.max(0, Math.min(1, k));
+  let i = 0;
+  while (i < CHASE_WAYPOINTS.length - 2 && c > CHASE_WAYPOINTS[i + 1][0]) i++;
+  const a = CHASE_WAYPOINTS[i];
+  const b = CHASE_WAYPOINTS[i + 1];
+  const t = Math.max(0, Math.min(1, (c - a[0]) / (b[0] - a[0])));
+  const s = t * t * (3 - 2 * t);
+  return [
+    a[1] + (b[1] - a[1]) * s,
+    a[2] + (b[2] - a[2]) * s,
+    a[3] + (b[3] - a[3]) * s,
+  ];
+}
+
+/** Chase-look damping rate (rad/s-ish) and look-ahead distance along the
+ * travel vector (view units) — the camera aims slightly past the ship. */
+export const CHASE_LOOK_LAMBDA = 3.0;
+export const CHASE_LOOK_AHEAD = 1.1;
+
+/** Ship scale/alpha station targets while the chase camera is active. */
+export const SHIP_WARP_SCALE = 0.9;
+export const SHIP_WARP_ALPHA = 0.62;
+
+/**
+ * Frame-rate-independent damp of an angle toward `target`, always along the
+ * shortest arc (wrap-aware — 3.1 → −3.1 goes through π, not through 0).
+ */
+export function dampAngle(
+  current: number,
+  target: number,
+  lambda: number,
+  dt: number,
+): number {
+  let d = (target - current) % (2 * Math.PI);
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  return current + d * (1 - Math.exp(-lambda * dt));
+}
+
+/** Inverse of ndcToView: view-space position → [ndcX, ndcY] under the same
+ * perspective convention. vz must be negative (in front of the camera). */
+export function viewToNdc(
+  v: readonly number[],
+  fovY: number,
+  aspect: number,
+): [number, number] {
+  const tanHalf = Math.tan(fovY / 2);
+  const depth = Math.max(1e-6, -v[2]);
+  return [v[0] / (depth * tanHalf * aspect), v[1] / (depth * tanHalf)];
+}
 
 /** Engine-glow intensity cast onto the rear hull, by plume phase (PF-08 F0). */
 export function engineGlowIntensity(p: PlumeParams): number {

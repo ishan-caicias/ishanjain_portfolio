@@ -8,8 +8,19 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPlumeVertices,
+  CHASE_ELEVATION,
+  CHASE_OFFSET_REST,
+  chaseOffsetAt,
+  dampAngle,
+  type Ember,
   engineGlowIntensity,
   ndcToView,
+  PLUME_CORE,
+  PLUME_SHEATH,
+  plumeThrottle,
+  stepEmber,
+  travelFrame,
+  viewToNdc,
   quatDamp,
   quatFromUnitVectors,
   quatToMat4,
@@ -251,6 +262,174 @@ describe("PF-08 F1 quaternion flight state", () => {
     expect(engineGlowIntensity({ ...base, parked: true })).toBeGreaterThan(
       engineGlowIntensity({ ...base, coasting: true }),
     );
+  });
+});
+
+describe("PF-08 F2 chase camera", () => {
+  const dot = (a: readonly number[], b: readonly number[]) =>
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const len = (a: readonly number[]) => Math.hypot(a[0], a[1], a[2]);
+
+  describe("travelFrame", () => {
+    const oblique = [0.267, -0.535, 0.802];
+    const ol = Math.hypot(...oblique);
+    const dirs: number[][] = [
+      [1, 0, 0],
+      [0, 1, 0],
+      oblique.map((c) => c / ol), // travelFrame contracts on a UNIT direction
+      [0, 0, 1], // polar — degenerate against the +Z reference up
+      [0, 0, -1],
+    ];
+
+    it("returns an orthonormal basis perpendicular to the route", () => {
+      for (const d of dirs) {
+        const { right, up } = travelFrame(d);
+        expect(len(right)).toBeCloseTo(1, 6);
+        expect(len(up)).toBeCloseTo(1, 6);
+        expect(dot(right, d)).toBeCloseTo(0, 6);
+        expect(dot(up, d)).toBeCloseTo(0, 6);
+        expect(dot(right, up)).toBeCloseTo(0, 6);
+      }
+    });
+
+    it("biases up toward celestial north for equatorial routes", () => {
+      expect(travelFrame([1, 0, 0]).up[2]).toBeCloseTo(1, 6);
+      expect(travelFrame([0, 1, 0]).up[2]).toBeCloseTo(1, 6);
+    });
+  });
+
+  describe("chaseOffsetAt", () => {
+    it("sits exactly astern at both journey ends (cam(0)=from, cam(1)=to)", () => {
+      for (const k of [0, 1, -0.5, 1.5]) {
+        const [r, u, b] = chaseOffsetAt(k);
+        expect(r).toBe(0);
+        expect(u).toBe(0);
+        expect(b).toBe(SHIP_VIEW_DEPTH);
+      }
+      expect(CHASE_OFFSET_REST).toEqual([0, 0, SHIP_VIEW_DEPTH]);
+    });
+
+    it("is continuous — no waypoint kinks the springs would read as a snap", () => {
+      let prev = chaseOffsetAt(0);
+      for (let k = 0.001; k <= 1; k += 0.001) {
+        const cur = chaseOffsetAt(k);
+        for (let i = 0; i < 3; i++)
+          expect(Math.abs(cur[i] - prev[i])).toBeLessThan(0.05);
+        prev = cur;
+      }
+    });
+
+    it("keeps the camera a safe distance behind the ship for the whole run", () => {
+      for (let k = 0; k <= 1; k += 0.01)
+        expect(chaseOffsetAt(k)[2]).toBeGreaterThanOrEqual(2);
+    });
+
+    // Owner retune 2026-07-18: the v1 flank-swing assertions are replaced —
+    // the choreography is now one behind-the-thruster view held at 30°.
+    it("holds the camera 30° above the thrust axis through the journey core", () => {
+      for (let k = 0.1; k <= 0.92; k += 0.01) {
+        const [, u, b] = chaseOffsetAt(k);
+        expect(u).toBeLessThan(0); // camera above the ship
+        expect(-u / b).toBeCloseTo(Math.tan(CHASE_ELEVATION), 6);
+      }
+    });
+
+    it("pans out through cruise/flip and closes back in for arrival", () => {
+      let maxB = 0;
+      for (let k = 0; k <= 1; k += 0.01)
+        maxB = Math.max(maxB, chaseOffsetAt(k)[2]);
+      expect(maxB).toBeGreaterThanOrEqual(5);
+      expect(chaseOffsetAt(0.55)[2]).toBeGreaterThan(chaseOffsetAt(0)[2]);
+      expect(chaseOffsetAt(0.55)[2]).toBeGreaterThan(chaseOffsetAt(1)[2]);
+    });
+  });
+
+  describe("dampAngle", () => {
+    it("converges to the target", () => {
+      let a = 0;
+      for (let i = 0; i < 300; i++) a = dampAngle(a, 1.2, 3.0, 1 / 60);
+      expect(a).toBeCloseTo(1.2, 3);
+    });
+
+    it("takes the short arc across the ±π wrap", () => {
+      // 3.0 → −3.0 is 0.28 rad through π, not 6 rad back through 0
+      const step = dampAngle(3.0, -3.0, 5, 1 / 60);
+      expect(step).toBeGreaterThan(3.0);
+      expect(step).toBeLessThan(3.0 + 0.3);
+    });
+
+    it("is frame-rate independent toward a fixed target", () => {
+      const one = dampAngle(0, 1, 3.0, 0.1);
+      let two = dampAngle(0, 1, 3.0, 0.05);
+      two = dampAngle(two, 1, 3.0, 0.05);
+      expect(two).toBeCloseTo(one, 10);
+    });
+  });
+
+  describe("viewToNdc", () => {
+    it("inverts ndcToView across FOVs and aspects", () => {
+      for (const [nx, ny, aspect] of [
+        [0, 0, 16 / 9],
+        [0.7, -0.4, 16 / 9],
+        [-0.9, 0.85, 9 / 16],
+      ] as const) {
+        const v = ndcToView(nx, ny, 2.7, SHIP_BASE_FOV, aspect);
+        const [rx, ry] = viewToNdc(v, SHIP_BASE_FOV, aspect);
+        expect(rx).toBeCloseTo(nx, 6);
+        expect(ry).toBeCloseTo(ny, 6);
+      }
+    });
+  });
+});
+
+describe("PF-08 F3 exhaust realism", () => {
+  const base: PlumeParams = {
+    burning: false,
+    coasting: false,
+    parked: false,
+    reduced: false,
+    t: 0.5,
+  };
+
+  it("throttle orders burn > idle > parked > coast", () => {
+    const burn = plumeThrottle({ ...base, burning: true, reduced: true });
+    const idle = plumeThrottle({ ...base, reduced: true });
+    const parked = plumeThrottle({ ...base, parked: true, reduced: true });
+    const coast = plumeThrottle({ ...base, coasting: true, reduced: true });
+    expect(burn).toBeGreaterThan(idle);
+    expect(idle).toBeGreaterThan(parked);
+    expect(parked).toBeGreaterThan(coast);
+  });
+
+  it("throttle flickers over time when burning; reduced motion is steady", () => {
+    const a = plumeThrottle({ ...base, burning: true, t: 0.1 });
+    const b = plumeThrottle({ ...base, burning: true, t: 0.2 });
+    expect(a).not.toBe(b);
+    const ra = plumeThrottle({ ...base, burning: true, reduced: true, t: 0.1 });
+    const rb = plumeThrottle({ ...base, burning: true, reduced: true, t: 9.9 });
+    expect(ra).toBe(rb);
+  });
+
+  it("core is brighter than the sheath (layered flame)", () => {
+    const lum = (c: readonly number[]) => c[0] + c[1] + c[2];
+    expect(lum(PLUME_CORE)).toBeGreaterThan(lum(PLUME_SHEATH));
+  });
+
+  it("stepEmber drifts by velocity and decays, dying at life 0", () => {
+    const e: Ember = { x: 0, y: 0, z: 0, vx: 1, vy: 2, vz: 3, life: 1 };
+    expect(stepEmber(e, 0.1)).toBe(true);
+    expect(e.x).toBeCloseTo(0.1, 6);
+    expect(e.z).toBeCloseTo(0.3, 6);
+    expect(e.life).toBeLessThan(1);
+    const dead: Ember = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0.05 };
+    expect(stepEmber(dead, 1)).toBe(false);
+  });
+
+  it("plume geometry carries an across-axis side coord in {-1,+1}", () => {
+    const v = buildPlumeVertices(0.4);
+    expect(v).toHaveLength(PLUME_VERTEX_COUNT * PLUME_VERTEX_FLOATS);
+    for (let i = 0; i < v.length; i += PLUME_VERTEX_FLOATS)
+      expect(Math.abs(v[i + 4])).toBe(1);
   });
 });
 

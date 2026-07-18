@@ -26,14 +26,27 @@ import {
   buildPlumeVertices,
   plumeFlareLength,
   plumeAlpha,
+  plumeThrottle,
+  stepEmber,
   rimColorAt,
+  PLUME_ENGINES,
   PLUME_VERTEX_COUNT,
+  PLUME_VERTEX_FLOATS,
   quatFromUnitVectors,
   quatDamp,
   quatToMat4,
   restPoseQuat,
   engineGlowIntensity,
   SHIP_TURN_LAMBDA,
+  travelFrame,
+  chaseOffsetAt,
+  CHASE_OFFSET_REST,
+  CHASE_LOOK_LAMBDA,
+  CHASE_LOOK_AHEAD,
+  SHIP_WARP_SCALE,
+  SHIP_WARP_ALPHA,
+  dampAngle,
+  viewToNdc,
 } from "./ship-dynamics";
 (function () {
   "use strict";
@@ -460,16 +473,33 @@ import {
     gl_FragColor = vec4(col*uFade, 1.0);
   }`;
 
-  // P3 (TR-018): layered exhaust plume — crossed-quad cones per engine,
-  // vertex alpha runs 1 (nozzle) → 0 (tip); additive blending does the glow.
+  // P3 (TR-018) → PF-08 F3: layered noise plume. Crossed-quad cones per engine
+  // carry [pos, axial(1 nozzle→0 tip), side(−1..+1)]. The FS samples a generated
+  // noise texture scrolled along the axis (turbulence), layers a tight white-hot
+  // core over a wide diesel-orange sheath, and cross-fades two scroll rates for a
+  // lightweight heat-shimmer. uThrottle drives intensity by burn phase.
   const PLUME_VS = `
-  attribute vec4 aPos; uniform mat4 uMVP; varying float vA;
-  void main(){ gl_Position = uMVP * vec4(aPos.xyz, 1.0); vA = aPos.w; }`;
+  attribute vec3 aPos; attribute vec2 aUV; uniform mat4 uMVP; varying vec2 vUV;
+  void main(){ gl_Position = uMVP * vec4(aPos, 1.0); vUV = aUV; }`;
   const PLUME_FS = `
-  precision mediump float; uniform float uAlpha; varying float vA;
+  precision mediump float;
+  uniform float uAlpha, uTime, uThrottle; uniform sampler2D uNoise;
+  varying vec2 vUV;                        // x = axial (1 nozzle → 0 tip), y = side (−1..1)
   void main(){
-    vec3 col = mix(vec3(1.0, 0.45, 0.15), vec3(1.0, 0.93, 0.78), vA);
-    gl_FragColor = vec4(col, vA * uAlpha);
+    float axial = vUV.x, side = vUV.y;
+    float along = 1.0 - axial;             // 0 nozzle → 1 tip
+    float scroll = uTime * (0.6 + 1.4 * uThrottle);
+    // two noise taps at different rates → turbulence + shimmer interference
+    float n1 = texture2D(uNoise, vec2(side*0.5 + 0.5, along*2.0 - scroll)).r;
+    float n2 = texture2D(uNoise, vec2(side*0.5 + 0.5 + 0.37, along*1.3 - scroll*0.6)).r;
+    float n = n1*0.65 + n2*0.35;
+    float turb = mix(1.0, n*1.7, along*uThrottle);   // noise eats the tip more under throttle
+    float a = axial * turb;
+    // layered flame: tight core near the axis + nozzle, wide orange sheath
+    float core = smoothstep(0.5, 0.0, abs(side)) * smoothstep(0.0, 0.45, axial);
+    vec3 col = mix(vec3(1.0, 0.42, 0.12), vec3(1.0, 0.95, 0.85), core);
+    a *= 0.35 + 0.65 * uThrottle;
+    gl_FragColor = vec4(col, clamp(a, 0.0, 1.0) * uAlpha);
   }`;
 
   function compile(gl, vsSrc, fsSrc) {
@@ -568,6 +598,15 @@ import {
       // PF-08 F1: ship orientation quaternion (view space), slerp-damped
       // toward the real travel vector during warp, rest pose otherwise.
       this._shipQuat = restPoseQuat();
+      // PF-08 F2: during warp the ship owns the route (world position) and
+      // the camera chases it; drag input stays authoritative over the look.
+      this._shipWorld = null;
+      this._dragging = false;
+      // PF-08 F3: ember sparks spawned on burn start/stop; generated noise
+      // texture drives the layered plume turbulence.
+      this._embers = [];
+      this._burnPrev = false;
+      this.plumeTex = null;
     }
     attributeChangedCallback(k, _o, v) {
       if (k === "density")
@@ -624,6 +663,7 @@ import {
       this.pPhoto = compile(gl, PHOTO_VS, PHOTO_FS);
       this.pBand = compile(gl, BAND_VS, BAND_FS);
       this.pPlume = compile(gl, PLUME_VS, PLUME_FS);
+      this.pPlume.aUV = gl.getAttribLocation(this.pPlume.prog, "aUV"); // F3
       const gp = this.pPhoto;
       gp.aCenter = gl.getAttribLocation(gp.prog, "aCenter");
       gp.aCorner = gl.getAttribLocation(gp.prog, "aCorner");
@@ -655,6 +695,7 @@ import {
       this._bindPointer();
       this._bindKeys();
       this._buildMilkyWay();
+      this._buildPlumeNoise(); // F3: procedural turbulence texture
       this._waitCatalog().then(() => {
         // helmet scripts execute in arbitrary order; rebuild whenever the catalog grows, atlas once stable
         const build = () => {
@@ -1268,6 +1309,7 @@ import {
           t: performance.now(),
         };
         moved = 0;
+        this._dragging = true; // F2: chase look yields while the pointer is down
         c.setPointerCapture(ev.pointerId);
       });
       c.addEventListener("pointermove", (ev) => {
@@ -1285,6 +1327,7 @@ import {
         }
       });
       const up = (ev) => {
+        this._dragging = false;
         if (!down) return;
         const dt = performance.now() - down.t;
         if (moved < 6 && dt < 600) this._click(ev.clientX, ev.clientY);
@@ -1292,6 +1335,7 @@ import {
       };
       c.addEventListener("pointerup", up);
       c.addEventListener("pointercancel", () => {
+        this._dragging = false;
         down = null;
       });
       c.addEventListener("pointerleave", () => {
@@ -1458,12 +1502,6 @@ import {
         return;
       } // already on station — open dossier
       const dir = b.dir;
-      const toYaw = Math.atan2(dir[1], dir[0]);
-      const toPitch = Math.asin(Math.max(-1, Math.min(1, dir[2])));
-      // shortest wrap for yaw
-      let dy = toYaw - this.yaw;
-      while (dy > Math.PI) dy -= TAU;
-      while (dy < -Math.PI) dy += TAU;
       const to = [
         b.pos[0] - dir[0] * 38,
         b.pos[1] - dir[1] * 38,
@@ -1474,16 +1512,19 @@ import {
         target: b,
         from: this.cam.slice(),
         to,
-        fromYaw: this.yaw,
-        fromPitch: this.pitch,
-        toYaw: this.yaw + dy,
-        toPitch,
         start: performance.now(),
         aimDur: this.reduced ? 200 : 900,
         warpDur: this.reduced ? 350 : 2400,
         t: 0,
         quiet: !!quiet,
       };
+      // F2 amendment: route known from launch so the ship's turn (aim phase)
+      // already points at the clicked object's screen direction.
+      const rx = to[0] - this.cam[0],
+        ry = to[1] - this.cam[1],
+        rz = to[2] - this.cam[2];
+      const rl = Math.hypot(rx, ry, rz) || 1;
+      this._warpDir = [rx / rl, ry / rl, rz / rl];
       this.arrivedId = null;
       emit("cosmos:select", { id, quiet: !!quiet });
     }
@@ -1505,20 +1546,11 @@ import {
       dir[0] /= dl;
       dir[1] /= dl;
       dir[2] /= dl;
-      const toYaw = Math.atan2(dir[1], dir[0]);
-      const toPitch = Math.asin(Math.max(-1, Math.min(1, dir[2])));
-      let dy = toYaw - this.yaw;
-      while (dy > Math.PI) dy -= TAU;
-      while (dy < -Math.PI) dy += TAU;
       this.warp = {
         mode: "aim",
         target: b,
         from: this.cam.slice(),
         to: [0, 0, 0],
-        fromYaw: this.yaw,
-        fromPitch: this.pitch,
-        toYaw: this.yaw + dy,
-        toPitch,
         start: performance.now(),
         aimDur: this.reduced ? 200 : 700,
         warpDur: this.reduced ? 350 : 2000,
@@ -1526,6 +1558,7 @@ import {
         home: true,
         quiet: !!quiet,
       };
+      this._warpDir = dir.slice(); // F2 amendment: retrograde route from launch
       this.arrivedId = null;
     }
     setStations(list) {
@@ -1694,6 +1727,61 @@ import {
       this.bandTex = tex;
       this._bandFade = 0;
     }
+    /* ---------- F3: procedural plume turbulence texture ---------- */
+    _buildPlumeNoise() {
+      const gl = this.gl;
+      if (!gl) return;
+      const N = 128;
+      const px = new Uint8Array(N * N * 4);
+      const hash = (x, y) => {
+        const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+        return s - Math.floor(s);
+      };
+      const vn = (x, y) => {
+        const xi = Math.floor(x),
+          yi = Math.floor(y),
+          xf = x - xi,
+          yf = y - yi;
+        const u = xf * xf * (3 - 2 * xf),
+          v = yf * yf * (3 - 2 * yf);
+        return (
+          hash(xi, yi) * (1 - u) * (1 - v) +
+          hash(xi + 1, yi) * u * (1 - v) +
+          hash(xi, yi + 1) * (1 - u) * v +
+          hash(xi + 1, yi + 1) * u * v
+        );
+      };
+      const fbm = (x, y) =>
+        0.55 * vn(x, y) +
+        0.28 * vn(x * 2.1, y * 2.1) +
+        0.17 * vn(x * 4.3, y * 4.3);
+      for (let y = 0; y < N; y++)
+        for (let x = 0; x < N; x++) {
+          const n = Math.max(0, Math.min(1, fbm(x * 0.08, y * 0.08)));
+          const v = Math.round(n * 255);
+          const o = (y * N + x) * 4;
+          px[o] = px[o + 1] = px[o + 2] = v;
+          px[o + 3] = 255;
+        }
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        N,
+        N,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        px,
+      );
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      this.plumeTex = tex;
+    }
     /* ---------- keyboard access ---------- */
     _bindKeys() {
       this.tabIndex = 0;
@@ -1797,6 +1885,7 @@ import {
       this.pPhoto = compile(gl, PHOTO_VS, PHOTO_FS);
       this.pBand = compile(gl, BAND_VS, BAND_FS);
       this.pPlume = compile(gl, PLUME_VS, PLUME_FS);
+      this.pPlume.aUV = gl.getAttribLocation(this.pPlume.prog, "aUV"); // F3
       const gp = this.pPhoto;
       gp.aCenter = gl.getAttribLocation(gp.prog, "aCenter");
       gp.aCorner = gl.getAttribLocation(gp.prog, "aCorner");
@@ -1852,6 +1941,7 @@ import {
         this.nTrail = nT * 2;
       }
       this._uploadBand();
+      this._buildPlumeNoise(); // F3: regenerate after context loss
       if (window.CELESTIAL) {
         this._applyImgmap();
         this._buildBodies();
@@ -1904,6 +1994,11 @@ import {
           }
         }
       }
+      // F2: clamped per-frame dt for the chase-look damping (frames can be
+      // skipped or throttled; matches the SHIP_MAX_DT convention).
+      const frameDt = this._lastT
+        ? Math.min(0.05, Math.max(0, (now - this._lastT) / 1000))
+        : 1 / 60;
       this._lastT = now;
 
       const t = now * 0.001;
@@ -1928,10 +2023,12 @@ import {
       // warp state machine
       const w = this.warp;
       if (w.mode === "aim") {
+        // F2 amendment (owner, 2026-07-18): the camera no longer pre-aims at
+        // the target. The SHIP turns toward the route during this phase — its
+        // orientation damp in _drawShip targets _warpDir, which points at the
+        // clicked object's on-screen position — and the chase look pans after
+        // it once the burn starts. The view holds still here.
         const k = Math.min(1, (now - w.start) / w.aimDur);
-        const e = ease(k);
-        this.yaw = w.fromYaw + (w.toYaw - w.fromYaw) * e;
-        this.pitch = w.fromPitch + (w.toPitch - w.fromPitch) * e;
         if (k >= 1) {
           w.mode = "warp";
           w.start = now;
@@ -1940,16 +2037,58 @@ import {
         const k = Math.min(1, (now - w.start) / w.warpDur);
         const e = ease(k);
         w.t = k;
-        for (let i = 0; i < 3; i++)
-          this.cam[i] = w.from[i] + (w.to[i] - w.from[i]) * e;
-        // brachistochrone profile: constant burn to midpoint, flip, constant deceleration burn
-        const dsdk = k < 0.5 ? 4 * k : 4 * (1 - k);
-        this._beta = Math.min(0.88, 0.88 * dsdk * 0.5);
         const dwx = w.to[0] - w.from[0],
           dwy = w.to[1] - w.from[1],
           dwz = w.to[2] - w.from[2];
         const dwl = Math.hypot(dwx, dwy, dwz) || 1;
         this._warpDir = [dwx / dwl, dwy / dwl, dwz / dwl];
+        // PF-08 F2: the SHIP owns the route — one ship-depth ahead of the old
+        // camera path — and the camera chases it through the waypoint
+        // choreography (side departure, behind-above cruise, wide flip,
+        // decelerating orbit-in). Both curve ends sit exactly astern, so
+        // cam(0) = warp.from and cam(1) = warp.to: every post-warp invariant
+        // (arrival distance, parked framing) is untouched.
+        const wd = this._warpDir;
+        const shipW = [
+          w.from[0] + dwx * e + wd[0] * SHIP_VIEW_DEPTH,
+          w.from[1] + dwy * e + wd[1] * SHIP_VIEW_DEPTH,
+          w.from[2] + dwz * e + wd[2] * SHIP_VIEW_DEPTH,
+        ];
+        this._shipWorld = shipW;
+        const off = this.reduced ? CHASE_OFFSET_REST : chaseOffsetAt(k);
+        const fr = travelFrame(wd);
+        for (let i = 0; i < 3; i++)
+          this.cam[i] =
+            shipW[i] -
+            fr.right[i] * off[0] -
+            fr.up[i] * off[1] -
+            wd[i] * off[2];
+        // chase look: aim slightly past the ship along the route, damped —
+        // but NEVER while the pointer is down (free-look drag stays
+        // authoritative; the chase re-engages gently on release).
+        if (!this._dragging) {
+          const lx = shipW[0] + wd[0] * CHASE_LOOK_AHEAD - this.cam[0],
+            ly = shipW[1] + wd[1] * CHASE_LOOK_AHEAD - this.cam[1],
+            lz = shipW[2] + wd[2] * CHASE_LOOK_AHEAD - this.cam[2];
+          const ll = Math.hypot(lx, ly, lz) || 1;
+          const toYaw = Math.atan2(ly, lx);
+          const toPitch = Math.asin(Math.max(-1, Math.min(1, lz / ll)));
+          if (this.reduced) {
+            this.yaw = toYaw;
+            this.pitch = toPitch;
+          } else {
+            this.yaw = dampAngle(this.yaw, toYaw, CHASE_LOOK_LAMBDA, frameDt);
+            this.pitch = dampAngle(
+              this.pitch,
+              toPitch,
+              CHASE_LOOK_LAMBDA,
+              frameDt,
+            );
+          }
+        }
+        // brachistochrone profile: constant burn to midpoint, flip, constant deceleration burn
+        const dsdk = k < 0.5 ? 4 * k : 4 * (1 - k);
+        this._beta = Math.min(0.88, 0.88 * dsdk * 0.5);
         const phase = k < 0.47 ? "accel" : k < 0.53 ? "flip" : "decel";
         const flipT = k < 0.47 ? 0 : k < 0.53 ? (k - 0.47) / 0.06 : 1;
         this._shipFlip += (flipT - this._shipFlip) * 0.25;
@@ -1967,6 +2106,7 @@ import {
         });
         if (k >= 1) {
           w.mode = "idle";
+          this._shipWorld = null; // F2: hand the ship back to the NDC stations
           if (w.home) {
             this.arrivedId = null;
             emit("cosmos:home", {});
@@ -2313,8 +2453,42 @@ import {
       // glide between flight stations: hero top-center → parked at visited body → corner escort when scrolled
       const sh = this.ship;
       const sy = window.scrollY || 0;
+      const aspect = W / H;
+      // PF-08 F2: while the chase camera is live, the ship's screen track is
+      // derived from its WORLD position seen through the current (chase +
+      // free-look) view, then fed to the same station springs — so both warp
+      // boundaries hand off with mass instead of a snap, and drag mid-flight
+      // orbits a ship that stays on its route.
+      const warping = this.warp.mode === "warp" && this._shipWorld;
+      // F2 amendment: the ship also turns during "aim" (launch toward the
+      // clicked object's screen direction), so the view basis is needed then.
+      const flightMode = this.warp.mode === "warp" || this.warp.mode === "aim";
+      let ld = null,
+        V = null,
+        shipDepth = SHIP_VIEW_DEPTH;
+      if (flightMode) {
+        ld = [
+          Math.cos(this.pitch) * Math.cos(this.yaw),
+          Math.cos(this.pitch) * Math.sin(this.yaw),
+          Math.sin(this.pitch),
+        ];
+        V = viewFrom(ld);
+      }
       let tx, ty, ts, ta;
-      if (sy > innerHeight * 0.55) {
+      if (warping) {
+        const px = this._shipWorld[0] - this.cam[0],
+          py = this._shipWorld[1] - this.cam[1],
+          pz = this._shipWorld[2] - this.cam[2];
+        const vx = V[0] * px + V[4] * py + V[8] * pz,
+          vy = V[1] * px + V[5] * py + V[9] * pz,
+          vz = Math.min(V[2] * px + V[6] * py + V[10] * pz, -1.2);
+        shipDepth = -vz;
+        const [nx, ny] = viewToNdc([vx, vy, vz], SHIP_BASE_FOV, aspect);
+        tx = nx;
+        ty = ny - SHIP_NDC_Y_OFFSET;
+        ts = SHIP_WARP_SCALE;
+        ta = SHIP_WARP_ALPHA;
+      } else if (sy > innerHeight * 0.55) {
         // corner escort while reading page content (modest 1.5× bump)
         tx = 0.72;
         ty = -0.6;
@@ -2362,9 +2536,9 @@ import {
       sh.s += (ts - sh.s) * kk;
       sh.a += (ta - sh.a) * kk;
       const fade = sh.a;
-      const aspect = W / H;
       // model: obj is nose -Z (blender export) — pitch it up-screen, view from behind-above
-      const bobNdc = this.reduced ? 0 : Math.sin(t * 1.4) * SHIP_BOB_NDC;
+      const bobNdc =
+        this.reduced || warping ? 0 : Math.sin(t * 1.4) * SHIP_BOB_NDC;
       const wk = this.warp.mode === "warp" ? this.warp.t : -1;
       const burning = wk >= 0 && (wk < 0.47 || wk > 0.53);
       const bank = Math.max(
@@ -2385,13 +2559,8 @@ import {
       // around a ship that keeps pointing where it is actually going. At rest
       // it settles into the classic hero attitude.
       let targetQ;
-      if (this.warp.mode === "warp") {
-        const ld = [
-          Math.cos(this.pitch) * Math.cos(this.yaw),
-          Math.cos(this.pitch) * Math.sin(this.yaw),
-          Math.sin(this.pitch),
-        ];
-        const V = viewFrom(ld);
+      if (flightMode) {
+        // ld/V computed once above (shared with the F2 chase-track transform)
         const wd = this._warpDir;
         let fx = V[0] * wd[0] + V[4] * wd[1] + V[8] * wd[2];
         let fy = V[1] * wd[0] + V[5] * wd[1] + V[9] * wd[2];
@@ -2421,7 +2590,7 @@ import {
       const [vpx, vpy, vpz] = ndcToView(
         sh.x,
         sh.y + SHIP_NDC_Y_OFFSET + bobNdc,
-        SHIP_VIEW_DEPTH,
+        shipDepth, // F2: chase distance breathes with the waypoint curve
         SHIP_BASE_FOV,
         aspect,
       );
@@ -2467,8 +2636,9 @@ import {
         if (P.aMeta >= 0) gl.disableVertexAttribArray(P.aMeta);
         gl.drawArrays(gl.LINES, 0, this.nShip);
       }
-      // P3 layered exhaust: phase-driven cone plumes (ship-dynamics.ts builds
-      // the crossed-quad geometry; additive blending is already active).
+      // PF-08 F3 layered noise exhaust: phase-driven cones whose fragment
+      // shader samples the generated turbulence texture (ship-dynamics.ts
+      // builds the [pos, axial, side] geometry; additive blending is active).
       const coasting = this.warp.mode === "warp" && !burning;
       const plumeP = {
         burning,
@@ -2481,6 +2651,13 @@ import {
       gl.useProgram(pp.prog);
       gl.uniformMatrix4fv(pp.u.uMVP, false, mvp);
       gl.uniform1f(pp.u.uAlpha, plumeAlpha(plumeP) * fade);
+      gl.uniform1f(pp.u.uTime, t);
+      gl.uniform1f(pp.u.uThrottle, plumeThrottle(plumeP));
+      if (this.plumeTex) {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.plumeTex);
+        gl.uniform1i(pp.u.uNoise, 0);
+      }
       gl.bindBuffer(gl.ARRAY_BUFFER, this.buf.plume);
       if (!this._plumeVerts) this._plumeVerts = buildPlumeVertices(0);
       gl.bufferData(
@@ -2488,9 +2665,11 @@ import {
         buildPlumeVertices(plumeFlareLength(plumeP), this._plumeVerts),
         gl.DYNAMIC_DRAW,
       );
+      const plumeStride = PLUME_VERTEX_FLOATS * 4;
       gl.enableVertexAttribArray(pp.aPos);
-      gl.vertexAttribPointer(pp.aPos, 4, gl.FLOAT, false, 16, 0);
-      if (pp.aMeta >= 0) gl.disableVertexAttribArray(pp.aMeta);
+      gl.vertexAttribPointer(pp.aPos, 3, gl.FLOAT, false, plumeStride, 0);
+      gl.enableVertexAttribArray(pp.aUV);
+      gl.vertexAttribPointer(pp.aUV, 2, gl.FLOAT, false, plumeStride, 12);
       gl.drawArrays(gl.TRIANGLES, 0, PLUME_VERTEX_COUNT);
       // engine glow points — the hot nozzle cores (both ship paths)
       gl.useProgram(P.prog);
@@ -2517,6 +2696,67 @@ import {
         (burning ? 30 : this.warp.mode === "warp" ? 10 : 14) * this.dpr,
       );
       gl.drawArrays(gl.POINTS, 0, 3);
+      // F3 ember sparks: a burst on burn start/stop, drifting back off the
+      // nozzles and fading. Point sprites in the same model-space mvp, drawn in
+      // three life buckets so they fade instead of popping. Reduced motion off.
+      if (!this.reduced) {
+        const started = burning && !this._burnPrev;
+        const stopped = !burning && this._burnPrev;
+        if (started || stopped) {
+          const n = started ? 14 : 8;
+          for (let i = 0; i < n && this._embers.length < 48; i++) {
+            const eng =
+              PLUME_ENGINES[(Math.random() * PLUME_ENGINES.length) | 0];
+            this._embers.push({
+              x: eng[0] + (Math.random() - 0.5) * 0.05,
+              y: eng[1] + (Math.random() - 0.5) * 0.05,
+              z: eng[2] + 0.05,
+              vx: (Math.random() - 0.5) * 0.7,
+              vy: (Math.random() - 0.5) * 0.7,
+              vz: 0.9 + Math.random() * 1.4, // drift backward (+Z, away from −Z nose)
+              life: 0.7 + Math.random() * 0.5,
+            });
+          }
+        }
+      }
+      this._burnPrev = burning;
+      if (this._embers.length) {
+        const live = [];
+        const b0 = [],
+          b1 = [],
+          b2 = [];
+        for (const e of this._embers) {
+          if (stepEmber(e, dt)) {
+            live.push(e);
+            const bucket = e.life > 0.66 ? b2 : e.life > 0.33 ? b1 : b0;
+            bucket.push(e.x, e.y, e.z);
+          }
+        }
+        this._embers = live;
+        if (!this.buf.ember) this.buf.ember = gl.createBuffer();
+        gl.useProgram(P.prog);
+        gl.uniformMatrix4fv(P.u.uMVP, false, mvp);
+        gl.uniform1f(P.u.uRound, 1);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.buf.ember);
+        gl.enableVertexAttribArray(P.aPos);
+        if (P.aMeta >= 0) gl.disableVertexAttribArray(P.aMeta);
+        for (const [pts, alpha, size] of [
+          [b0, 0.25, 3],
+          [b1, 0.5, 5],
+          [b2, 0.85, 7],
+        ]) {
+          if (!pts.length) continue;
+          gl.bufferData(
+            gl.ARRAY_BUFFER,
+            new Float32Array(pts),
+            gl.DYNAMIC_DRAW,
+          );
+          gl.vertexAttribPointer(P.aPos, 3, gl.FLOAT, false, 12, 0);
+          gl.uniform4f(P.u.uColor, 1.0, 0.6, 0.2, alpha * fade);
+          gl.uniform1f(P.u.uPtSize, size * this.dpr);
+          gl.drawArrays(gl.POINTS, 0, pts.length / 3);
+        }
+      }
     }
   }
   if (!customElements.get("space-engine"))
