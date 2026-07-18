@@ -9,6 +9,13 @@ declare module "react" {
         HTMLAttributes<HTMLElement>,
         HTMLElement
       >;
+      // PF-09 B0: the Babylon renderer (behind ?engine=babylon). Registered as a
+      // side effect of importing babylon-engine.ts; implements the same
+      // SpaceEngineElement contract (stubbed until B2).
+      "babylon-scene": DetailedHTMLProps<
+        HTMLAttributes<HTMLElement>,
+        HTMLElement
+      >;
     }
   }
 }

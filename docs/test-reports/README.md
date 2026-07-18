@@ -28,3 +28,10 @@
 | [TR-024](TR-024.md) | 2026-07-18 | PF-08 F2: 360° Travel Choreography + Chase Camera               | READY TO PROCEED                    |
 | [TR-025](TR-025.md) | 2026-07-18 | F2 Amendments: 30° Thruster Chase & Ship-Turns Launch           | READY TO PROCEED                    |
 | [TR-026](TR-026.md) | 2026-07-18 | PF-08 F3: Exhaust Realism (Layered Noise Plume + Embers)        | READY TO PROCEED                    |
+| [TR-027](TR-027.md) | 2026-07-18 | PF-09 B0: Dual-Engine Scaffold + Perf Telemetry                 | READY TO PROCEED                    |
+| [TR-028](TR-028.md) | 2026-07-18 | PF-09 B1: Renderer Parity Spike (bundle GO · fps gate pending)  | PARTIAL — gate owner-pending        |
+| [TR-029](TR-029.md) | 2026-07-18 | PF-09 B1-continued: WGSL Twin & WebGPU Point-Sprite Finding     | READY TO PROCEED                    |
+| [TR-030](TR-030.md) | 2026-07-18 | Shiki/CSP Config Warning Resolved (+ dev-server cleanup)        | READY TO PROCEED                    |
+| [TR-031](TR-031.md) | 2026-07-18 | Dev-Mode Hydration Crash (Vite dep-optimizer) + Gate Correction | READY TO PROCEED                    |
+| [TR-032](TR-032.md) | 2026-07-18 | Gate Instrument Defect: fps measured host rAF, not renders      | READY TO PROCEED (B1 still gated)   |
+| [TR-033](TR-033.md) | 2026-07-18 | Round 2: refresh-estimator bug + device-identity gap            | READY TO PROCEED (B1 still gated)   |

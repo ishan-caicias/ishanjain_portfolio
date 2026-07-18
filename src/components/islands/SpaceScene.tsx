@@ -18,6 +18,19 @@ import {
   resolveCraftAttribute,
   CRAFT_QUALITY_STORAGE_KEY,
 } from "@/lib/craft-tier";
+import {
+  resolveEngine,
+  parseEngineValue,
+  ENGINE_STORAGE_KEY,
+  type EngineKind,
+} from "@/lib/engine-select";
+import {
+  PerfMonitor,
+  classifyDeviceTier,
+  deviceSignature,
+  readDeviceContext,
+  type PerfSnapshot,
+} from "@/lib/perf-telemetry";
 import MissionControlBar from "./space/MissionControlBar";
 import type { CommandSuggestion } from "./space/MissionControlBar";
 import WarpOverlay from "./space/WarpOverlay";
@@ -75,6 +88,15 @@ export default function SpaceScene({
   const [state, setState] = useState<SceneState>(INITIAL_SCENE_STATE);
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // PF-09 B0: dual-engine seam. First render is always the current engine
+  // (matches the client:load SSR HTML — resolving synchronously would risk a
+  // hydration mismatch); a post-hydration effect swaps to Babylon only when
+  // ?engine=babylon is set. The default (webgl) path never swaps, so it stays
+  // behaviourally identical.
+  const [engineKind, setEngineKind] = useState<EngineKind>("webgl");
+  const [engineResolved, setEngineResolved] = useState(false);
+  const [perfHud, setPerfHud] = useState<PerfSnapshot | null>(null);
 
   // Mobile responsive pass (design_handoff_mobile_responsive): auto-resolves nav mode to
   // scroll on mobile / travel on desktop unless the user has explicitly overridden it via
@@ -187,11 +209,88 @@ export default function SpaceScene({
     }
   }, []);
 
-  // --- Phase 1: load the browser-only engine + data modules client-side only ---
+  // PF-09 B0: resolve the engine once, post-hydration (client-only).
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setEngineKind(
+      resolveEngine(
+        params.get("engine"),
+        parseEngineValue(localStorage.getItem(ENGINE_STORAGE_KEY)),
+      ),
+    );
+    setEngineResolved(true);
+  }, []);
+
+  // PF-09 B0: engine-agnostic perf telemetry (the B1-gate measurement
+  // instrument). Times mount → cosmos:ready for startup, samples rAF for fps;
+  // works for either engine with no change to their internals. Reports on
+  // demand via window.__ijPerf() and the cosmos:perf event; a visible readout
+  // is opt-in via ?perf=1 so default visuals are untouched.
+  useEffect(() => {
+    if (!engineResolved) return;
+    const monitor = new PerfMonitor(
+      engineKind,
+      classifyDeviceTier(readTierSignals(window)),
+      readDeviceContext(window),
+    );
+    monitor.start(performance.now());
+    const onReady = () => monitor.markReady(performance.now());
+    window.addEventListener("cosmos:ready", onReady);
+    // Read the ENGINE's own frame counter so a reading can prove the scene is
+    // really drawing — the host rAF loop keeps ticking even if it isn't.
+    // space-engine increments _frame per tick; babylon-scene exposes renderFrames.
+    type FrameCounterEl = Element & { _frame?: number; renderFrames?: number };
+    const selector =
+      engineKind === "babylon" ? "babylon-scene" : "space-engine";
+    // cache the element — this runs every animation frame, so re-querying the
+    // DOM here would add avoidable per-frame cost to the very thing we measure
+    let engineEl: FrameCounterEl | null = null;
+    const readEngineFrames = (): number | null => {
+      if (!engineEl || !engineEl.isConnected)
+        engineEl = document.querySelector(selector) as FrameCounterEl | null;
+      if (!engineEl) return null;
+      const n =
+        engineKind === "babylon" ? engineEl.renderFrames : engineEl._frame;
+      return typeof n === "number" ? n : null;
+    };
+    let raf = requestAnimationFrame(function loop() {
+      monitor.frame(performance.now());
+      monitor.setRenderFrames(readEngineFrames(), performance.now());
+      raf = requestAnimationFrame(loop);
+    });
+    const perfWin = window as unknown as { __ijPerf?: () => PerfSnapshot };
+    perfWin.__ijPerf = () => monitor.snapshot();
+    const onReq = () =>
+      window.dispatchEvent(
+        new CustomEvent("cosmos:perf", { detail: monitor.snapshot() }),
+      );
+    window.addEventListener("cosmos:perf:req", onReq);
+    const showPerf =
+      new URLSearchParams(window.location.search).get("perf") === "1";
+    const hudTimer = showPerf
+      ? window.setInterval(() => setPerfHud(monitor.snapshot()), 500)
+      : 0;
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("cosmos:ready", onReady);
+      window.removeEventListener("cosmos:perf:req", onReq);
+      if (hudTimer) window.clearInterval(hudTimer);
+      delete perfWin.__ijPerf;
+    };
+  }, [engineResolved, engineKind]);
+
+  // --- Phase 1: load the browser-only engine + data modules client-side only.
+  // Gated on the resolved engine (B0): imports the current WebGL engine by
+  // default, or the Babylon module when ?engine=babylon. ---
+  useEffect(() => {
+    if (!engineResolved) return;
     let cancelled = false;
+    const engineImport =
+      engineKind === "babylon"
+        ? import("@/lib/babylon-engine")
+        : import("@/lib/space-engine.js");
     Promise.all([
-      import("@/lib/space-engine.js"),
+      engineImport,
       import("@/data/celestial/celestial-catalog.js"),
       import("@/data/celestial/celestial-extra.js"),
       import("@/data/celestial/celestial-imgmap.js"),
@@ -203,7 +302,7 @@ export default function SpaceScene({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [engineResolved, engineKind]);
 
   useEffect(() => {
     const el = engineRef.current;
@@ -584,19 +683,51 @@ export default function SpaceScene({
           }))
       : [];
 
+  const engineStyle = {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
+  } as const;
+
   return (
     <>
-      <space-engine
-        ref={engineRef}
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          zIndex: 0,
-        }}
-      />
+      {engineKind === "babylon" ? (
+        // PF-09 B0: no ref — the host drives via querySelector("space-engine")
+        // (null here), so its engine calls no-op while this preview self-runs.
+        <babylon-scene style={engineStyle} />
+      ) : (
+        <space-engine ref={engineRef} style={engineStyle} />
+      )}
+
+      {perfHud && (
+        <div
+          style={{
+            position: "fixed",
+            top: 8,
+            left: 8,
+            zIndex: 80,
+            font: "11px/1.5 monospace",
+            letterSpacing: "0.08em",
+            color: "#9fa8da",
+            background: "rgba(5,8,26,0.72)",
+            border: "1px solid #1a237e",
+            borderRadius: 6,
+            padding: "6px 9px",
+            pointerEvents: "none",
+            whiteSpace: "pre",
+          }}
+        >
+          {`ENGINE ${perfHud.engine} · TIER ${perfHud.tier}\n` +
+            `STARTUP ${perfHud.startupMs == null ? "—" : Math.round(perfHud.startupMs) + "ms"}\n` +
+            `▶ RENDER FPS ${perfHud.renderFps ?? "—"}   ← RECORD THIS\n` +
+            `   host rAF ${perfHud.fps} / ${perfHud.displayHz || "?"}Hz${perfHud.fps > perfHud.displayHz + 2 ? " ⚠IMPOSSIBLE" : ""}\n` +
+            `   rendered ${perfHud.renderFrames == null ? "— (no counter)" : perfHud.renderFrames}${perfHud.renderFrames === 0 ? " ⚠NOT DRAWING" : ""}\n` +
+            `   ${deviceSignature(perfHud.device)}`}
+        </div>
+      )}
 
       <HUD
         progress={state.progress}

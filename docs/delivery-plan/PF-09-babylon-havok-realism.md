@@ -1,9 +1,13 @@
 # PF-09 Babylon + Havok Realism Engine
 
 **Date:** 2026-07-18
-**Status:** PLANNED — awaiting owner approval to start B0.
+**Status:** IN PROGRESS — B0 complete ([TR-027](../test-reports/TR-027.md)) · **B1 gate decided:
+CONDITIONAL GO** ([ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md)) on desktop evidence;
+mobile unmeasured and gating the B6 cutover, not B2 · **B2 next**.
 **Supersedes:** [ADR-0002](../adr/0002-in-engine-glb-ship-renderer.md) (zero runtime 3D deps) —
-_conditionally_, at the B1 gate, from measured data. A new ADR is written at B1, not before.
+conditionally, per [ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md), written at the B1
+gate from measured desktop data. The current engine remains the shipping default until the
+mobile condition is discharged.
 **Basis:** [Graphics/physics engine evaluation + Babylon cost addendum](../architecture/2026-07-18-graphics-physics-engine-evaluation.md),
 building on PF-08 ([DELIVERED](PF-08-flight-v3.md), 67 unit / 48 E2E).
 
@@ -54,6 +58,12 @@ Add `@babylonjs/core` (+ loaders), stand up a `BabylonScene` island alongside th
 **perf-telemetry harness**: startup timing + rolling fps + device-tier detection, logged for A/B.
 No visual parity yet — just two engines mountable behind a flag and a way to measure them.
 **Exit:** both engines load behind the flag; telemetry reports startup + fps on demand.
+**Outcome (2026-07-18, TR-027):** ✅ Delivered — `engine-select.ts` (`?engine=` resolver, default
+webgl), `perf-telemetry.ts` (engine-agnostic `PerfMonitor` → `window.__ijPerf()` + `?perf=1`
+overlay), `babylon-engine.ts` (`<babylon-scene>`, minimal WebGL2 scene), SpaceScene post-hydration
+swap. Default bundle unchanged (Babylon is a lazy chunk). 80/80 unit · 51/51 E2E. **Measured
+finding for B1:** the `@babylonjs/core` barrel import = **1.1 MB gz** (over the ~900 KB budget) —
+B1 must use tree-shaken subpath imports + `WebGPUEngine`.
 
 ### B1 — Renderer parity spike ⛔ GO / NO-GO GATE
 
@@ -65,6 +75,27 @@ engine. **GATE:** meet the B1 budgets above → write the superseding ADR from m
 proceed to B2. Miss them → stop, keep the current engine, record the negative result, and
 cherry-pick isolated upgrades instead. _This is the only irreversible commitment point._
 **Exit:** parity scene measured on 3 device classes; ADR written; explicit go/no-go recorded.
+**GATE DECIDED (2026-07-18): CONDITIONAL GO — [ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md).**
+Desktop (real hardware): Babylon **140 fps / 1070 ms** vs current **142 fps / 1357 ms** against a
+60 fps floor — parity on fps, _better_ on startup, with the bundle already under budget. Mobile
+rows were **DevTools emulation** (owner confirmed, no physical phone) so mobile perf is
+**UNMEASURED, not passed**; it gates the B6 cutover rather than B2 development. The current engine
+stays default throughout. Conditions to discharge: real-device mobile fps · confirm the badge
+reads `BABYLON WEBGPU` (WGSL twin still unproven on hardware) · billboard memory reduction.
+
+**Progress (2026-07-18, TR-028):** ⏳ Spike built & CI-verified; gate awaiting owner devices.
+Tree-shaken subpath imports + WebGPU (WebGL2 fallback); 168k-star custom-ShaderMaterial cloud
+([star-field.ts](../../src/lib/star-field.ts)). **Bundle GO: 329 KB gz** (from 1.1 MB barrel,
+under the ~900 KB budget); default path unchanged. 84 unit · 51 E2E. fps/startup + WebGPU path
+require real desktop/Android/iPhone — see the
+[gate procedure](../validation-checklist/2026-07-18-pf09-b1-gate-measurement.md). ADR-0002 not
+yet superseded (only after a GO reading).
+**B1-continued (2026-07-18, TR-029):** ✅ WGSL twin delivered — and it exposed a technique-level
+finding: **WebGPU has no `gl_PointSize`**, so the live engine's point-sprite star field cannot
+port at all. Stars re-architected as **billboard quads** (one merged indexed mesh; thin instances
+rejected — they need a matrix buffer). GLSL + WGSL twins selected by backend. Verified drawing the
+full catalog: 1,013,754 active indices, 237,959 lit pixels. 86 unit · 52 E2E · bundle still
+330 KB gz. WGSL path itself is unvalidated until a real WebGPU device runs it.
 
 ### B2 — Cinematic flight port ("travel feels real")
 
