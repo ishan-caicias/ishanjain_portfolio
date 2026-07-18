@@ -2,9 +2,12 @@
 
 **Date:** 2026-07-18
 **Status:** Accepted — **conditional**. Supersedes [ADR-0002](0002-in-engine-glb-ship-renderer.md)'s
-zero-runtime-3D-dependency stance for the renderer layer **only as far as desktop evidence
-supports**; the current WebGL1 engine remains the shipping default until the mobile condition
-below is discharged.
+zero-runtime-3D-dependency stance for the renderer layer **only as far as measured evidence
+supports**; the current WebGL1 engine remains the shipping default until the remaining conditions
+are discharged.
+**Condition status (2026-07-19):** 1 of 3 cleared — mobile measured on real Android and **passed**;
+the WebGPU-backend confirmation and billboard-memory work still gate the cutover.
+See [Condition status](#condition-status).
 **Context:** PF-09 [B0](../test-reports/TR-027.md) / [B1](../test-reports/TR-028.md) spike,
 [WGSL + point-sprite finding](../test-reports/TR-029.md),
 [gate instrument corrections](../test-reports/TR-032.md) & [TR-033](../test-reports/TR-033.md),
@@ -25,7 +28,7 @@ retired, until the mobile performance condition is measured on real hardware.
 | Desktop render fps       | Babylon **140** vs current **142** (budget 60) — parity, 2.3× budget | ✅ GO             |
 | Desktop startup          | Babylon **1070 ms** vs current **1357 ms** — Babylon _faster_        | ✅ GO             |
 | Functional correctness   | 168,959-star field draws; 92 unit / 52 E2E green incl. pixel proof   | ✅ GO             |
-| **Mobile fps / startup** | **UNMEASURED** — no physical iPhone or Android available             | ⚠️ **OPEN**       |
+| **Mobile fps / startup** | UNMEASURED at decision time — **closed 2026-07-19**, see below       | ✅ GO (Android)   |
 | WebGPU on real hardware  | Probable on desktop but **unconfirmed** (see condition 2)            | ⚠️ **OPEN**       |
 
 Desktop rows are from real hardware (Windows, 16 cores) and are the basis of this decision.
@@ -64,6 +67,39 @@ If condition 1 fails on real hardware, this ADR is revisited: the current engine
 we cherry-pick isolated Babylon upgrades rather than completing the migration. That path remains
 cheap because the dual-engine seam (B0) keeps both renderers live behind one flag.
 
+## Condition status
+
+| #   | Condition                           | Status                         | Evidence                        |
+| --- | ----------------------------------- | ------------------------------ | ------------------------------- |
+| 1   | Real-device mobile measurement      | ✅ **DISCHARGED** (2026-07-19) | Round 3, physical Android       |
+| 2   | Confirm the WebGPU backend ran      | ⚠️ OPEN                        | badge still unobserved          |
+| 3   | Billboard memory reduction (~23 MB) | ⚠️ OPEN                        | engineering task, not a reading |
+
+### Condition 1 — discharged 2026-07-19
+
+Measured on a **physical Android** (`384x832 · dpr2.8125 · 8c` → 1080×2340), both engines, against
+the Netlify preview deploy — see the
+[gate record, Round 3](../validation-checklist/2026-07-18-pf09-b1-gate-measurement.md):
+
+| Engine      | Startup    | RENDER FPS | Budget         | Pass |
+| ----------- | ---------- | ---------- | -------------- | ---- |
+| **babylon** | **678 ms** | **60**     | ≥ 40 · ≤ 4.0 s | ✅   |
+| current     | 1745 ms    | 60         | ≥ 40 · ≤ 4.0 s | ✅   |
+
+Babylon clears the mid-Android row with margin and is **2.6× faster to interactive** than the
+current engine — a wider margin than desktop showed (1.27×). The reading passes every rejection
+rule in the gate procedure, including the emulation heuristic (8 cores, non-integer dpr).
+
+**Scope of what this proves, stated precisely:** the panel was forced to 60 Hz by battery-saver
+mode, so both engines sit at the vsync cap and tie by construction. This establishes that Babylon
+_reaches_ the cap on throttled real hardware — not how much headroom it has above it. Battery
+saver also throttles CPU/GPU, which makes the pass conservative rather than optimistic. A 120 Hz
+device and an iPhone remain unmeasured; the ADR's stated minimum ("at minimum one physical
+Android") is met.
+
+**Consequence:** the primary open risk on PF-09 — unknown mobile performance — is closed for
+Android. Conditions 2 and 3 still gate the B6 cutover; mobile fps no longer does.
+
 ## Consequences
 
 - **Accepted:** ADR-0002's "zero runtime 3D dependencies" no longer holds for the renderer layer.
@@ -77,8 +113,11 @@ cheap because the dual-engine seam (B0) keeps both renderers live behind one fla
   single item in B2's estimate.
 - **Preserved:** the current engine remains default and fully supported throughout B2–B5, so the
   live site carries no risk from this decision.
-- **Risk carried forward:** mobile performance is unknown. It is tracked as the primary open risk
-  on PF-09 and gates the B6 cutover, not B2 development.
+- **Risk carried forward (as written 2026-07-18):** mobile performance is unknown. It is tracked as
+  the primary open risk on PF-09 and gates the B6 cutover, not B2 development.
+  → **Update 2026-07-19: closed for Android** (condition 1 above). Babylon passes the mid-Android
+  budget on real, battery-saver-throttled hardware. Residual mobile unknowns are narrower: no
+  120 Hz device and no iPhone measured, and 60 fps was a vsync cap rather than a ceiling.
 
 ## Alternatives considered
 

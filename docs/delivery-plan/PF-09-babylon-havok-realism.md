@@ -2,8 +2,10 @@
 
 **Date:** 2026-07-18
 **Status:** IN PROGRESS — B0 complete ([TR-027](../test-reports/TR-027.md)) · **B1 gate decided:
-CONDITIONAL GO** ([ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md)) on desktop evidence;
-mobile unmeasured and gating the B6 cutover, not B2 · **B2 next**.
+CONDITIONAL GO** ([ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md)) on desktop evidence ·
+**mobile condition DISCHARGED 2026-07-19** on real Android (Babylon 60 fps / 678 ms vs current
+60 fps / 1745 ms, budget ≥ 40 fps · ≤ 4.0 s) — the primary open risk is closed; conditions 2
+(WebGPU badge) and 3 (billboard memory) still gate the B6 cutover · **B2 next**.
 **Supersedes:** [ADR-0002](../adr/0002-in-engine-glb-ship-renderer.md) (zero runtime 3D deps) —
 conditionally, per [ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md), written at the B1
 gate from measured desktop data. The current engine remains the shipping default until the

@@ -46,9 +46,11 @@ dep cache is stale: `rm -rf node_modules/.vite/deps` and restart.
    record **RENDER FPS** (not the host-rAF figure) and **STARTUP**.
 3. For a precise snapshot, open the console and run `window.__ijPerf()` — it returns
    `{ engine, tier, startupMs, fps, renderFps, displayHz, renderFrames, frames, device }`.
-4. On the Babylon page, confirm the badge reads `BABYLON WEBGPU · …` on WebGPU-capable
-   browsers (it reads `WEBGL2` on the fallback). If it says WEBGL2 on a device you expect to
-   support WebGPU, note that — it is a finding.
+4. On the Babylon page, the backend is now printed **on the overlay's first line** (TR-035):
+   `ENGINE babylon · WEBGPU · TIER low`. `WEBGL2` means the fallback ran and the WGSL path is
+   unproven on that device — a finding worth noting. `BACKEND ?` means Babylon's async init has
+   not resolved yet; wait a moment and re-read. (The same string also appears on a badge at the
+   **bottom-left** of the canvas, which is easy to miss on a phone — hence the overlay field.)
 
 ### Round 1 (2026-07-18) — ⚠️ VOID, instrument defect. Do not use.
 
@@ -109,6 +111,75 @@ Chrome DevTools emulation; no physical phone was available.**
   or a cloud device lab. Also confirm the badge reads `BABYLON WEBGPU` — the `Backend` column
   below was pre-filled from the template, not observed, so the WGSL twin's real-hardware
   execution is still unconfirmed.
+
+---
+
+### Round 3 (2026-07-19) — ✅ REAL ANDROID HARDWARE · ADR-0003 condition 1 DISCHARGED
+
+Owner measured a **physical Android** against the Netlify preview deploy, both engines:
+
+| Device class          | Engine      | Startup (ms) | **RENDER FPS** | displayHz | Budget         | Pass? |
+| --------------------- | ----------- | ------------ | -------------- | --------- | -------------- | ----- |
+| Android (real device) | **babylon** | **678**      | **60**         | 62        | ≥ 40 · ≤ 4.0 s | ✅    |
+| Android (real device) | current     | 1745         | 60             | 62        | ≥ 40 · ≤ 4.0 s | ✅    |
+
+Device line: `Android · 384x832 · dpr2.8125 · 8c`.
+**Panel forced to 60 Hz by battery-saver mode** (owner-reported).
+
+**This is the first mobile data in this gate that passes every rejection rule:**
+
+- `renderFps` 60 ≤ `displayHz` 62 — consistent, not impossible.
+- 60 fps on a 62 Hz panel is exactly vsync-locked behaviour.
+- `dpr 2.8125 × 384×832` = **1080×2340**, a real Android panel; no emulation preset produces a
+  non-integer dpr like this.
+- **8 cores** — a genuine phone, not the 16-core desktop signature. No `⚠LOOKS EMULATED` flag.
+- Both startups exceed the 300 ms warm-page floor.
+
+#### Verdict: condition 1 of [ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md) is discharged
+
+Babylon clears the mid-Android row on **real hardware**: 60 fps against a ≥ 40 floor, 678 ms
+against a ≤ 4.0 s budget. The ADR's stated minimum was "one physical Android"; that is met.
+
+**Babylon is 2.6× faster to interactive than the current engine (678 ms vs 1745 ms)** — and the
+gap is _wider_ on mobile than on desktop (1070 vs 1357 ms, 1.27×). Plausible cause, not yet
+confirmed: the current engine streams 168,959 stars in 8,000-star chunks at `setTimeout(…, 16)`
+(≥ 350 ms of pure timer delay) and decodes 2.9 MB of PNGs — both of which punish a phone harder
+than a desktop. Babylon's merged-mesh path avoids the chunked stream. Worth verifying before
+relying on it.
+
+#### Two honest limits on this result
+
+1. **60 fps is the vsync cap, not the ceiling.** Battery saver forced the panel to 60 Hz, so both
+   engines are pinned at the cap and tie _by construction_. This measures "reaches the cap", not
+   "how much headroom remains". Babylon's true mobile ceiling is still unknown, and a 120 Hz phone
+   remains unmeasured.
+2. **Battery saver makes the pass stronger, not weaker.** It throttles CPU/GPU as well as refresh,
+   so Babylon cleared the floor on a _deliberately throttled_ device. Unthrottled can only improve.
+
+**On the startup figure:** 678 ms on a phone is faster than the 1070 ms desktop reading, which is
+counter-intuitive and suggests a partially warm cache or CDN advantage. Flagged rather than
+resolved — **the conclusion does not depend on it**: even at 2× pessimism the figure clears the
+4.0 s budget by a wide margin.
+
+**Still open:** condition 2 (which backend the phone negotiated) and condition 3 (billboard memory
+reduction). iPhone remains unmeasured; the ADR treats it as "ideally", not a minimum.
+
+#### `TIER low` on this reading does NOT mean a reduced scene ([TR-035](../test-reports/TR-035.md))
+
+The overlay read `ENGINE BABYLON · TIER low`. **Tier is reporting-only on the Babylon path** —
+`babylon-engine.ts` calls `buildStarField(LIVE_STAR_COUNT)` unconditionally and never consults it;
+tier gating is B5 scope, not yet implemented. `low` was assigned solely because
+`viewportWidth < 768` (the phone is 384 CSS px).
+
+**So Round 3 is stronger than the table suggests:** 60 fps on the **full 168,959-star field**, on a
+low-tier phone, under battery-saver throttling — no quality reduction of any kind.
+
+⚠️ **The comparison is asymmetric, favouring the current engine.** `space-engine.js` has an
+adaptive quality governor (self-downgrades after 70 bad frames, scales quality multipliers) and
+loads the 1K craft model below 768 px. **Babylon has neither.** The current engine can buy
+framerate by shedding quality; Babylon held 60 fps without that lever. Conversely Babylon is not
+yet carrying the ship (B2), so its startup figure is not complete either — re-measure after B2
+rather than treating 678 ms vs 1745 ms as final like-for-like.
 
 ---
 

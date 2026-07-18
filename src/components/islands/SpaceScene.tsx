@@ -97,6 +97,9 @@ export default function SpaceScene({
   const [engineKind, setEngineKind] = useState<EngineKind>("webgl");
   const [engineResolved, setEngineResolved] = useState(false);
   const [perfHud, setPerfHud] = useState<PerfSnapshot | null>(null);
+  /** Render backend reported by <babylon-scene> ("webgpu" | "webgl2"); null on
+   * the WebGL engine or before Babylon's async init resolves. */
+  const [backend, setBackend] = useState<string | null>(null);
 
   // Mobile responsive pass (design_handoff_mobile_responsive): auto-resolves nav mode to
   // scroll on mobile / travel on desktop unless the user has explicitly overridden it via
@@ -239,18 +242,29 @@ export default function SpaceScene({
     // Read the ENGINE's own frame counter so a reading can prove the scene is
     // really drawing — the host rAF loop keeps ticking even if it isn't.
     // space-engine increments _frame per tick; babylon-scene exposes renderFrames.
-    type FrameCounterEl = Element & { _frame?: number; renderFrames?: number };
+    type FrameCounterEl = Element & {
+      _frame?: number;
+      renderFrames?: number;
+      /** babylon-scene only: "webgpu" | "webgl2", null until init resolves. */
+      backend?: string | null;
+    };
     const selector =
       engineKind === "babylon" ? "babylon-scene" : "space-engine";
     // cache the element — this runs every animation frame, so re-querying the
     // DOM here would add avoidable per-frame cost to the very thing we measure
     let engineEl: FrameCounterEl | null = null;
-    const readEngineFrames = (): number | null => {
+    // Resolving the element must NOT depend on the rAF loop having run: rAF is
+    // throttled to zero in background tabs and heavily under battery saver, and
+    // the HUD interval still fires there. Both callers resolve through this.
+    const resolveEngineEl = (): FrameCounterEl | null => {
       if (!engineEl || !engineEl.isConnected)
         engineEl = document.querySelector(selector) as FrameCounterEl | null;
-      if (!engineEl) return null;
-      const n =
-        engineKind === "babylon" ? engineEl.renderFrames : engineEl._frame;
+      return engineEl;
+    };
+    const readEngineFrames = (): number | null => {
+      const el = resolveEngineEl();
+      if (!el) return null;
+      const n = engineKind === "babylon" ? el.renderFrames : el._frame;
       return typeof n === "number" ? n : null;
     };
     let raf = requestAnimationFrame(function loop() {
@@ -268,7 +282,14 @@ export default function SpaceScene({
     const showPerf =
       new URLSearchParams(window.location.search).get("perf") === "1";
     const hudTimer = showPerf
-      ? window.setInterval(() => setPerfHud(monitor.snapshot()), 500)
+      ? window.setInterval(() => {
+          setPerfHud(monitor.snapshot());
+          // Gate condition 2 (ADR-0003) is "did the WGSL/WebGPU path actually
+          // run?". That was only ever readable from the engine's own badge in
+          // the opposite screen corner, which is easy to miss on a phone — so
+          // surface it on the overlay the gate procedure tells you to read.
+          setBackend(resolveEngineEl()?.backend ?? null);
+        }, 500)
       : 0;
     return () => {
       cancelAnimationFrame(raf);
@@ -720,7 +741,11 @@ export default function SpaceScene({
             whiteSpace: "pre",
           }}
         >
-          {`ENGINE ${perfHud.engine} · TIER ${perfHud.tier}\n` +
+          {`ENGINE ${perfHud.engine}${
+            perfHud.engine === "babylon"
+              ? ` · ${backend ? backend.toUpperCase() : "BACKEND ?"}`
+              : ""
+          } · TIER ${perfHud.tier}\n` +
             `STARTUP ${perfHud.startupMs == null ? "—" : Math.round(perfHud.startupMs) + "ms"}\n` +
             `▶ RENDER FPS ${perfHud.renderFps ?? "—"}   ← RECORD THIS\n` +
             `   host rAF ${perfHud.fps} / ${perfHud.displayHz || "?"}Hz${perfHud.fps > perfHud.displayHz + 2 ? " ⚠IMPOSSIBLE" : ""}\n` +
