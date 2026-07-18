@@ -105,7 +105,36 @@ Re-implement the PF-08 flight model on the Babylon camera/scene: damped-spring +
 orientation, the 30° behind-the-thruster chase, launch-points-at-click, arrival framing. Add
 **distance-scaled travel**: near hops are quick; multi-hundred-ly journeys spend longer at cruise
 (velocity profile keyed off `ly`), so speed communicates distance. Reduced-motion parity.
-**Exit:** the PF-08 journey reproduces on Babylon, now with distance-driven pacing; suite green.
+
+**Scope addition (2026-07-19): vertex-index expansion** — ADR-0003 condition 3 folded in here
+rather than deferred to B3. The B1 buffer layout stores each star's xyz **four times** (once per
+quad corner) plus a 4-float corner attribute, costing ~23 MB against the live engine's ~2.7 MB:
+
+| Buffer      | B1 layout          | Size    |
+| ----------- | ------------------ | ------- |
+| `positions` | 675,836 × 3 floats | 8.1 MB  |
+| `corners`   | 675,836 × 4 floats | 10.8 MB |
+| `indices`   | 1,013,754 × Uint32 | 4.1 MB  |
+
+Both the corner offset (`vertex_index % 4`) and the star index (`vertex_index / 4`) are derivable
+in-shader from `@builtin(vertex_index)` / `gl_VertexID`, so per-star attributes need storing only
+**once**. This is a WebGPU-native technique unavailable in WebGL1 — an upgrade, not a workaround.
+
+**Sequenced this way deliberately** — the buffer path is rewritten _before_ real data lands, so the
+catalog is built into the final layout rather than migrated twice:
+
+1. **Vertex expansion** — rewrite the star buffer path + WGSL/GLSL twins; memory measured.
+2. **Real catalog swap** — replace `buildStarField`'s seeded-LCG placeholder with the actual
+   Gaia/Hipparcos catalog and port the photometric shader.
+3. **Flight model port** — wire the existing pure, unit-tested `ship-dynamics.ts` to a Babylon
+   camera (damped spring + quaternion slerp).
+4. **Chase camera · launch-at-click · arrival framing** — the PF-08 choreography.
+5. **Distance-scaled travel** — velocity profile keyed off `ly`.
+6. **Reduced-motion parity.**
+
+**Exit:** the PF-08 journey reproduces on Babylon, now with distance-driven pacing; star memory
+materially below the B1 figure; suite green. **Re-measure fps/startup after this phase** — the B1
+readings were taken on procedural stars with no ship and are an upper bound (TR-035).
 
 ### B3 — Volumetric & particle rendering
 

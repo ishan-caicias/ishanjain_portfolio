@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildStarBillboards,
   buildStarField,
+  cornerFromVertexId,
+  CORNERS,
   LIVE_STAR_COUNT,
 } from "@/lib/star-field";
 
@@ -34,7 +36,7 @@ describe("buildStarField", () => {
     expect(b.count).toBe(50);
     expect(b.vertexCount).toBe(200);
     expect(b.positions).toHaveLength(600);
-    expect(b.corners).toHaveLength(800);
+    expect(b.meta).toHaveLength(400); // 200 verts * 2 floats (size, colourT)
     expect(b.indices).toHaveLength(300);
 
     for (let i = 0; i < f.count; i++) {
@@ -45,10 +47,8 @@ describe("buildStarField", () => {
         // every corner of a star shares its centre, size and colour
         expect(b.positions[v * 3]).toBe(f.positions[i * 3]);
         expect(b.positions[v * 3 + 2]).toBe(f.positions[i * 3 + 2]);
-        expect(Math.abs(b.corners[v * 4])).toBe(1); // cornerX ∈ {-1,1}
-        expect(Math.abs(b.corners[v * 4 + 1])).toBe(1); // cornerY ∈ {-1,1}
-        expect(b.corners[v * 4 + 2]).toBe(size);
-        expect(b.corners[v * 4 + 3]).toBe(colT);
+        expect(b.meta[v * 2]).toBe(size);
+        expect(b.meta[v * 2 + 1]).toBe(colT);
       }
       // two triangles, indices confined to this star's own 4 verts
       for (let k = 0; k < 6; k++) {
@@ -57,6 +57,33 @@ describe("buildStarField", () => {
         expect(idx).toBeLessThan(i * 4 + 4);
       }
     }
+  });
+
+  // B2 vertex expansion: the quad corner is no longer stored in a buffer, it is
+  // recomputed inside BOTH shader twins. That makes this arithmetic a contract
+  // between JS and two shader languages with no compiler to check it — so it is
+  // pinned here. If this fails, the GLSL/WGSL `select`/ternary lines are wrong
+  // and stars will render as skewed or degenerate quads.
+  it("corner derivation reproduces the winding table exactly", () => {
+    for (let c = 0; c < 4; c++) {
+      expect(cornerFromVertexId(c)).toEqual(CORNERS[c]);
+    }
+  });
+
+  it("corner derivation repeats every 4 vertices across many stars", () => {
+    for (let v = 0; v < 4 * 500; v++) {
+      const [cx, cy] = cornerFromVertexId(v);
+      expect([cx, cy]).toEqual(CORNERS[v % 4]);
+      expect(Math.abs(cx)).toBe(1);
+      expect(Math.abs(cy)).toBe(1);
+    }
+  });
+
+  it("derived corners give each quad four distinct, non-degenerate corners", () => {
+    const seen = new Set(
+      [0, 1, 2, 3].map((c) => cornerFromVertexId(c).join(",")),
+    );
+    expect(seen.size).toBe(4); // a repeat here collapses the quad to a sliver
   });
 
   it("indices exceed 16-bit range at full catalog size (needs 32-bit)", () => {

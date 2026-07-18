@@ -33,34 +33,60 @@ export const LIVE_STAR_COUNT = 168959;
  *     custom per-instance buffers leaves `thinInstanceCount` at 0 and nothing
  *     draws. Rather than carry ~10.8 MB of per-star matrices, the spike merges
  *     every quad into one indexed mesh: no instancing machinery, identical on
- *     both backends. Cost: ~23 MB of vertex data (see TR-029) — swapping this
- *     for matrix-backed instancing is a B1-continued optimisation.
+ *     both backends.
  *
- * Each vertex carries the star centre plus `corner` = (cx, cy, size, colourT);
- * the vertex shader billboards the corner in view space.
+ * **B2 vertex expansion (2026-07-19).** The B1 layout stored a 4-float `corner`
+ * attribute per vertex — 10.8 MB, of which the (cx, cy) half is pure redundancy:
+ * it is a fixed 4-entry table indexed by `vertexID % 4`. Both shader twins now
+ * derive it from `gl_VertexID` (GLSL ES 3.00) / `vertexInputs.vertexIndex`
+ * (WGSL), so only (size, colourT) is stored. That is 5.4 MB saved outright,
+ * with no per-backend divergence — the derivation is pure integer arithmetic
+ * available identically on both.
+ *
+ * Remaining layout (~17.6 MB for the live count):
+ *   positions 8.1 MB · meta 5.4 MB · indices 4.1 MB (Uint32 forced, >65535 verts)
+ *
+ * **The live engine's ~2.7 MB is NOT a reachable target here** — it gets that by
+ * drawing one vertex per star as a point sprite, which WebGPU cannot do at all.
+ * `positions` alone is an irreducible 8.1 MB floor while the mesh needs a real
+ * per-vertex position attribute. Moving (size, colourT) into a per-star data
+ * texture fetched by `vertexID / 4` would take this to ~14.9 MB and is the next
+ * available increment; it was not taken here because a float-texture format that
+ * silently misbehaves on one backend would risk the WebGPU path we have only
+ * just confirmed working on real Android hardware.
  */
 export interface StarBillboards {
   /** star centre xyz, repeated per corner (verts * 3). */
   positions: Float32Array;
-  /** cornerX, cornerY, size, colourT (verts * 4). */
-  corners: Float32Array;
+  /** size, colourT (verts * 2). The quad corner is NOT stored — see below. */
+  meta: Float32Array;
   indices: Uint32Array;
   vertexCount: number;
   count: number;
 }
 
-const CORNERS: readonly [number, number][] = [
+/** Corner winding, kept as the single source of truth for the shader twins.
+ * Index `c` (= vertexID % 4) maps to (cx, cy); both shaders derive it with
+ * `cx = (c == 1 || c == 2) ? 1 : -1`, `cy = (c >= 2) ? 1 : -1`.
+ * Exported so a unit test can assert the arithmetic matches this table. */
+export const CORNERS: readonly [number, number][] = [
   [-1, -1],
   [1, -1],
   [1, 1],
   [-1, 1],
 ];
 
+/** The corner arithmetic the shaders use, in JS, so it is testable off-GPU. */
+export function cornerFromVertexId(vertexId: number): [number, number] {
+  const c = vertexId % 4;
+  return [c === 1 || c === 2 ? 1 : -1, c >= 2 ? 1 : -1];
+}
+
 export function buildStarBillboards(field: StarField): StarBillboards {
   const { count } = field;
   const vertexCount = count * 4;
   const positions = new Float32Array(vertexCount * 3);
-  const corners = new Float32Array(vertexCount * 4);
+  const meta = new Float32Array(vertexCount * 2);
   const indices = new Uint32Array(count * 6);
   for (let i = 0; i < count; i++) {
     const x = field.positions[i * 3];
@@ -74,10 +100,10 @@ export function buildStarBillboards(field: StarField): StarBillboards {
       positions[v * 3] = x;
       positions[v * 3 + 1] = y;
       positions[v * 3 + 2] = z;
-      corners[v * 4] = CORNERS[c][0];
-      corners[v * 4 + 1] = CORNERS[c][1];
-      corners[v * 4 + 2] = size;
-      corners[v * 4 + 3] = colT;
+      // corner (cx, cy) is deliberately NOT stored — both shader twins derive
+      // it from the vertex id (B2 vertex expansion, see the header note).
+      meta[v * 2] = size;
+      meta[v * 2 + 1] = colT;
     }
     const o = i * 6;
     indices[o] = v0;
@@ -87,7 +113,7 @@ export function buildStarBillboards(field: StarField): StarBillboards {
     indices[o + 4] = v0 + 2;
     indices[o + 5] = v0 + 3;
   }
-  return { positions, corners, indices, vertexCount, count };
+  return { positions, meta, indices, vertexCount, count };
 }
 
 export function buildStarField(

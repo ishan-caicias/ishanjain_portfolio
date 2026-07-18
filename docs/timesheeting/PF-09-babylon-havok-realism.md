@@ -30,12 +30,12 @@ Plan: [docs/delivery-plan/PF-09-babylon-havok-realism.md](../delivery-plan/PF-09
     "project": "ishanjain-portfolio",
     "deliveryPlan": "PF-09-babylon-havok-realism",
     "phase": "B2 — Cinematic flight port",
-    "detail": "PF-08 flight model on Babylon + distance-scaled travel pacing",
-    "status": "planned",
-    "start": null,
+    "detail": "Vertex expansion → catalog swap → flight model → chase camera → distance pacing → reduced-motion",
+    "status": "inprogress",
+    "start": "2026-07-19T01:25:00Z",
     "end": null,
     "llmStrategy": null,
-    "notes": "Gated behind B1 go. 'Travel feels real' — speed communicates distance via ly-keyed velocity profile."
+    "notes": "Started 2026-07-19 after ADR-0003 conditions 1 and 2 were both discharged on real Android hardware. Scope extended with the vertex-index expansion (ADR-0003 condition 3, folded in from B3). Step 1 of 6 COMPLETE (TR-036): quad corner derived from gl_VertexID / vertexInputs.vertexIndex instead of stored, star vertex buffers 21.9 → 16.8 MiB (-5.2 MiB, 24%). Verified 95/95 unit, 52/52 E2E incl. the Babylon pixel proof, build exit 0. HONEST GAP: the pixel proof runs on Playwright chromium which has no WebGPU adapter, so it validates the GLSL twin only; the WGSL twin is evidenced by materialReady=true (effect compiled) + 1,013,754 active indices + zero console errors, but not by pixels — a WebGPU canvas cannot be read back via drawImage locally. Steps 2-6 (real catalog, flight model, chase camera, distance pacing, reduced-motion) NOT started."
   },
   {
     "project": "ishanjain-portfolio",

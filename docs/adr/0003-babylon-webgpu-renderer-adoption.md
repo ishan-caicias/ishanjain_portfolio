@@ -5,9 +5,9 @@
 zero-runtime-3D-dependency stance for the renderer layer **only as far as measured evidence
 supports**; the current WebGL1 engine remains the shipping default until the remaining conditions
 are discharged.
-**Condition status (2026-07-19):** 1 of 3 cleared — mobile measured on real Android and **passed**;
-the WebGPU-backend confirmation and billboard-memory work still gate the cutover.
-See [Condition status](#condition-status).
+**Condition status (2026-07-19):** **2 of 3 cleared** — mobile measured on real Android and
+**passed**, and the WebGPU backend **confirmed** on that same device. Only the billboard-memory
+work remains, and it is in progress inside B2. See [Condition status](#condition-status).
 **Context:** PF-09 [B0](../test-reports/TR-027.md) / [B1](../test-reports/TR-028.md) spike,
 [WGSL + point-sprite finding](../test-reports/TR-029.md),
 [gate instrument corrections](../test-reports/TR-032.md) & [TR-033](../test-reports/TR-033.md),
@@ -29,7 +29,7 @@ retired, until the mobile performance condition is measured on real hardware.
 | Desktop startup          | Babylon **1070 ms** vs current **1357 ms** — Babylon _faster_        | ✅ GO             |
 | Functional correctness   | 168,959-star field draws; 92 unit / 52 E2E green incl. pixel proof   | ✅ GO             |
 | **Mobile fps / startup** | UNMEASURED at decision time — **closed 2026-07-19**, see below       | ✅ GO (Android)   |
-| WebGPU on real hardware  | Probable on desktop but **unconfirmed** (see condition 2)            | ⚠️ **OPEN**       |
+| WebGPU on real hardware  | Unconfirmed at decision time — **confirmed on Android 2026-07-19**   | ✅ GO             |
 
 Desktop rows are from real hardware (Windows, 16 cores) and are the basis of this decision.
 
@@ -69,11 +69,25 @@ cheap because the dual-engine seam (B0) keeps both renderers live behind one fla
 
 ## Condition status
 
-| #   | Condition                           | Status                         | Evidence                        |
-| --- | ----------------------------------- | ------------------------------ | ------------------------------- |
-| 1   | Real-device mobile measurement      | ✅ **DISCHARGED** (2026-07-19) | Round 3, physical Android       |
-| 2   | Confirm the WebGPU backend ran      | ⚠️ OPEN                        | badge still unobserved          |
-| 3   | Billboard memory reduction (~23 MB) | ⚠️ OPEN                        | engineering task, not a reading |
+| #   | Condition                           | Status                         | Evidence                    |
+| --- | ----------------------------------- | ------------------------------ | --------------------------- |
+| 1   | Real-device mobile measurement      | ✅ **DISCHARGED** (2026-07-19) | Round 3, physical Android   |
+| 2   | Confirm the WebGPU backend ran      | ✅ **DISCHARGED** (2026-07-19) | `BABYLON WEBGPU` on Android |
+| 3   | Billboard memory reduction (~23 MB) | 🔨 IN PROGRESS                 | folded into B2 scope        |
+
+### Condition 2 — discharged 2026-07-19
+
+The owner read `ENGINE babylon · WEBGPU · TIER low` on the physical Android. **This is the WGSL
+twin's first confirmed execution on real mobile GPU hardware** — until now it had only ever run
+under CI (no adapter) and on desktop headless Chrome.
+
+Two things follow, and the second matters more than the first:
+
+1. The Round 3 Android figures (60 fps / 678 ms) are **WebGPU numbers**, not a WebGL2 fallback
+   reading. The gate's headline result measures the path we actually intend to ship.
+2. The WGSL shader twin, the `WebGPUEngine` init path, and the billboard-quad technique adopted
+   after the `gl_PointSize` finding (TR-029) are all **proven on a phone**. That was the largest
+   remaining unknown in the renderer migration.
 
 ### Condition 1 — discharged 2026-07-19
 

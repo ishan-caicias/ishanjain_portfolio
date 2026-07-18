@@ -50,18 +50,23 @@ const emit = (name: string, detail: unknown) =>
 ShaderStore.ShadersStore["ijStarVertexShader"] = `
 precision highp float;
 attribute vec3 position;     // star centre (world)
-attribute vec4 corner;       // xy = quad corner -1..1, z = size, w = colour t
+attribute vec2 starMeta;     // x = size, y = colour t
 uniform mat4 view;
 uniform mat4 projection;
 uniform float uScale;
 varying vec2 vCorner;
 varying float vT;
 void main(){
+  // Quad corner derived from the vertex id rather than stored (B2 vertex
+  // expansion): c=0..3 -> (-1,-1) (1,-1) (1,1) (-1,1). gl_VertexID is the
+  // post-index-fetch vertex index, so this is correct for indexed draws.
+  int c = gl_VertexID % 4;
+  vec2 corner = vec2((c == 1 || c == 2) ? 1.0 : -1.0, (c >= 2) ? 1.0 : -1.0);
   vec4 centre = view * vec4(position, 1.0);
-  centre.xy += corner.xy * (corner.z * uScale);   // billboard in view space
+  centre.xy += corner * (starMeta.x * uScale);   // billboard in view space
   gl_Position = projection * centre;
-  vCorner = corner.xy;
-  vT = corner.w;
+  vCorner = corner;
+  vT = starMeta.y;
 }`;
 ShaderStore.ShadersStore["ijStarFragmentShader"] = `
 precision highp float;
@@ -84,7 +89,7 @@ void main(){
 // Babylon-flavoured WGSL twin (vertexInputs / uniforms / vertexOutputs …).
 ShaderStore.ShadersStoreWGSL["ijStarVertexShader"] = `
 attribute position : vec3<f32>;
-attribute corner : vec4<f32>;
+attribute starMeta : vec2<f32>;
 uniform view : mat4x4<f32>;
 uniform projection : mat4x4<f32>;
 uniform uScale : f32;
@@ -93,16 +98,22 @@ varying vT : f32;
 
 @vertex
 fn main(input : VertexInputs) -> FragmentInputs {
+  // Corner derived from the vertex index, not stored (B2 vertex expansion).
+  // Babylon injects @builtin(vertex_index) into VertexInputs as vertexIndex.
+  let c : u32 = vertexInputs.vertexIndex % 4u;
+  let corner : vec2<f32> = vec2<f32>(
+    select(-1.0, 1.0, c == 1u || c == 2u),
+    select(-1.0, 1.0, c >= 2u));
   var centre : vec4<f32> = uniforms.view * vec4<f32>(vertexInputs.position, 1.0);
-  let s : f32 = vertexInputs.corner.z * uniforms.uScale;
+  let s : f32 = vertexInputs.starMeta.x * uniforms.uScale;
   centre = vec4<f32>(
-    centre.x + vertexInputs.corner.x * s,
-    centre.y + vertexInputs.corner.y * s,
+    centre.x + corner.x * s,
+    centre.y + corner.y * s,
     centre.z,
     centre.w);
   vertexOutputs.position = uniforms.projection * centre;
-  vertexOutputs.vCorner = vertexInputs.corner.xy;
-  vertexOutputs.vT = vertexInputs.corner.w;
+  vertexOutputs.vCorner = corner;
+  vertexOutputs.vT = vertexInputs.starMeta.y;
 }`;
 ShaderStore.ShadersStoreWGSL["ijStarFragmentShader"] = `
 varying vCorner : vec2<f32>;
@@ -222,7 +233,7 @@ class BabylonScene extends HTMLElement {
     vd.indices = bb.indices;
     vd.applyToMesh(mesh, false);
     mesh.setVerticesBuffer(
-      new VertexBuffer(engine, bb.corners, "corner", false, false, 4),
+      new VertexBuffer(engine, bb.meta, "starMeta", false, false, 2),
     );
     // the shell surrounds the camera; never frustum/occlusion-cull it away
     mesh.alwaysSelectAsActiveMesh = true;
@@ -232,7 +243,7 @@ class BabylonScene extends HTMLElement {
       scene,
       { vertex: "ijStar", fragment: "ijStar" },
       {
-        attributes: ["position", "corner"],
+        attributes: ["position", "starMeta"],
         uniforms: ["view", "projection", "uScale"],
         needAlphaBlending: true,
         shaderLanguage:

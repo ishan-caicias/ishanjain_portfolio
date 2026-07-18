@@ -37,3 +37,4 @@
 | [TR-033](TR-033.md) | 2026-07-18 | Round 2: refresh-estimator bug + device-identity gap                    | READY TO PROCEED (B1 still gated)   |
 | [TR-034](TR-034.md) | 2026-07-19 | CI red on unsupported Node runtime (not the astro-check hints)          | READY TO PROCEED                    |
 | [TR-035](TR-035.md) | 2026-07-19 | TIER low is report-only (full field rendered); backend added to overlay | READY TO PROCEED                    |
+| [TR-036](TR-036.md) | 2026-07-19 | B2 step 1: vertex-index expansion, star buffers 21.9 → 16.8 MiB         | READY TO PROCEED                    |
