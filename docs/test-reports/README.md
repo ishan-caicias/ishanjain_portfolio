@@ -35,3 +35,4 @@
 | [TR-031](TR-031.md) | 2026-07-18 | Dev-Mode Hydration Crash (Vite dep-optimizer) + Gate Correction | READY TO PROCEED                    |
 | [TR-032](TR-032.md) | 2026-07-18 | Gate Instrument Defect: fps measured host rAF, not renders      | READY TO PROCEED (B1 still gated)   |
 | [TR-033](TR-033.md) | 2026-07-18 | Round 2: refresh-estimator bug + device-identity gap            | READY TO PROCEED (B1 still gated)   |
+| [TR-034](TR-034.md) | 2026-07-19 | CI red on unsupported Node runtime (not the astro-check hints)  | READY TO PROCEED                    |

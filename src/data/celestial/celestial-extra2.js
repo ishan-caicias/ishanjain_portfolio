@@ -2225,7 +2225,9 @@
     if (ly >= 1000) return Math.round(ly).toLocaleString() + " ly";
     return ly + " ly";
   }
-  function rarityFor(tK, mg, ly) {
+  // `_ly` is unused here (rarity is magnitude-driven) but kept so the signature
+  // mirrors factFor(tK, n, con, ly, sp) and the call sites stay uniform.
+  function rarityFor(tK, mg, _ly) {
     var m = parseFloat(mg); if (isNaN(m)) m = 9;
     if (tK === "s") return m <= 1.9 ? "rare" : m <= 3 ? "uncommon" : "common";
     if (m <= 6.5) return "rare";

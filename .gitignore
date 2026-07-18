@@ -148,6 +148,9 @@ playwright-report/
 # Claude
 .claude/
 
+# Agent tooling scratch space (brainstorm servers, PIDs, logs) - transient, not source
+.superpowers/
+
 # PF-07 raw Gaia/Hipparcos dataset pipeline (source material for public/assets/ and
 # src/data/celestial/*.js, which are the converted/committed runtime binaries - see
 # docs/delivery-plan/PF-07-space-portfolio-webgl.md §1). Not needed to build or run the site.

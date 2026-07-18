@@ -3,7 +3,9 @@
   publish = "dist"
 
 [build.environment]
-  NODE_VERSION = "20"
+  # Astro 7 requires Node >=22.12.0 — see package.json "engines" and .nvmrc.
+  # Node 20 here silently failed every preview deploy (astro exits 1 before building).
+  NODE_VERSION = "22"
 
 [[headers]]
   for = "/*"
