@@ -39,6 +39,7 @@ This folder documents the current state of the portfolio codebase and the spaces
 - [2026-07-16-rendering-stack-options.md](2026-07-16-rendering-stack-options.md) — A/B/C analysis valid; "validated delivery decision" void (rolled back)
 - [2026-07-16-validation-record.md](2026-07-16-validation-record.md) — model validations useful; repo/implementation claims void
 - [2026-07-17-codex-analysis-audit.md](2026-07-17-codex-analysis-audit.md) — **claim-by-claim audit of the set above** (Orion, 2026-07-17)
+- [2026-07-19-webgl-babylon-cutover-gap-analysis.md](2026-07-19-webgl-babylon-cutover-gap-analysis.md) — **PF-09 B6 post-flip delta register** (Procyon, 2026-07-19); 27 gaps between the archived WebGL1 engine and the Babylon default. Headline: curated destination bodies and the photographic DSO layer are not rendered on the Babylon path — undocumented in ADR-0006
 - [pf-07-spaceship-v2-report.html](../checkpoint/pf-07-spaceship-v2-report.html) — interactive HTML report (audit verdicts, decision, phased plan, roadmap); lives in `docs/checkpoint/`, also published as a Claude Artifact
 
 ## Headline Conclusions

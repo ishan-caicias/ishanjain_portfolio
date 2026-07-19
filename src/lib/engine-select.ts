@@ -3,12 +3,15 @@
  * The Babylon migration runs both engines behind one switch (see
  * docs/delivery-plan/PF-09-babylon-havok-realism.md). Resolution order mirrors
  * craft-tier.ts:
- *   1. URL param  ?engine=webgl|babylon  — dev/preview, always wins
+ *   1. URL param  ?engine=webgl|babylon  — always wins; ?engine=webgl is the
+ *                                          ARCHIVED legacy engine (kept fully
+ *                                          functional for one release — the
+ *                                          cutover's rollback lever)
  *   2. Stored override                   — future user selector (parity hook)
- *   3. Default 'webgl'                   — stays default until ADR-0006 (the
- *                                          B6 cutover, currently PROPOSED/
- *                                          gated) is accepted; the flip is
- *                                          this one default value.
+ *   3. Default 'babylon'                 — CUT OVER 2026-07-19 per ADR-0006
+ *                                          (owner decision; §B3 dispositioned
+ *                                          Option A, device rows accepted as
+ *                                          post-flip validation).
  *
  * Pure policy (unit-tested); the browser reads live in SpaceScene.
  */
@@ -27,5 +30,5 @@ export function resolveEngine(
   urlParam: string | null,
   stored: EngineKind | null = null,
 ): EngineKind {
-  return parseEngineValue(urlParam) ?? stored ?? "webgl";
+  return parseEngineValue(urlParam) ?? stored ?? "babylon";
 }

@@ -46,18 +46,18 @@ npm run dev        # Start dev server at localhost:4321
 
 ## The Dual-Engine Seam
 
-The site is mid-migration from the bespoke WebGL1 engine to Babylon.js + WebGPU + Havok
-(delivery plan [PF-09](docs/delivery-plan/PF-09-babylon-havok-realism.md)):
+The Babylon.js + WebGPU + Havok engine **is the default as of the PF-09 B6 cutover**
+([ADR-0006](docs/adr/0006-babylon-default-cutover.md), 2026-07-19):
 
-- `?engine=webgl` (default) — the shipping custom engine.
-- `?engine=babylon` — the Babylon path: WebGPU-first with WebGL2 fallback, photometric star
+- **Default** — the Babylon path: WebGPU-first with WebGL2 fallback, photometric star
   billboards, destination-gated volumetric nebulae (WebGPU compute raymarch / WebGL2 fragment
-  fallback), the GLB ship with flip-and-burn choreography, and the Havok asteroid belt.
+  fallback), the GLB ship with flip-and-burn thrusters + heat shimmer, the Havok asteroid belt
+  with proximity slowdown/deflection/impact shake, and full/balanced/lite quality tiers.
+- `?engine=webgl` — the **archived** legacy WebGL1 engine, kept fully functional for one
+  release as the rollback lever.
 - `?perf=1` — on-screen perf telemetry (`window.__ijPerf()`), used for all performance claims.
-- `?craft=1k|2k|off` — ship-quality override (auto device-tiered otherwise).
-
-The default stays `webgl` until the PF-09 B6 cutover gate passes (per-device fps/startup
-budgets on real hardware — see the delivery plan and ADR-0003).
+- `?craft=1k|2k|off` — ship-quality override; `?tier=full|balanced|lite` — quality-tier
+  override (auto device-tiered otherwise).
 
 ## Project Structure
 

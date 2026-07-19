@@ -5,7 +5,11 @@ change in `engine-select.ts` (`resolveEngine`'s final fallback) **plus** moving
 [ADR-0006](../adr/0006-babylon-default-cutover.md) from Proposed → Accepted with the evidence
 below attached. Rollback: [engine-cutover runbook](../runbooks/2026-07-19-engine-cutover-rollback.md).
 
-## A. Measurement conditions (owner devices — the blocking items)
+## A. Measurement conditions (owner devices)
+
+> **2026-07-19: §A waived pre-flip by owner decision (ADR-0006)** — the cutover proceeded with
+> these rows as ACCEPTED RISK; they are now the standing **post-flip validation** items with
+> the same instruments. Rollback levers: `?engine=webgl` + the runbook.
 
 | #   | Condition                                         | Instrument                                                        | Status                                                          |
 | --- | ------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------- |
@@ -17,11 +21,11 @@ below attached. Rollback: [engine-cutover runbook](../runbooks/2026-07-19-engine
 
 ## B. ADR-0003 conditions
 
-| #   | Condition                                               | Status                                                                                                                                                                                                       |
-| --- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| B1  | Real-device mobile fps                                  | ☑ discharged 2026-07-19 (real Android) — re-confirmed by A3 above                                                                                                                                            |
-| B2  | Badge reads `BABYLON WEBGPU` on device (WGSL path real) | ☑ discharged + automated (webgpu-hardware.spec)                                                                                                                                                              |
-| B3  | Billboard-memory reduction                              | ☐ **decision needed**: B2 step 1 delivered −5.2 MiB (24%, 21.9→16.8 MiB); either accept as satisfying the condition (record in ADR-0006) or schedule further reduction (f16/quantized positions) before flip |
+| #   | Condition                                                                                                          | Status                                                                                                                                                                                                       |
+| --- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| B1  | Real-device mobile fps                                                                                             | ☑ discharged 2026-07-19 (real Android) — re-confirmed by A3 above                                                                                                                                            |
+| B2  | Badge reads `BABYLON WEBGPU` on device (WGSL path real)                                                            | ☑ discharged + automated (webgpu-hardware.spec)                                                                                                                                                              |
+| B3  | Billboard-memory reduction — **DISPOSITIONED Option A 2026-07-19 (owner)**: B2 step 1's −24% accepted; revisitable | ☐ **decision needed**: B2 step 1 delivered −5.2 MiB (24%, 21.9→16.8 MiB); either accept as satisfying the condition (record in ADR-0006) or schedule further reduction (f16/quantized positions) before flip |
 
 ## C. Security / CSP (pre-deploy)
 

@@ -1,3 +1,7 @@
+// PINNED TO ?engine=webgl at the ADR-0006 cutover (declared test change):
+// this spec guards the ARCHIVED legacy engine during its one-release archival
+// window. Babylon-path coverage lives in the engine-select/accessibility/
+// perf-budgets/webgpu-hardware specs.
 /**
  * PF-07 ship-v2 P1 — E2E for the flagged textured craft.
  *
@@ -38,7 +42,7 @@ for (const tier of ["1k", "2k"] as const) {
 test("warp travel completes with the craft active (P2 world-space staging)", async ({
   page,
 }) => {
-  await page.goto("/?craft=2k");
+  await page.goto("/?craft=2k&engine=webgl");
   await page.waitForSelector('space-engine[data-craft-state="ready"]');
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
@@ -76,7 +80,7 @@ test("warp travel completes with the craft active (P2 world-space staging)", asy
 test("?craft=on auto-resolves to the 2k tier on a capable desktop (P4)", async ({
   page,
 }) => {
-  await page.goto("/?craft=on");
+  await page.goto("/?craft=on&engine=webgl");
   await page.waitForSelector('space-engine[data-craft-state="ready"]', {
     timeout: 20000,
   });
@@ -87,7 +91,7 @@ test("?craft=on picks the 1k tier on a narrow viewport (P4)", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto("/?craft=on");
+  await page.goto("/?craft=on&engine=webgl");
   await page.waitForSelector('space-engine[data-craft-state="ready"]', {
     timeout: 20000,
   });
@@ -100,7 +104,7 @@ test("stored quality override applies without any URL flag (P4)", async ({
   await page.addInitScript(() => {
     localStorage.setItem("ij-craft-quality", "1k");
   });
-  await page.goto("/");
+  await page.goto("/?engine=webgl");
   await page.waitForSelector('space-engine[data-craft-state="ready"]', {
     timeout: 20000,
   });
@@ -123,7 +127,7 @@ test("no-WebGL fallback still works with the craft flag on (P4 parity)", async (
   });
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
-  await page.goto("/?craft=2k");
+  await page.goto("/?craft=2k&engine=webgl");
   await page.waitForSelector("space-engine");
   await expect(page.getByText(/ONLINE ·.*LIVE SOURCES/)).toBeVisible({
     timeout: 15000,
@@ -137,7 +141,7 @@ test("no-WebGL fallback still works with the craft flag on (P4 parity)", async (
 test("default page loads the craft via the auto policy (P5 rollout)", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?engine=webgl");
   await page.waitForSelector('space-engine[data-craft-state="ready"]', {
     timeout: 20000,
   });
@@ -147,7 +151,7 @@ test("default page loads the craft via the auto policy (P5 rollout)", async ({
 test("?craft=off restores the wireframe (rollout opt-out)", async ({
   page,
 }) => {
-  await page.goto("/?craft=off");
+  await page.goto("/?craft=off&engine=webgl");
   await page.waitForSelector("space-engine");
   await page.waitForTimeout(1500);
   expect(await page.locator("space-engine[data-craft-state]").count()).toBe(0);

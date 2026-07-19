@@ -39,40 +39,45 @@ const perf = (page: Page) =>
       }),
   );
 
-test("default page mounts the current WebGL engine and telemetry reports webgl", async ({
+// DEFAULT-ENGINE TESTS REWRITTEN AT THE B6 CUTOVER (ADR-0006, owner decision
+// 2026-07-19) — declared test changes: the default is now BABYLON, and
+// ?engine=webgl mounts the archived legacy engine (kept fully functional for
+// one release as the rollback lever; the pinned legacy specs keep guarding it).
+
+test("default page mounts the BABYLON engine (ADR-0006 cutover), telemetry reports babylon", async ({
   page,
 }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
   await page.goto("/");
-  await page.waitForSelector("space-engine");
-  await expect(page.locator("babylon-scene")).toHaveCount(0);
 
-  const snap = await perf(page);
-  expect(snap.engine).toBe("webgl");
-  expect(["low", "mid", "high"]).toContain(snap.tier);
-  expect(snap.frames).toBeGreaterThan(0);
-  expect(pageErrors).toEqual([]);
-});
-
-test("?engine=babylon swaps to the Babylon preview, telemetry reports babylon", async ({
-  page,
-}) => {
-  const pageErrors: string[] = [];
-  page.on("pageerror", (err) => pageErrors.push(err.message));
-  await page.goto("/?engine=babylon");
-
-  // the swap happens post-hydration; the current engine must be gone
   await page.waitForSelector("babylon-scene", { timeout: 15000 });
   await expect(page.locator("space-engine")).toHaveCount(0);
 
   const snap = await perf(page);
   expect(snap.engine).toBe("babylon");
+  expect(["low", "mid", "high"]).toContain(snap.tier);
   // startup is reported once the scene's first frame emits cosmos:ready
   await expect
-    .poll(async () => (await perf(page)).startupMs !== null, { timeout: 15000 })
+    .poll(async () => (await perf(page)).startupMs !== null, { timeout: 20000 })
     .toBe(true);
 
+  expect(pageErrors).toEqual([]);
+});
+
+test("?engine=webgl mounts the ARCHIVED legacy engine (the cutover rollback lever)", async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message));
+  await page.goto("/?engine=webgl");
+
+  await page.waitForSelector("space-engine");
+  await expect(page.locator("babylon-scene")).toHaveCount(0);
+
+  const snap = await perf(page);
+  expect(snap.engine).toBe("webgl");
+  expect(snap.frames).toBeGreaterThan(0);
   expect(pageErrors).toEqual([]);
 });
 

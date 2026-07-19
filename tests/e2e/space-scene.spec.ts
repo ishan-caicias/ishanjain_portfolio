@@ -1,3 +1,7 @@
+// PINNED TO ?engine=webgl at the ADR-0006 cutover (declared test change):
+// this spec guards the ARCHIVED legacy engine during its one-release archival
+// window. Babylon-path coverage lives in the engine-select/accessibility/
+// perf-budgets/webgpu-hardware specs.
 import { test, expect } from "@playwright/test";
 
 // Replaces the old star-interaction.spec.ts, which tested the now-unmounted
@@ -8,7 +12,7 @@ import { test, expect } from "@playwright/test";
 
 test.describe("Space Scene", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/?engine=webgl");
     await page.waitForSelector("space-engine");
   });
 
@@ -127,7 +131,7 @@ test.describe("Space Scene - WebGL fallback", () => {
     const errors: string[] = [];
     page.on("pageerror", (err) => errors.push(err.message));
 
-    await page.goto("/");
+    await page.goto("/?engine=webgl");
     await page.waitForSelector("space-engine");
     await expect(page.getByText(/ONLINE ·.*LIVE SOURCES/)).toBeVisible({
       timeout: 15000,
@@ -153,7 +157,7 @@ test.describe("Space Scene - mobile responsive", () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test("mobile defaults to scroll mode, not travel", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/?engine=webgl");
     await page.waitForSelector("space-engine");
 
     await expect(page.locator("body")).not.toHaveClass(/ij-travel/);
@@ -164,7 +168,7 @@ test.describe("Space Scene - mobile responsive", () => {
   test("HUD readouts are hidden on mobile regardless of mode", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto("/?engine=webgl");
     await page.waitForSelector("space-engine");
 
     await expect(page.getByText(/GAIA DR3/)).toBeHidden();
@@ -174,7 +178,7 @@ test.describe("Space Scene - mobile responsive", () => {
   test("mission control bar is hidden in mobile scroll mode, shown after switching to travel", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto("/?engine=webgl");
     await page.waitForSelector("space-engine");
 
     const missionControl = page.getByLabel(
@@ -192,7 +196,7 @@ test.describe("Space Scene - mobile responsive", () => {
   test("mobile menu: mode toggle switches modes and closes the menu", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto("/?engine=webgl");
     await page.waitForSelector("space-engine");
 
     const menuButton = page.getByRole("button", { name: "Open menu" });
@@ -214,7 +218,7 @@ test.describe("Space Scene - mobile responsive", () => {
   test("mobile menu: Data & Licenses opens the credits dialog and closes the menu", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto("/?engine=webgl");
     await page.waitForSelector("space-engine");
 
     await page.getByRole("button", { name: "Open menu" }).click();
@@ -229,7 +233,7 @@ test.describe("Space Scene - mobile responsive", () => {
   });
 
   test("mobile menu closes on Escape", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/?engine=webgl");
     await page.waitForSelector("space-engine");
 
     const menuButton = page.getByRole("button", { name: "Open menu" });
@@ -243,7 +247,7 @@ test.describe("Space Scene - mobile responsive", () => {
   test("mobile menu nav link still navigates (scroll mode) and closes the menu", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto("/?engine=webgl");
     await page.waitForSelector("space-engine");
 
     await page.getByRole("button", { name: "Open menu" }).click();
@@ -264,7 +268,7 @@ test.describe("Space Scene - reduced motion", () => {
     // option doesn't reliably apply before the first navigation in this setup,
     // but an explicit emulateMedia() call does.
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto("/");
+    await page.goto("/?engine=webgl");
     await page.waitForFunction(
       () => {
         const en = document.querySelector("space-engine") as unknown as {

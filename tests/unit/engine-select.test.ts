@@ -18,9 +18,11 @@ describe("parseEngineValue", () => {
 });
 
 describe("resolveEngine", () => {
-  it("defaults to the current engine (webgl)", () => {
-    expect(resolveEngine(null)).toBe("webgl");
-    expect(resolveEngine(null, null)).toBe("webgl");
+  // Default flipped webgl -> babylon at the B6 cutover (ADR-0006, owner
+  // decision 2026-07-19) — a declared test change, not a drive-by.
+  it("defaults to babylon (the ADR-0006 cutover)", () => {
+    expect(resolveEngine(null)).toBe("babylon");
+    expect(resolveEngine(null, null)).toBe("babylon");
   });
 
   it("URL param wins over stored and default", () => {

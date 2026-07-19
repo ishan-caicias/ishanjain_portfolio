@@ -1,12 +1,21 @@
 # ADR-0006 — Cut the default engine over to Babylon.js + WebGPU
 
 **Date:** 2026-07-19
-**Status:** **Proposed — GATED.** This ADR is written ahead of the decision so the flip is a
-one-line change plus a status change here, with the evidence attached. It moves to Accepted
-only when every gate row in the
-[B6 cutover checklist](../validation-checklist/2026-07-19-pf09-b6-cutover-checklist.md)
-sections A and B is closed. Flipping the default without that evidence violates the migration's
-own safety doctrine (the dual-engine seam exists precisely so this decision is never rushed).
+**Status:** **ACCEPTED 2026-07-19 — owner decision.** The default is Babylon as of this date.
+Two gate rows were closed by explicit owner decision rather than measurement, recorded honestly:
+
+- **§B3 (billboard memory): dispositioned Option A** — B2 step 1's −5.2 MiB (24%,
+  21.9 → 16.8 MiB) reduction is accepted as satisfying ADR-0003's condition 3. Revisitable in a
+  future iteration (the 16-bit quantization path is scoped in TR-notes if ever needed).
+- **§A (iPad / mid-Android budget rows): accepted risk — post-flip validation.** The owner chose
+  to flip ahead of the device measurements. Mitigations: the per-visitor `?engine=webgl` escape
+  and the [rollback runbook](../runbooks/2026-07-19-engine-cutover-rollback.md); the B5 tier
+  system bounds worst-case load on constrained devices. **The device pass remains the standing
+  post-flip follow-up** (tier badge + `?perf=1`, same instrument).
+
+**Known behaviour deltas at cutover** (named Babylon-path scope boundaries, now live product
+deltas — surfaced to the owner before the flip): station sprite markers hidden, field-star
+hover absent, free-look drag absent. All three are candidates for future iterations.
 
 ## Context
 

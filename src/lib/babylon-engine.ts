@@ -840,8 +840,25 @@ async function createEngine(canvas: HTMLCanvasElement): Promise<{
   backend: "webgpu" | "webgl2";
 }> {
   // WebGPU primary — only where the browser actually has it (real devices).
-  const gpu = (navigator as Navigator & { gpu?: unknown }).gpu;
+  // PROBE the adapter BEFORE constructing WebGPUEngine: initAsync on an
+  // adapterless browser logs a Babylon ERROR ("fatal error during WebGPU
+  // creation") before we can fall back — which, post-cutover, every
+  // non-WebGPU visitor would see and the strict page-load console spec
+  // rightly fails on. A null probe falls back silently instead (TR-053).
+  const gpu = (
+    navigator as Navigator & {
+      gpu?: { requestAdapter(): Promise<unknown | null> };
+    }
+  ).gpu;
+  let adapter: unknown = null;
   if (gpu) {
+    try {
+      adapter = await gpu.requestAdapter();
+    } catch {
+      adapter = null;
+    }
+  }
+  if (adapter) {
     try {
       // engine.computeShader is a SIDE-EFFECT extension module: it patches
       // createComputeContext/computeDispatch onto WebGPUEngine's prototype.

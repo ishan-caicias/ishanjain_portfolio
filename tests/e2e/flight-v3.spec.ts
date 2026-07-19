@@ -1,3 +1,7 @@
+// PINNED TO ?engine=webgl at the ADR-0006 cutover (declared test change):
+// this spec guards the ARCHIVED legacy engine during its one-release archival
+// window. Babylon-path coverage lives in the engine-select/accessibility/
+// perf-budgets/webgpu-hardware specs.
 /**
  * PF-08 F2 — 360° travel choreography + chase camera (incl. the 2026-07-18
  * owner amendments: 30°-elevated thruster chase, ship-turns launch).
@@ -94,7 +98,7 @@ test("a full journey emits the flight sequence burn → flip → brake → arriv
 }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
-  await page.goto("/");
+  await page.goto("/?engine=webgl");
   await page.waitForSelector("space-engine");
   await waitForStations(page);
 
@@ -114,7 +118,7 @@ test("a full journey emits the flight sequence burn → flip → brake → arriv
 test("chase camera pans the look mid-warp without any input", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?engine=webgl");
   await page.waitForSelector("space-engine");
   await waitForStations(page);
 
@@ -128,7 +132,7 @@ test("chase camera pans the look mid-warp without any input", async ({
 test("launch points at the click: camera holds during aim while the ship turns", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?engine=webgl");
   await page.waitForSelector("space-engine");
   await waitForStations(page);
 
@@ -148,7 +152,7 @@ test("free-look drag stays authoritative over the chase mid-flight", async ({
 }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
-  await page.goto("/");
+  await page.goto("/?engine=webgl");
   await page.waitForSelector("space-engine");
   await waitForStations(page);
   await page

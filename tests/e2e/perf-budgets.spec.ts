@@ -41,7 +41,9 @@ for (const engine of ["webgl", "babylon"] as const) {
   test(`${engine}: startup and frame-production stay within CI regression ceilings`, async ({
     page,
   }) => {
-    await page.goto(engine === "webgl" ? "/" : "/?engine=babylon");
+    // post-cutover (ADR-0006): babylon IS the default; webgl is the archived
+    // engine behind its explicit flag
+    await page.goto(engine === "webgl" ? "/?engine=webgl" : "/");
     await page.waitForSelector(
       engine === "webgl" ? "space-engine" : "babylon-scene",
       { timeout: 15000 },

@@ -37,7 +37,8 @@ test("page load produces zero console errors from navigation start", async ({
 
 test("both variable fonts actually load and apply", async ({ page }) => {
   await page.goto("/");
-  await page.waitForSelector("space-engine");
+  // engine-agnostic since the ADR-0006 cutover: either engine may mount
+  await page.waitForSelector("space-engine, babylon-scene");
   const fonts = await page.evaluate(async () => {
     await document.fonts.ready;
     return {
