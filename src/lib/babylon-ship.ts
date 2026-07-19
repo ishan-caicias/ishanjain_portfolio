@@ -28,9 +28,11 @@
 import {
   buildPlumeVertices,
   PLUME_CORE,
+  PLUME_ENGINES,
   PLUME_SHEATH,
   PLUME_VERTEX_COUNT,
   PLUME_VERTEX_FLOATS,
+  type Ember,
   type PlumeParams,
 } from "./ship-dynamics";
 
@@ -289,6 +291,191 @@ void main(){
     sn(vUV*vec2(21.0, 17.0) + vec2(4.7, -uTime*2.4))) - 0.5)
     * ${f6(SHIMMER_STRENGTH)} * k;
   gl_FragColor = texture2D(textureSampler, vUV + off);
+}`;
+
+/* ---------- GAP-07: ember sparks ------------------------------------------
+ *
+ * Ported from space-engine.js's F3 ember burst (space-engine.js:2690-2764):
+ * a burst of point sprites on burn start/stop, drifting back off the
+ * nozzles and fading, capped at 48 concurrently live. That original renders
+ * embers in the ship's own LOCAL/model space (re-transformed by whatever the
+ * ship's CURRENT world matrix is every frame, since the draw call uses the
+ * frame's own mvp) — a cheap simplification that works because embers barely
+ * outlive a fraction of a second of ship motion. This port instead resolves
+ * each ember's spawn position/velocity into WORLD space once, at spawn time
+ * (babylon-engine.ts's `_tickShip`, using the ship's quaternion/scale at that
+ * instant), then steps it in true world space thereafter via
+ * `ship-dynamics.ts`'s `stepEmber` — physically cleaner (sparks a moving
+ * craft actually left behind, rather than being dragged along with it) and
+ * avoids needing a parented-mesh billboard technique. Point sprites don't
+ * exist on WebGPU (CLAUDE.md #7), so embers are billboard quads sized in
+ * clip space exactly like the star/body billboards. */
+export const EMBER_BURST_START = 14;
+export const EMBER_BURST_STOP = 8;
+/** Concurrent live-ember cap — matches space-engine.js's `this._embers.length < 48`. */
+export const MAX_EMBERS = 48;
+
+/** Local (unit-ship, nose −Z) spawn jitter + drift-back velocity for one
+ * ember at a randomly chosen engine nozzle — matches space-engine.js's F3
+ * spawn block exactly (`(Math.random()-0.5)*0.05` jitter, `0.9 + rand*1.4`
+ * backward drift). Returned in UNIT-SHIP space; the caller (which already
+ * has the wrapper's nose-flip convention — see this file's header) applies
+ * the same Z negation `plumeBuffersForWrapper` does before rotating into
+ * world space. Takes no RNG dependency beyond `Math.random()`, matching
+ * every other spark/jitter site in this codebase (e.g. plume turbulence). */
+export function spawnEmberLocal(): {
+  pos: [number, number, number];
+  vel: [number, number, number];
+} {
+  const eng = PLUME_ENGINES[(Math.random() * PLUME_ENGINES.length) | 0];
+  return {
+    pos: [
+      eng[0] + (Math.random() - 0.5) * 0.05,
+      eng[1] + (Math.random() - 0.5) * 0.05,
+      eng[2] + 0.05,
+    ],
+    vel: [
+      (Math.random() - 0.5) * 0.7,
+      (Math.random() - 0.5) * 0.7,
+      0.9 + Math.random() * 1.4,
+    ],
+  };
+}
+
+/** Billboard-quad vertex/meta buffers for the current live-ember set, world
+ * space (already stepped). Continuous alpha/size-by-life rather than the
+ * archived engine's 3 discrete draw-call buckets (alpha 0.85/0.5/0.25, size
+ * 7/5/3px) — that bucketing existed to batch legacy's per-bucket `gl.POINTS`
+ * draw calls, not as a deliberate visual step; one merged billboard mesh has
+ * no such constraint, so a continuous fade is the more faithful reading of
+ * "fades instead of popping," not a scope cut. `life` is normalised 0..1 by
+ * the caller (raw life / spawn life varies per ember). Reuses caller-owned
+ * scratch arrays — runs every frame. */
+export function emberBillboards(
+  embers: readonly Ember[],
+  outPositions: Float32Array,
+  outMeta: Float32Array,
+): number {
+  const n = Math.min(embers.length, MAX_EMBERS);
+  for (let i = 0; i < n; i++) {
+    const e = embers[i];
+    const lifeNorm = Math.max(0, Math.min(1, e.life));
+    const alpha = 0.2 + 0.65 * lifeNorm;
+    const size = (2.5 + 5 * lifeNorm) * (window.devicePixelRatio || 1);
+    const v0 = i * 4;
+    for (let c = 0; c < 4; c++) {
+      const v = v0 + c;
+      outPositions[v * 3] = e.x;
+      outPositions[v * 3 + 1] = e.y;
+      outPositions[v * 3 + 2] = e.z;
+      outMeta[v * 2] = alpha;
+      outMeta[v * 2 + 1] = size;
+    }
+  }
+  // unused capacity: alpha 0 so the fragment shader's discard/blend drops it
+  for (let i = n; i < MAX_EMBERS; i++) {
+    const v0 = i * 4;
+    for (let c = 0; c < 4; c++) {
+      const v = v0 + c;
+      outPositions[v * 3] = 0;
+      outPositions[v * 3 + 1] = 0;
+      outPositions[v * 3 + 2] = 0;
+      outMeta[v * 2] = 0;
+      outMeta[v * 2 + 1] = 0;
+    }
+  }
+  return n;
+}
+
+/** Sequential quad indices for the fixed-capacity ember mesh (6 per
+ * particle — two triangles), always MAX_EMBERS worth regardless of how many
+ * are currently alive (unused slots are zero-alpha, not zero-index). */
+export function emberIndices(): Uint32Array {
+  const idx = new Uint32Array(MAX_EMBERS * 6);
+  for (let i = 0; i < MAX_EMBERS; i++) {
+    const v0 = i * 4;
+    const o = i * 6;
+    idx[o] = v0;
+    idx[o + 1] = v0 + 1;
+    idx[o + 2] = v0 + 2;
+    idx[o + 3] = v0;
+    idx[o + 4] = v0 + 2;
+    idx[o + 5] = v0 + 3;
+  }
+  return idx;
+}
+
+export const EMBER_VERTEX_GLSL = `
+precision highp float;
+attribute vec3 position;   // ember world position (already stepped in JS)
+attribute vec2 emberMeta;  // x = alpha, y = size (device px)
+uniform mat4 view;
+uniform mat4 projection;
+uniform vec2 uViewport;
+varying vec2 vCorner;
+varying float vAlpha;
+void main(){
+  int c = gl_VertexID % 4;
+  vec2 corner = vec2((c == 1 || c == 2) ? 1.0 : -1.0, (c >= 2) ? 1.0 : -1.0);
+  vec4 centre = view * vec4(position, 1.0);
+  vec4 clip = projection * centre;
+  clip.x += corner.x * emberMeta.y * clip.w / max(uViewport.x, 1.0);
+  clip.y += corner.y * emberMeta.y * clip.w / max(uViewport.y, 1.0);
+  gl_Position = clip;
+  vCorner = corner;
+  vAlpha = emberMeta.x;
+}`;
+
+export const EMBER_FRAGMENT_GLSL = `
+precision mediump float;
+varying vec2 vCorner;
+varying float vAlpha;
+void main(){
+  float d = length(vCorner);
+  if (d > 1.0 || vAlpha <= 0.001) discard;
+  float a = exp(-d * d * 4.0) * vAlpha;
+  vec3 col = mix(vec3(1.0, 0.6, 0.2), vec3(1.0, 0.85, 0.55), exp(-d * d * 3.0));
+  gl_FragColor = vec4(col, a);
+}`;
+
+export const EMBER_VERTEX_WGSL = `
+attribute position : vec3<f32>;
+attribute emberMeta : vec2<f32>;
+uniform view : mat4x4<f32>;
+uniform projection : mat4x4<f32>;
+uniform uViewport : vec2<f32>;
+varying vCorner : vec2<f32>;
+varying vAlpha : f32;
+
+@vertex
+fn main(input : VertexInputs) -> FragmentInputs {
+  let c : u32 = vertexInputs.vertexIndex % 4u;
+  let corner : vec2<f32> = vec2<f32>(
+    select(-1.0, 1.0, c == 1u || c == 2u),
+    select(-1.0, 1.0, c >= 2u));
+  let centre : vec4<f32> = uniforms.view * vec4<f32>(vertexInputs.position, 1.0);
+  var clip : vec4<f32> = uniforms.projection * centre;
+  clip = vec4<f32>(
+    clip.x + corner.x * vertexInputs.emberMeta.y * clip.w / max(uniforms.uViewport.x, 1.0),
+    clip.y + corner.y * vertexInputs.emberMeta.y * clip.w / max(uniforms.uViewport.y, 1.0),
+    clip.z, clip.w);
+  vertexOutputs.position = clip;
+  vertexOutputs.vCorner = corner;
+  vertexOutputs.vAlpha = vertexInputs.emberMeta.x;
+}`;
+
+export const EMBER_FRAGMENT_WGSL = `
+varying vCorner : vec2<f32>;
+varying vAlpha : f32;
+
+@fragment
+fn main(input : FragmentInputs) -> FragmentOutputs {
+  let d : f32 = length(fragmentInputs.vCorner);
+  if (d > 1.0 || fragmentInputs.vAlpha <= 0.001) { discard; }
+  let a : f32 = exp(-d * d * 4.0) * fragmentInputs.vAlpha;
+  let col : vec3<f32> = mix(
+    vec3<f32>(1.0, 0.6, 0.2), vec3<f32>(1.0, 0.85, 0.55), exp(-d * d * 3.0));
+  fragmentOutputs.color = vec4<f32>(col, a);
 }`;
 
 export const SHIMMER_FRAGMENT_WGSL = `

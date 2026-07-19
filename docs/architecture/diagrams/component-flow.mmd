@@ -30,8 +30,8 @@ sequenceDiagram
     Scene->>Overlay: unmount dossier
 
     rect rgb(26,35,46)
-        Note over Engine: Legacy-only events (archived engine)
-        Note right of Engine: cosmos:aim, cosmos:hover,<br/>cosmos:unhover, cosmos:craft<br/>are NOT emitted by babylon-scene<br/>— see the cutover gap analysis
+        Note over Engine: Full event-contract parity (TR-058, 2026-07-20)
+        Note right of Engine: cosmos:aim, cosmos:hover,<br/>cosmos:unhover, cosmos:craft<br/>are now emitted by BOTH engines<br/>(GAP-14/15/16 closed — see the cutover gap analysis)
     end
 
     rect rgb(26,35,46)

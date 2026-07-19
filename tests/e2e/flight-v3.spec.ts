@@ -2,6 +2,24 @@
 // this spec guards the ARCHIVED legacy engine during its one-release archival
 // window. Babylon-path coverage lives in the engine-select/accessibility/
 // perf-budgets/webgpu-hardware specs.
+//
+// GAP-17 DISPOSITION (2026-07-20, TR-060): the first 3 tests below stay
+// pinned deliberately, not as a residual gap — they drive space-engine.js's
+// OWN internal API (`_tick(now)`, `.gl`, `.yaw`/`.pitch` as PUBLIC fields)
+// with a synthetic-clock harness that has no Babylon equivalent to port to,
+// because babylon-engine.ts has no exposed synchronous tick method the same
+// way (its render loop only runs via `engine.runRenderLoop`). More to the
+// point: test 3's premise ("the camera holds still during aim while the ship
+// turns") describes the ARCHIVED engine's specific choreography, which isn't
+// how Babylon's aim phase works BY DESIGN — babylon-engine.ts's camera
+// itself previews the turn during aim (see that file's WarpMode comment);
+// porting this test literally would assert behaviour Babylon was never
+// built to have. Test 4 (free-look drag, wall-clock, real UI — no synthetic
+// ticks) WAS genuinely portable and now has a direct Babylon-native sibling
+// in engine-select.spec.ts, alongside a new accel→flip→decel strict-
+// ordering test closing the rest of GAP-17's real gap (the choreography
+// itself being unverified on the default engine). See engine-select.spec.ts
+// for both.
 /**
  * PF-08 F2 — 360° travel choreography + chase camera (incl. the 2026-07-18
  * owner amendments: 30°-elevated thruster chase, ship-turns launch).

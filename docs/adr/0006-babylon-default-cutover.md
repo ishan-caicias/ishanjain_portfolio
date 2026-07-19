@@ -14,8 +14,16 @@ Two gate rows were closed by explicit owner decision rather than measurement, re
   post-flip follow-up** (tier badge + `?perf=1`, same instrument).
 
 **Known behaviour deltas at cutover** (named Babylon-path scope boundaries, now live product
-deltas — surfaced to the owner before the flip): station sprite markers hidden, field-star
-hover absent, free-look drag absent. All three are candidates for future iterations.
+deltas — surfaced to the owner before the flip): ~~station sprite markers hidden, field-star
+hover absent, free-look drag absent.~~ All three are candidates for future iterations.
+
+> **UPDATE 2026-07-20 (TR-058):** all three closed — station sprite markers (GAP-11),
+> field-star hover (GAP-09), and free-look drag (GAP-08) all ship on the Babylon path now,
+> alongside eight further gaps from the
+> [cutover gap analysis](../analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md)
+> (GAP-06, GAP-07, GAP-10, GAP-12 through GAP-16). Struck through rather than rewritten, per
+> this repo's own corrections-are-additive convention — the text above was accurate at the
+> Accepted date and is kept as the record of what was true then.
 
 ## Context
 

@@ -80,49 +80,55 @@ Each cost a real defect. Sources in `docs/test-reports/`.
 7. WebGPU has **no `gl_PointSize`** — variable-size sprites must be billboard quads. (TR-029)
 8. WGSL `textureSample` must be in **uniform control flow** — never branch around it; zero the
    offset instead. (TR-047)
-9. Light textures in **linear space** (decode sRGB → light → tone-map → encode). (TR-021)
-10. Pixel evidence on WebGPU comes from `page.screenshot()`, **never** `drawImage`+`getImageData`
+9. **Every declared sampler needs a real texture object bound before that mesh ever draws** —
+   not before the content is ready, before the JS object exists. `material.isReady()` checks
+   shader compilation, not whether every sampler has a resource; on WebGPU an empty binding is
+   a hard, uncaught exception building the bind group that kills `scene.render()` for the
+   **entire frame**, not just that mesh (WebGL2 only warns). If a texture builds asynchronously
+   or in chunks, bind a placeholder immediately and swap it once real content lands. (TR-059)
+10. Light textures in **linear space** (decode sRGB → light → tone-map → encode). (TR-021)
+11. Pixel evidence on WebGPU comes from `page.screenshot()`, **never** `drawImage`+`getImageData`
     (a WebGPU canvas reads back transparent regardless of correctness). (TR-036)
 
 **Security**
 
-11. CSP is **hash-based with no `unsafe-inline`, ever.** React islands must never SSR a
+12. CSP is **hash-based with no `unsafe-inline`, ever.** React islands must never SSR a
     `style="…"` attribute or inject a runtime `<style>` — put CSS in `global.css` and set
     styles post-hydration via `el.style.prop`. (TR-016)
-12. `astro.config.mjs` is the single source of CSP truth. New capabilities get a scoped
+13. `astro.config.mjs` is the single source of CSP truth. New capabilities get a scoped
     directive + a comment + usually a TR. **No CDN dependencies** — self-host decoders/WASM.
     (ADR-0005)
 
 **Testing**
 
-13. **Never `test.fixme`/skip a failing test to unblock.** Root-cause it. Quarantine once
+14. **Never `test.fixme`/skip a failing test to unblock.** Root-cause it. Quarantine once
     nearly buried a real signal _and_ two further defects. (TR-054)
-14. **No test may be modified to make the suite pass** unless the change is named and justified
+15. **No test may be modified to make the suite pass** unless the change is named and justified
     in the TR. An unexplained test edit is equivalent to a build failure.
-15. Playwright `workers: 1` locally and in CI — GPU-heavy specs time-slice one SwiftShader
+16. Playwright `workers: 1` locally and in CI — GPU-heavy specs time-slice one SwiftShader
     emulator; more workers produce rotating phantom failures. (TR-052)
-16. Specs guarding the archived engine must pin **every** `page.goto` with `?engine=webgl`.
+17. Specs guarding the archived engine must pin **every** `page.goto` with `?engine=webgl`.
     Specs asserting engine-agnostic mechanisms must accept `"space-engine, babylon-scene"`.
     (TR-054)
-17. Assert **behaviour, not readiness**. `cosmos:ready` fires happily over a scene drawing
+18. Assert **behaviour, not readiness**. `cosmos:ready` fires happily over a scene drawing
     nothing. Drive the real UI rather than calling engine methods directly. (TR-029/040)
 
 **Platform & data**
 
-18. Windows dev box. Playwright spawns `node ./node_modules/astro/bin/astro.mjs preview` — the
+19. Windows dev box. Playwright spawns `node ./node_modules/astro/bin/astro.mjs preview` — the
     `npm.cmd` shim crashes with `0xC0000409`. LF enforced via `.gitattributes`. (TR-012/013)
-19. Node **≥ 22.12.0** in `package.json`, `.nvmrc`, CI, and `netlify.toml` — raising it is a
+20. Node **≥ 22.12.0** in `package.json`, `.nvmrc`, CI, and `netlify.toml` — raising it is a
     4-file change or CI red-fails before parsing anything. (TR-034)
-20. TypeScript pinned `~6.0.3`. **Do not upgrade to TS 7** — breaks `astro check` and typed
+21. TypeScript pinned `~6.0.3`. **Do not upgrade to TS 7** — breaks `astro check` and typed
     lint. (ADR-0001)
-21. Generated/vendored files are **never hand-edited**: `src/data/celestial/*.js` (verbatim
+22. Generated/vendored files are **never hand-edited**: `src/data/celestial/*.js` (verbatim
     ports, lint-ignored), `public/assets/craft/*.glb`, `meshopt_decoder.js`.
 
 **Accessibility — regression-tested, must not regress**
 
-22. Babylon stamps `tabindex="1"` on its canvas; set `-1` at boot **and re-assert on first
+23. Babylon stamps `tabindex="1"` on its canvas; set `-1` at boot **and re-assert on first
     rendered frame** (deferred input setup re-stamps it). (TR-052)
-23. `prefers-reduced-motion` is a per-feature contract on **both** engines and composes with
+24. `prefers-reduced-motion` is a per-feature contract on **both** engines and composes with
     any quality tier — it is not a tier. Every visual feature defines its reduced-motion and
     no-WebGL behaviour at design time. (TR-042/051)
 

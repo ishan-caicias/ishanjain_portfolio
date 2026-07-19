@@ -334,7 +334,15 @@ export default function SpaceScene({
   }, [engineResolved, engineKind]);
 
   useEffect(() => {
-    const el = engineRef.current;
+    // Bug found via GAP-17..20 E2E work (TR-060): this used engineRef.current,
+    // which only ever attaches to <space-engine> (see the "no ref" comment on
+    // <babylon-scene>'s JSX below) — on the Babylon path `el` was always null
+    // and this whole effect silently no-op'd, so density/constellations/ship/
+    // craft never reached babylon-engine.ts's attributeChangedCallback (GAP-12)
+    // at all. engineEl() is the established combined-selector accessor every
+    // other imperative call site in this file already uses for exactly this
+    // reason (works for whichever of the two custom elements is mounted).
+    const el = engineEl();
     if (!el || !engineReady) return;
     el.setAttribute("density", String(density));
     el.setAttribute("constellations", constellations ? "on" : "off");

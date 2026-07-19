@@ -121,6 +121,8 @@ attribute vec2 trailMeta;  // colourT, endFlag
 uniform mat4 view;
 uniform mat4 projection;
 uniform vec3 uCam, uCamPrev;
+uniform float uBeta; // GAP-06: position-only aberration, matches TRAIL_VS
+uniform vec3 uWarpDir; // (no Doppler — TRAIL_FS never had uBeta)
 varying vec3 vColor;
 varying float vAlpha;
 vec3 ramp(float t){
@@ -128,6 +130,15 @@ vec3 ramp(float t){
   if(t<0.4) return mix(c0,c2,t/0.4);
   if(t<0.8) return mix(c2,c4,(t-0.4)/0.4);
   return mix(c4,c5,(t-0.8)/0.2);
+}
+vec3 aberrate(vec3 p, vec3 warpDirView){
+  if (uBeta < 0.001) return p;
+  float dist = length(p); vec3 d = p / dist;
+  float c = dot(d, warpDirView);
+  float cp = clamp((c + uBeta) / (1.0 + uBeta * c), -1.0, 1.0);
+  vec3 perp = d - c * warpDirView; float pl = length(perp);
+  float sp = sqrt(max(0.0, 1.0 - cp * cp));
+  return (warpDirView * cp + (pl > 1e-5 ? perp * (sp / pl) : vec3(0.0))) * dist;
 }
 void main(){
   // Babylon's "view" bakes in the CURRENT camera position (unlike the
@@ -138,9 +149,14 @@ void main(){
   // scale/shear, mat3(view) is exactly the world->view rotation, so
   // mat3(view)*(uCam-uCamPrev) is the correct view-space correction —
   // algebraically: view*p + R*(cam-camPrev) == R*(p-camPrev) + T, matching
-  // the archived engine's uCamPrev branch exactly.
+  // the archived engine's uCamPrev branch exactly. GAP-06's aberrate() then
+  // applies to that same camera-relative vector, per endpoint, exactly like
+  // TRAIL_VS's aberrate(aPos - cam) (cam already selected per-endpoint by
+  // the correction above).
   vec4 viewPos = view * vec4(position, 1.0);
   if (trailMeta.y > 0.5) viewPos.xyz += mat3(view) * (uCam - uCamPrev);
+  vec3 warpDirView = mat3(view) * uWarpDir;
+  viewPos.xyz = aberrate(viewPos.xyz, warpDirView);
   gl_Position = projection * viewPos;
   vColor = ramp(fract(trailMeta.x));
   vAlpha = 0.20;
@@ -162,6 +178,8 @@ uniform view : mat4x4<f32>;
 uniform projection : mat4x4<f32>;
 uniform uCam : vec3<f32>;
 uniform uCamPrev : vec3<f32>;
+uniform uBeta : f32;
+uniform uWarpDir : vec3<f32>;
 varying vColor : vec3<f32>;
 varying vAlpha : f32;
 
@@ -175,14 +193,28 @@ fn ramp(t : f32) -> vec3<f32> {
   return mix(c4, c5, (t - 0.8) / 0.2);
 }
 
+fn aberrate(p : vec3<f32>, warpDirView : vec3<f32>) -> vec3<f32> {
+  if (uniforms.uBeta < 0.001) { return p; }
+  let dist : f32 = length(p);
+  let d : vec3<f32> = p / dist;
+  let c : f32 = dot(d, warpDirView);
+  let cp : f32 = clamp((c + uniforms.uBeta) / (1.0 + uniforms.uBeta * c), -1.0, 1.0);
+  let perp : vec3<f32> = d - c * warpDirView;
+  let pl : f32 = length(perp);
+  let sp : f32 = sqrt(max(0.0, 1.0 - cp * cp));
+  let side : vec3<f32> = select(vec3<f32>(0.0, 0.0, 0.0), perp * (sp / pl), pl > 1e-5);
+  return (warpDirView * cp + side) * dist;
+}
+
 @vertex
 fn main(input : VertexInputs) -> FragmentInputs {
   var viewPos : vec4<f32> = uniforms.view * vec4<f32>(vertexInputs.position, 1.0);
+  let rot : mat3x3<f32> = mat3x3<f32>(
+    uniforms.view[0].xyz, uniforms.view[1].xyz, uniforms.view[2].xyz);
   if (vertexInputs.trailMeta.y > 0.5) {
-    let rot : mat3x3<f32> = mat3x3<f32>(
-      uniforms.view[0].xyz, uniforms.view[1].xyz, uniforms.view[2].xyz);
     viewPos = vec4<f32>(viewPos.xyz + rot * (uniforms.uCam - uniforms.uCamPrev), viewPos.w);
   }
+  viewPos = vec4<f32>(aberrate(viewPos.xyz, rot * uniforms.uWarpDir), viewPos.w);
   vertexOutputs.position = uniforms.projection * viewPos;
   vertexOutputs.vColor = ramp(fract(vertexInputs.trailMeta.x));
   vertexOutputs.vAlpha = 0.20;

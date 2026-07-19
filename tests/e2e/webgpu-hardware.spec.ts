@@ -179,6 +179,98 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
   }
 });
 
+test("TR-059 regression: the default scene keeps producing frames through the Milky Way band's chunked texture build", async () => {
+  // TR-059: _setupMilkyWay's ShaderMaterial declares a `uTex` sampler, but
+  // the real equirect texture isn't built until _tickMilkyWay's chunked loop
+  // finishes — ~26 frames later (20 rows/frame against a 512-row grid). For
+  // that whole window, no texture object was bound to `uTex` at all.
+  // material.isReady() returned true regardless (it checks shader
+  // compilation, not whether every sampler has a resource), so the mesh drew
+  // anyway. On WebGPU, building a bind group with no resource for a declared
+  // binding is a hard, UNCAUGHT exception — it killed scene.render() for the
+  // entire frame, every frame, so nothing after the band in draw order ever
+  // rendered either. Fixed by binding a placeholder texture immediately and
+  // swapping it once the real one lands (babylon-engine.ts's
+  // _setupMilkyWay/_tickMilkyWay). This test's job is proving the render
+  // loop never stalls across that exact window, on the backend that actually
+  // exposed the bug (WebGL2's bundled-Chromium fallback only warns — see
+  // this file's header on why real hardware is required here at all).
+  const browser = await realAdapterOrSkip();
+  try {
+    const page = await browser.newPage();
+    const consoleIssues: string[] = [];
+    page.on("console", (m) => {
+      if (m.type() === "error" || m.type() === "warning")
+        consoleIssues.push(m.text());
+    });
+    const pageErrors: string[] = [];
+    page.on("pageerror", (e) => pageErrors.push(e.message));
+
+    await page.goto(`${BASE_URL}/?engine=babylon`);
+    await page.waitForSelector("babylon-scene", { timeout: 15000 });
+    await expect
+      .poll(async () => (await readStats(page)).starSource, { timeout: 20000 })
+      .not.toBeNull();
+
+    const readFrames = () =>
+      page
+        .locator("babylon-scene")
+        .evaluate(
+          (el) => (el as unknown as { renderFrames: number }).renderFrames,
+        );
+
+    // TR-059's actual failure mode was ZERO frames advancing across the
+    // WHOLE danger window (scene.render() threw on literally every frame,
+    // every time) — not merely a slow frame here or there. Sampling every
+    // 300ms and demanding EACH consecutive pair strictly increase turned out
+    // to be a stricter claim than the scene's real startup profile supports:
+    // right after starSource resolves, Havok WASM compilation and the ship
+    // GLB decode are both still running concurrently (fire-and-forget
+    // promises kicked off earlier in _boot), and a single occasional slow
+    // frame during that genuine startup burst is expected, not a
+    // regression. So: record frames BEFORE the band build is known to have
+    // crossed the danger window, wait for bandReady (which only flips once
+    // the chunked build — the exact window that used to crash every frame —
+    // has completed), and assert frames net-increased across that ENTIRE
+    // span. A persistent stall (TR-059's actual signature) still fails this;
+    // a single slow frame during concurrent asset loading does not.
+    const framesBeforeBand = await readFrames();
+    await expect
+      .poll(async () => (await readStats(page)).bandReady, { timeout: 20000 })
+      .toBe(true);
+    const framesAfterBand = await readFrames();
+    expect(
+      framesAfterBand,
+      `renderFrames did not advance across the Milky Way band's chunked build (before=${framesBeforeBand}, after=${framesAfterBand}) — this is TR-059's exact signature`,
+    ).toBeGreaterThan(framesBeforeBand);
+
+    // Confirm continued healthy operation past the danger window too —
+    // several samples with real waits between them, each pair must advance.
+    // This part of the scene should have settled by now (ship/physics async
+    // loads are typically done well before the band's ~26-frame build
+    // finishes), so a stricter per-sample check is appropriate here.
+    const samples: number[] = [framesAfterBand];
+    for (let i = 0; i < 4; i++) {
+      await page.waitForTimeout(300);
+      samples.push(await readFrames());
+    }
+    for (let i = 1; i < samples.length; i++) {
+      expect(
+        samples[i],
+        `renderFrames stalled post-band-build between samples ${i - 1} (${samples[i - 1]}) and ${i} (${samples[i]})`,
+      ).toBeGreaterThan(samples[i - 1]);
+    }
+
+    expect(await readStats(page).then((s) => s.bandTextureReady)).toBe(true);
+    expect(consoleIssues).toEqual([]);
+    expect(pageErrors).toEqual([]);
+
+    await page.close();
+  } finally {
+    await browser.close();
+  }
+});
+
 test("HiDPI: WebGPU canvas renders at physical-pixel resolution, not CSS-pixel resolution (owner-reported blur)", async () => {
   // The owner reported the deployed demo reads as blurry on desktop. Root
   // cause: WebGPUEngine's adaptToDeviceRatio has NO positional constructor

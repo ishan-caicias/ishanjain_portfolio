@@ -18,9 +18,17 @@
  * own `setTimeout(step, 0)` 20-rows-per-tick technique, just driven from
  * Babylon's render loop instead of a raw timer).
  *
- * Deliberately NOT ported: relativistic aberration/Doppler tinting on the
- * band (GAP-06's dependency — needs the flight model's velocity wired to
- * this pass, not yet done for stars or bodies either on this path).
+ * GAP-06 (2026-07-20): Doppler colour tint IS now ported — see the fragment
+ * shader below. The POSITIONAL half (relativistic aberration crowding the
+ * band toward the travel vector) is deliberately NOT: this pass samples a
+ * skybox SPHERE by its own built-in UV, not a per-pixel reconstructed view
+ * ray the way the archived engine's fullscreen-triangle BAND_FS does (see
+ * this file's header on that technique substitution) — re-deriving that ray
+ * per fragment just to aberrate it, then inverting the mapping back to a
+ * sphere UV, would mean re-deriving Babylon's own CreateSphere UV formula by
+ * hand for a diffuse, huge-radius background layer where the colour shift is
+ * the visually load-bearing half of the effect. Named here, not silently
+ * dropped, per the gap analysis's implementation guardrail.
  */
 
 const D2R = Math.PI / 180;
@@ -187,18 +195,34 @@ uniform mat4 world;
 uniform mat4 view;
 uniform mat4 projection;
 varying vec2 vUV;
+varying vec3 vDir;
 void main(){
   gl_Position = projection * view * world * vec4(position, 1.0);
   vUV = uv;
+  // GAP-06: object-space position IS the observed direction — this sphere is
+  // centred on the camera every frame (mesh.infiniteDistance), so its local
+  // (pre-world-transform) position already points the way the archived
+  // engine's per-pixel view ray d did at the point BAND_FS computes dop.
+  vDir = normalize(position);
 }`;
 
 export const MILKY_WAY_FRAGMENT_GLSL = `
 precision mediump float;
 uniform sampler2D uTex;
 uniform float uFade;
+uniform float uBeta, uGamma; // GAP-06: Doppler tint (see this file's header)
+uniform vec3 uWarpDir;
 varying vec2 vUV;
+varying vec3 vDir;
 void main(){
   vec3 col = texture2D(uTex, vUV).rgb;
+  if (uBeta > 0.001) {
+    float c = dot(normalize(vDir), uWarpDir);
+    float dop = 1.0 / (uGamma * (1.0 - uBeta * c));
+    col = mix(col, vec3(0.62, 0.75, 1.0) * length(col) * 1.4, clamp((dop - 1.0) * 0.8, 0.0, 0.6));
+    col = mix(col, vec3(1.0, 0.45, 0.3) * length(col) * 1.2, clamp((1.0 - dop) * 1.0, 0.0, 0.65));
+    col *= clamp(dop * dop, 0.3, 2.0);
+  }
   gl_FragColor = vec4(col * uFade, 1.0);
 }`;
 
@@ -209,20 +233,33 @@ uniform world : mat4x4<f32>;
 uniform view : mat4x4<f32>;
 uniform projection : mat4x4<f32>;
 varying vUV : vec2<f32>;
+varying vDir : vec3<f32>;
 @vertex
 fn main(input : VertexInputs) -> FragmentInputs {
   vertexOutputs.position = uniforms.projection * uniforms.view * uniforms.world * vec4<f32>(vertexInputs.position, 1.0);
   vertexOutputs.vUV = vertexInputs.uv;
+  vertexOutputs.vDir = normalize(vertexInputs.position);
 }`;
 
 export const MILKY_WAY_FRAGMENT_WGSL = `
 varying vUV : vec2<f32>;
+varying vDir : vec3<f32>;
 var uTex : texture_2d<f32>;
 var uTexSampler : sampler;
 uniform uFade : f32;
+uniform uBeta : f32;
+uniform uGamma : f32;
+uniform uWarpDir : vec3<f32>;
 
 @fragment
 fn main(input : FragmentInputs) -> FragmentOutputs {
-  let col : vec3<f32> = textureSample(uTex, uTexSampler, fragmentInputs.vUV).rgb;
+  var col : vec3<f32> = textureSample(uTex, uTexSampler, fragmentInputs.vUV).rgb;
+  if (uniforms.uBeta > 0.001) {
+    let c : f32 = dot(normalize(fragmentInputs.vDir), uniforms.uWarpDir);
+    let dop : f32 = 1.0 / (uniforms.uGamma * (1.0 - uniforms.uBeta * c));
+    col = mix(col, vec3<f32>(0.62, 0.75, 1.0) * length(col) * 1.4, clamp((dop - 1.0) * 0.8, 0.0, 0.6));
+    col = mix(col, vec3<f32>(1.0, 0.45, 0.3) * length(col) * 1.2, clamp((1.0 - dop) * 1.0, 0.0, 0.65));
+    col = col * clamp(dop * dop, 0.3, 2.0);
+  }
   fragmentOutputs.color = vec4<f32>(col * uniforms.uFade, 1.0);
 }`;

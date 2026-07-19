@@ -97,3 +97,72 @@ export function resolveQualityTier(
   }
   return device === "high" ? QUALITY_BUDGETS.balanced : QUALITY_BUDGETS.lite;
 }
+
+/* ---------- GAP-21: adaptive quality governor ----------
+ *
+ * resolveQualityTier above runs once at boot. space-engine.js also demotes
+ * tier after 70 sustained slow frames and promotes after 900 sustained good
+ * ones (`_tick`'s `_ftBad`/`_ftGood`, space-engine.js:1975-1994) — a device
+ * that starts strong but degrades (thermal throttling, a heavy background
+ * tab) never recovers headroom on the Babylon path today. These two
+ * functions port that governor as pure, unit-testable steps; babylon-
+ * engine.ts owns only the per-instance state and the side effects (which
+ * knobs are safe to re-apply live is documented at the call site there).
+ */
+
+const TIER_ORDER: readonly QualityTierName[] = ["lite", "balanced", "full"];
+
+/** One step down (full → balanced → lite); a no-op at the floor. */
+export function demoteTier(name: QualityTierName): QualityTierName {
+  const i = TIER_ORDER.indexOf(name);
+  return i > 0 ? TIER_ORDER[i - 1] : name;
+}
+
+/** One step up (lite → balanced → full); a no-op at the ceiling. */
+export function promoteTier(name: QualityTierName): QualityTierName {
+  const i = TIER_ORDER.indexOf(name);
+  return i < TIER_ORDER.length - 1 ? TIER_ORDER[i + 1] : name;
+}
+
+export interface GovernorState {
+  /** Exponentially-smoothed frame time, ms (space-engine.js's `_ft`). */
+  ft: number;
+  /** Consecutive over-budget samples (space-engine.js's `_ftBad`). */
+  bad: number;
+  /** Consecutive comfortably-fast samples (space-engine.js's `_ftGood`). */
+  good: number;
+}
+
+export const GOVERNOR_IDLE_STATE: GovernorState = { ft: 16, bad: 0, good: 0 };
+
+/** One governor tick. `dtMs` is the wall-clock gap since the previous call;
+ * `budgetMs` is the demote threshold (space-engine.js: 25 normally, 42 while
+ * scrolled off-hero) and 15 ms is hardcoded as the promote threshold on both
+ * sides, matching the live engine exactly. Samples outside `(0, 200)` ms
+ * (tab-hidden resume, context-loss recovery) are ignored, same as upstream.
+ * Returns the next state and the tier that should now be in effect —
+ * unchanged unless a threshold was just crossed. */
+export function stepGovernor(
+  state: GovernorState,
+  dtMs: number,
+  budgetMs: number,
+  tier: QualityTierName,
+): { state: GovernorState; tier: QualityTierName } {
+  if (!(dtMs > 0 && dtMs < 200)) return { state, tier };
+  const ft = state.ft * 0.9 + dtMs * 0.1;
+  if (ft > budgetMs) {
+    const bad = state.bad + 1;
+    if (bad > 70) {
+      return { state: { ft: 16, bad: 0, good: 0 }, tier: demoteTier(tier) };
+    }
+    return { state: { ft, bad, good: 0 }, tier };
+  }
+  if (ft < 15) {
+    const good = state.good + 1;
+    if (good > 900) {
+      return { state: { ft, bad: 0, good: 0 }, tier: promoteTier(tier) };
+    }
+    return { state: { ft, bad: 0, good }, tier };
+  }
+  return { state: { ft, bad: state.bad, good: state.good }, tier };
+}

@@ -9,7 +9,16 @@ import {
   DOCK_HOLD_S,
   dockFade,
   dockSettleOffset,
+  EMBER_BURST_START,
+  EMBER_BURST_STOP,
+  emberBillboards,
+  EMBER_FRAGMENT_GLSL,
+  EMBER_FRAGMENT_WGSL,
+  emberIndices,
+  EMBER_VERTEX_GLSL,
+  EMBER_VERTEX_WGSL,
   flipPhase,
+  MAX_EMBERS,
   plumeBuffersForWrapper,
   plumeIndices,
   plumeParamsForWarp,
@@ -18,6 +27,7 @@ import {
   PLUME_FRAGMENT_WGSL,
   SHIMMER_FRAGMENT_GLSL,
   SHIMMER_FRAGMENT_WGSL,
+  spawnEmberLocal,
   WARP_ACCEL_END,
   WARP_DECEL_START,
 } from "@/lib/babylon-ship";
@@ -25,9 +35,12 @@ import { WGSL_RESERVED_IDENTIFIERS } from "@/lib/nebula-field";
 import {
   buildPlumeVertices,
   PLUME_CORE,
+  PLUME_ENGINES,
   PLUME_SHEATH,
   PLUME_VERTEX_COUNT,
   PLUME_VERTEX_FLOATS,
+  stepEmber,
+  type Ember,
 } from "@/lib/ship-dynamics";
 
 describe("flipPhase", () => {
@@ -169,5 +182,96 @@ describe("ship shader sources", () => {
     expect(SHIMMER_FRAGMENT_WGSL).not.toContain("if (k");
     expect(SHIMMER_FRAGMENT_GLSL.match(/texture2D\(/g)).toHaveLength(1);
     expect(SHIMMER_FRAGMENT_GLSL).not.toContain("if (k");
+  });
+
+  it("GAP-07 TR-045 guard: no reserved WGSL identifiers in the ember twins", () => {
+    for (const word of WGSL_RESERVED_IDENTIFIERS) {
+      expect(EMBER_VERTEX_WGSL).not.toMatch(new RegExp(`\\b${word}\\b`));
+      expect(EMBER_FRAGMENT_WGSL).not.toMatch(new RegExp(`\\b${word}\\b`));
+    }
+  });
+
+  it("ember twins derive the quad corner from the vertex id, like the star/body billboards", () => {
+    expect(EMBER_VERTEX_GLSL).toContain("gl_VertexID % 4");
+    expect(EMBER_VERTEX_WGSL).toContain("vertexIndex % 4u");
+  });
+
+  it("ember fragment twins discard on both the circular falloff and a zero-alpha slot", () => {
+    expect(EMBER_FRAGMENT_GLSL).toContain("discard");
+    expect(EMBER_FRAGMENT_GLSL).toContain("vAlpha <= 0.001");
+    expect(EMBER_FRAGMENT_WGSL).toContain("discard");
+    expect(EMBER_FRAGMENT_WGSL).toContain("vAlpha <= 0.001");
+  });
+});
+
+describe("GAP-07: ember sparks", () => {
+  it("burst counts match space-engine.js's F3 spark burst exactly (14 start / 8 stop)", () => {
+    expect(EMBER_BURST_START).toBe(14);
+    expect(EMBER_BURST_STOP).toBe(8);
+  });
+
+  it("spawnEmberLocal picks a real engine nozzle and jitters within the live engine's bounds", () => {
+    for (let i = 0; i < 200; i++) {
+      const { pos, vel } = spawnEmberLocal();
+      // pos must be within jitter distance of SOME engine nozzle (matches
+      // space-engine.js's `eng[0] + (rand-0.5)*0.05` etc.)
+      const nearAnEngine = PLUME_ENGINES.some(
+        (eng) =>
+          Math.abs(pos[0] - eng[0]) <= 0.025 + 1e-9 &&
+          Math.abs(pos[1] - eng[1]) <= 0.025 + 1e-9 &&
+          Math.abs(pos[2] - eng[2] - 0.05) < 1e-9,
+      );
+      expect(nearAnEngine).toBe(true);
+      // drift-back velocity: away from the nose (+Z in unit-ship space),
+      // matches space-engine.js's `vz: 0.9 + Math.random()*1.4`.
+      expect(vel[2]).toBeGreaterThanOrEqual(0.9);
+      expect(vel[2]).toBeLessThanOrEqual(2.3);
+    }
+  });
+
+  it("stepEmber (ship-dynamics.ts) integrates spawned embers to death within a bounded lifespan", () => {
+    const { pos, vel } = spawnEmberLocal();
+    const e: Ember = {
+      x: pos[0],
+      y: pos[1],
+      z: pos[2],
+      vx: vel[0],
+      vy: vel[1],
+      vz: vel[2],
+      life: 0.7 + 0.5, // max spawn life
+    };
+    let steps = 0;
+    while (stepEmber(e, 1 / 60) && steps < 600) steps++;
+    // EMBER_DECAY = 1.6/s, max life 1.2 -> dies within ~0.75s (45 frames at
+    // 60fps); generous upper bound guards against a decay-rate regression.
+    expect(steps).toBeGreaterThan(0);
+    expect(steps).toBeLessThan(90);
+  });
+
+  it("emberBillboards fills exactly MAX_EMBERS worth of quads, alpha 0 past the live count", () => {
+    const embers: Ember[] = [
+      { x: 1, y: 2, z: 3, vx: 0, vy: 0, vz: 0, life: 1 },
+      { x: 4, y: 5, z: 6, vx: 0, vy: 0, vz: 0, life: 0.1 },
+    ];
+    const positions = new Float32Array(MAX_EMBERS * 4 * 3);
+    const meta = new Float32Array(MAX_EMBERS * 4 * 2);
+    const n = emberBillboards(embers, positions, meta);
+    expect(n).toBe(2);
+    // first ember's 4 corners all share its world position
+    for (let c = 0; c < 4; c++) {
+      expect(positions[c * 3]).toBe(1);
+      expect(positions[c * 3 + 1]).toBe(2);
+      expect(positions[c * 3 + 2]).toBe(3);
+    }
+    // brighter/longer-lived ember (life=1) has more alpha than the fading one
+    expect(meta[0]).toBeGreaterThan(meta[4 * 2]);
+    // unused capacity beyond the 2 live embers is zero-alpha
+    expect(meta[2 * 4 * 2]).toBe(0);
+  });
+
+  it("emberIndices covers every quad's 6 indices for the full MAX_EMBERS capacity", () => {
+    const idx = emberIndices();
+    expect(idx).toHaveLength(MAX_EMBERS * 6);
+    expect(Math.max(...idx)).toBe(MAX_EMBERS * 4 - 1);
   });
 });

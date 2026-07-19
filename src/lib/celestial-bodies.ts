@@ -373,10 +373,27 @@ uniform mat4 view;
 uniform mat4 projection;
 uniform vec2 uViewport;
 uniform float uTime;
+uniform float uBeta, uGamma; // GAP-06: relativistic aberration + Doppler
+uniform vec3 uWarpDir;
 varying vec2 vCorner;
 varying vec3 vColor;
 varying float vType;
 varying float vSeed;
+varying float vDoppler; // GAP-06: D^2 alpha scale, matches STAR_VS's vAlpha *= clamp(D*D, 0.25, 2.2)
+// GAP-06: curated bodies render through the same beacon pipeline
+// space-engine.js's STAR_VS drives (uMode>0.5 branch) — so they get the same
+// full aberration + Doppler treatment as field stars, not the position-only
+// version photo billboards and warp trails use. See babylon-engine.ts's
+// ijStarVertexShader for the header explaining the view-space adaptation.
+vec3 aberrate(vec3 p, vec3 warpDirView){
+  if (uBeta < 0.001) return p;
+  float dist = length(p); vec3 d = p / dist;
+  float c = dot(d, warpDirView);
+  float cp = clamp((c + uBeta) / (1.0 + uBeta * c), -1.0, 1.0);
+  vec3 perp = d - c * warpDirView; float pl = length(perp);
+  float sp = sqrt(max(0.0, 1.0 - cp * cp));
+  return (warpDirView * cp + (pl > 1e-5 ? perp * (sp / pl) : vec3(0.0))) * dist;
+}
 vec3 ramp(float t){
   vec3 c0=vec3(0.608,0.690,1.000), c1=vec3(0.792,0.843,1.000), c2=vec3(0.973,0.969,1.000),
        c3=vec3(1.000,0.957,0.918), c4=vec3(1.000,0.824,0.631), c5=vec3(1.000,0.800,0.435);
@@ -390,6 +407,8 @@ void main(){
   int c = gl_VertexID % 4;
   vec2 corner = vec2((c == 1 || c == 2) ? 1.0 : -1.0, (c >= 2) ? 1.0 : -1.0);
   vec4 centre = view * vec4(position, 1.0);
+  vec3 warpDirView = mat3(view) * uWarpDir;
+  centre.xyz = aberrate(centre.xyz, warpDirView);
   float dist = length(centre.xyz);
 
   float ty = bodyMeta.y;
@@ -409,6 +428,15 @@ void main(){
   vType = ty;
   vSeed = bodyMeta.w * 6.2831853;
 
+  vDoppler = 1.0;
+  if (uBeta > 0.001) {
+    float cp2 = dot(centre.xyz, warpDirView) / max(dist, 1e-4);
+    float D = 1.0 / (uGamma * (1.0 - uBeta * cp2));
+    vColor = mix(vColor, vec3(0.60, 0.74, 1.0), clamp((D - 1.0) * 0.9, 0.0, 0.65));
+    vColor = mix(vColor, vec3(1.0, 0.40, 0.26), clamp((1.0 - D) * 1.1, 0.0, 0.70));
+    vDoppler = clamp(D * D, 0.25, 2.2);
+  }
+
   vec4 clip = projection * centre;
   clip.x += corner.x * px * clip.w / max(uViewport.x, 1.0);
   clip.y += corner.y * px * clip.w / max(uViewport.y, 1.0);
@@ -422,6 +450,7 @@ varying vec2 vCorner;
 varying vec3 vColor;
 varying float vType;
 varying float vSeed;
+varying float vDoppler;
 float hash2(vec2 p, float s){ return fract(sin(dot(p, vec2(127.1, 311.7)) + s) * 43758.5453); }
 void main(){
   vec2 pc = vCorner;
@@ -494,6 +523,7 @@ void main(){
     a = step(0.78, h) * (0.35+0.65*fract(h*5.0)) * smoothstep(0.95, 0.7, max(abs(pc.x),abs(pc.y))*2.0);
     a += exp(-d*d*4.0)*0.05;
   }
+  a *= vDoppler;
   if (a <= 0.004) discard;
   gl_FragColor = vec4(col, a);
 }`;
@@ -505,10 +535,28 @@ uniform view : mat4x4<f32>;
 uniform projection : mat4x4<f32>;
 uniform uViewport : vec2<f32>;
 uniform uTime : f32;
+uniform uBeta : f32;
+uniform uGamma : f32;
+uniform uWarpDir : vec3<f32>;
 varying vCorner : vec2<f32>;
 varying vColor : vec3<f32>;
 varying vType : f32;
 varying vSeed : f32;
+varying vDoppler : f32;
+
+// GAP-06: line-for-line twin of the GLSL aberrate() above.
+fn aberrate(p : vec3<f32>, warpDirView : vec3<f32>) -> vec3<f32> {
+  if (uniforms.uBeta < 0.001) { return p; }
+  let dist : f32 = length(p);
+  let d : vec3<f32> = p / dist;
+  let c : f32 = dot(d, warpDirView);
+  let cp : f32 = clamp((c + uniforms.uBeta) / (1.0 + uniforms.uBeta * c), -1.0, 1.0);
+  let perp : vec3<f32> = d - c * warpDirView;
+  let pl : f32 = length(perp);
+  let sp : f32 = sqrt(max(0.0, 1.0 - cp * cp));
+  let side : vec3<f32> = select(vec3<f32>(0.0, 0.0, 0.0), perp * (sp / pl), pl > 1e-5);
+  return (warpDirView * cp + side) * dist;
+}
 
 fn ramp(t : f32) -> vec3<f32> {
   let c0 = vec3<f32>(0.608, 0.690, 1.000);
@@ -530,7 +578,10 @@ fn main(input : VertexInputs) -> FragmentInputs {
   let corner : vec2<f32> = vec2<f32>(
     select(-1.0, 1.0, c == 1u || c == 2u),
     select(-1.0, 1.0, c >= 2u));
-  let centre : vec4<f32> = uniforms.view * vec4<f32>(vertexInputs.position, 1.0);
+  var centre : vec4<f32> = uniforms.view * vec4<f32>(vertexInputs.position, 1.0);
+  let warpDirView : vec3<f32> = mat3x3<f32>(
+    uniforms.view[0].xyz, uniforms.view[1].xyz, uniforms.view[2].xyz) * uniforms.uWarpDir;
+  centre = vec4<f32>(aberrate(centre.xyz, warpDirView), centre.w);
   let dist : f32 = length(centre.xyz);
 
   let ty : f32 = vertexInputs.bodyMeta.y;
@@ -548,7 +599,17 @@ fn main(input : VertexInputs) -> FragmentInputs {
     px = px * (1.0 + 0.12 * sin(uniforms.uTime * 2.2 + vertexInputs.bodyMeta.w * 40.0));
   }
 
-  vertexOutputs.vColor = ramp(vertexInputs.bodyMeta.x);
+  var col : vec3<f32> = ramp(vertexInputs.bodyMeta.x);
+  var doppler : f32 = 1.0;
+  if (uniforms.uBeta > 0.001) {
+    let cp2 : f32 = dot(centre.xyz, warpDirView) / max(dist, 1e-4);
+    let D : f32 = 1.0 / (uniforms.uGamma * (1.0 - uniforms.uBeta * cp2));
+    col = mix(col, vec3<f32>(0.60, 0.74, 1.0), clamp((D - 1.0) * 0.9, 0.0, 0.65));
+    col = mix(col, vec3<f32>(1.0, 0.40, 0.26), clamp((1.0 - D) * 1.1, 0.0, 0.70));
+    doppler = clamp(D * D, 0.25, 2.2);
+  }
+  vertexOutputs.vColor = col;
+  vertexOutputs.vDoppler = doppler;
   vertexOutputs.vType = ty;
   vertexOutputs.vSeed = vertexInputs.bodyMeta.w * 6.2831853;
 
@@ -564,6 +625,7 @@ varying vCorner : vec2<f32>;
 varying vColor : vec3<f32>;
 varying vType : f32;
 varying vSeed : f32;
+varying vDoppler : f32;
 
 fn hash2(p : vec2<f32>, s : f32) -> f32 {
   return fract(sin(dot(p, vec2<f32>(127.1, 311.7)) + s) * 43758.5453);
@@ -637,6 +699,7 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
       * smoothstep(0.95, 0.7, max(abs(pc.x), abs(pc.y)) * 2.0);
     a = a + exp(-d * d * 4.0) * 0.05;
   }
+  a = a * fragmentInputs.vDoppler;
   if (a <= 0.004) { discard; }
   fragmentOutputs.color = vec4<f32>(col, a);
 }`;
@@ -654,10 +717,21 @@ uniform mat4 view;
 uniform mat4 projection;
 uniform vec2 uViewport;
 uniform float uTime;
+uniform float uBeta; // GAP-06: position-only aberration, matches PHOTO_VS
+uniform vec3 uWarpDir; // (no Doppler colour shift — PHOTO_FS never had uBeta)
 varying vec2 vLocal;
 varying vec4 vCell;
 varying float vType;
 varying float vZ;
+vec3 aberrate(vec3 p, vec3 warpDirView){
+  if (uBeta < 0.001) return p;
+  float dist = length(p); vec3 d = p / dist;
+  float c = dot(d, warpDirView);
+  float cp = clamp((c + uBeta) / (1.0 + uBeta * c), -1.0, 1.0);
+  vec3 perp = d - c * warpDirView; float pl = length(perp);
+  float sp = sqrt(max(0.0, 1.0 - cp * cp));
+  return (warpDirView * cp + (pl > 1e-5 ? perp * (sp / pl) : vec3(0.0))) * dist;
+}
 void main(){
   int c = gl_VertexID % 4;
   vec2 corner = vec2((c == 1 || c == 2) ? 1.0 : -1.0, (c >= 2) ? 1.0 : -1.0);
@@ -673,6 +747,8 @@ void main(){
   vec2 rotated = vec2(local.x*ca - local.y*sa, local.x*sa + local.y*ca);
 
   vec4 centre = view * vec4(position, 1.0);
+  vec3 warpDirView = mat3(view) * uWarpDir;
+  centre.xyz = aberrate(centre.xyz, warpDirView);
   // cosmological redshift proxy from log-compressed depth (matches
   // space-engine.js's PHOTO_VS exactly: z ~ d / 14.1 Gly) — a function of the
   // body's placement, not of travel velocity, so it needs no aberration wiring.
@@ -763,10 +839,25 @@ uniform view : mat4x4<f32>;
 uniform projection : mat4x4<f32>;
 uniform uViewport : vec2<f32>;
 uniform uTime : f32;
+uniform uBeta : f32;
+uniform uWarpDir : vec3<f32>;
 varying vLocal : vec2<f32>;
 varying vCell : vec4<f32>;
 varying vType : f32;
 varying vZ : f32;
+
+fn aberrate(p : vec3<f32>, warpDirView : vec3<f32>) -> vec3<f32> {
+  if (uniforms.uBeta < 0.001) { return p; }
+  let dist : f32 = length(p);
+  let d : vec3<f32> = p / dist;
+  let c : f32 = dot(d, warpDirView);
+  let cp : f32 = clamp((c + uniforms.uBeta) / (1.0 + uniforms.uBeta * c), -1.0, 1.0);
+  let perp : vec3<f32> = d - c * warpDirView;
+  let pl : f32 = length(perp);
+  let sp : f32 = sqrt(max(0.0, 1.0 - cp * cp));
+  let side : vec3<f32> = select(vec3<f32>(0.0, 0.0, 0.0), perp * (sp / pl), pl > 1e-5);
+  return (warpDirView * cp + side) * dist;
+}
 
 @vertex
 fn main(input : VertexInputs) -> FragmentInputs {
@@ -786,7 +877,10 @@ fn main(input : VertexInputs) -> FragmentInputs {
   let sa : f32 = sin(rotAng);
   let rotated : vec2<f32> = vec2<f32>(local.x * ca - local.y * sa, local.x * sa + local.y * ca);
 
-  let centre : vec4<f32> = uniforms.view * vec4<f32>(vertexInputs.position, 1.0);
+  var centre : vec4<f32> = uniforms.view * vec4<f32>(vertexInputs.position, 1.0);
+  let warpDirView : vec3<f32> = mat3x3<f32>(
+    uniforms.view[0].xyz, uniforms.view[1].xyz, uniforms.view[2].xyz) * uniforms.uWarpDir;
+  centre = vec4<f32>(aberrate(centre.xyz, warpDirView), centre.w);
   vertexOutputs.vZ = clamp(
     pow(10.0, (length(vertexInputs.position) - 150.0) / 128.0) * 7.1e-11, 0.0, 1.3);
   let dist : f32 = length(centre.xyz);

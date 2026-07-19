@@ -13,8 +13,19 @@
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    # Optional: uncomment for stronger security (may require tuning for inline scripts)
-    # Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    # Optional: uncomment for stronger security. astro.config.mjs's hash-based
+    # <meta> CSP is the single source of truth (docs/architecture/overview.md
+    # "Security") and already covers every page — this header is disabled on
+    # purpose, not by oversight. GAP-24 (2026-07-20 cutover gap analysis): if
+    # it is ever enabled anyway, it MUST mirror astro.config's connect-src/
+    # worker-src blob: and script-src 'wasm-unsafe-eval' or the Babylon ship
+    # regresses to a geometry-less hull on WebGPU / a wireframe fallback on
+    # every backend (TR-047's failure mode) — this line previously omitted
+    # both and would have reproduced that regression the moment it was
+    # uncommented. style-src still needs 'unsafe-inline' here (a static
+    # header can't carry Astro's per-page hashes) — a real gap versus the
+    # <meta> CSP, accepted because this header ships disabled.
+    # Content-Security-Policy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self'; connect-src 'self' blob:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 
 [[headers]]
   for = "/fonts/*"

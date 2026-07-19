@@ -1,14 +1,23 @@
-// PINNED TO ?engine=webgl at the ADR-0006 cutover (declared test change):
-// this spec guards the ARCHIVED legacy engine during its one-release archival
-// window. Babylon-path coverage lives in the engine-select/accessibility/
-// perf-budgets/webgpu-hardware specs.
+// UN-PINNED 2026-07-20 (GAP-18, TR-060): this spec tested the default engine
+// before the B6 cutover, then was pinned to ?engine=webgl at the cutover
+// ("during its one-release archival window" — this file's own former
+// header) because Babylon hadn't wired dataset.craftState/cosmos:craft yet
+// (GAP-15) nor honoured the `craft` HTML attribute as an input (GAP-12).
+// Both are closed (TR-058): SpaceScene.tsx sets density/constellations/ship/
+// craft on whichever engine element it mounts identically regardless of
+// engine (src/components/islands/SpaceScene.tsx:339-350), and babylon-
+// engine.ts now mirrors dataset.craftState + emits cosmos:craft at the same
+// three transitions space-engine.js does. Testing the default (Babylon)
+// again, per the header's own original intent.
 /**
  * PF-07 ship-v2 P1 — E2E for the flagged textured craft.
  *
- * The craft is opt-in via ?craft=1k|2k (space-engine "craft" attribute); the
- * engine mirrors its load state onto data-craft-state and emits cosmos:craft
- * events. Flag-off behaviour is covered by the existing 33-test suite — the
- * dedicated check here is that the default page never enters a craft state.
+ * The craft is opt-in via ?craft=1k|2k (the "craft" HTML attribute, set by
+ * SpaceScene.tsx from resolveCraftAttribute's URL/stored/device-policy
+ * chain); the engine mirrors its load state onto data-craft-state and emits
+ * cosmos:craft events. Flag-off behaviour is covered by the existing test
+ * suite — the dedicated check here is that the default page never enters a
+ * craft state it wasn't asked for.
  */
 import { expect, test } from "@playwright/test";
 
@@ -16,10 +25,7 @@ for (const tier of ["1k", "2k"] as const) {
   test(`?craft=${tier} loads the textured craft without errors`, async ({
     page,
   }) => {
-    // engine=webgl per this file's archival pin (TR-054: this goto was the one
-    // the ADR-0006 cutover missed, so it still resolved to the Babylon default
-    // and waited forever for a <space-engine> that never mounts)
-    await page.goto(`/?craft=${tier}&engine=webgl`);
+    await page.goto(`/?craft=${tier}`);
     // Listeners attach post-goto, matching the suite's established convention
     // (space-scene.spec.ts): page-load-time noise is out of scope here — the
     // craft-specific failure detector is the data-craft-state assertion below.
@@ -29,7 +35,7 @@ for (const tier of ["1k", "2k"] as const) {
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
     });
-    await page.waitForSelector(`space-engine[data-craft-state="ready"]`, {
+    await page.waitForSelector(`babylon-scene[data-craft-state="ready"]`, {
       timeout: 20000,
     });
 
@@ -37,7 +43,7 @@ for (const tier of ["1k", "2k"] as const) {
     expect(consoleErrors).toEqual([]);
     // the wireframe-failure fallback warning must not have fired
     expect(
-      await page.locator('space-engine[data-craft-state="error"]').count(),
+      await page.locator('babylon-scene[data-craft-state="error"]').count(),
     ).toBe(0);
   });
 }
@@ -45,14 +51,14 @@ for (const tier of ["1k", "2k"] as const) {
 test("warp travel completes with the craft active (P2 world-space staging)", async ({
   page,
 }) => {
-  await page.goto("/?craft=2k&engine=webgl");
-  await page.waitForSelector('space-engine[data-craft-state="ready"]');
+  await page.goto("/?craft=2k");
+  await page.waitForSelector('babylon-scene[data-craft-state="ready"]');
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
 
   // Warp to a station through the full flight sequence (aim → burn → flip →
-  // decel → arrive) — exercises the view-space placement, FOV breathing, and
-  // spring dynamics along the way.
+  // decel → arrive) — exercises the ship track, plume, and chase choreography
+  // along the way.
   await page
     .getByRole("navigation", { name: "Main navigation" })
     .locator("ul")
@@ -83,22 +89,22 @@ test("warp travel completes with the craft active (P2 world-space staging)", asy
 test("?craft=on auto-resolves to the 2k tier on a capable desktop (P4)", async ({
   page,
 }) => {
-  await page.goto("/?craft=on&engine=webgl");
-  await page.waitForSelector('space-engine[data-craft-state="ready"]', {
+  await page.goto("/?craft=on");
+  await page.waitForSelector('babylon-scene[data-craft-state="ready"]', {
     timeout: 20000,
   });
-  await expect(page.locator("space-engine")).toHaveAttribute("craft", "2k");
+  await expect(page.locator("babylon-scene")).toHaveAttribute("craft", "2k");
 });
 
 test("?craft=on picks the 1k tier on a narrow viewport (P4)", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto("/?craft=on&engine=webgl");
-  await page.waitForSelector('space-engine[data-craft-state="ready"]', {
+  await page.goto("/?craft=on");
+  await page.waitForSelector('babylon-scene[data-craft-state="ready"]', {
     timeout: 20000,
   });
-  await expect(page.locator("space-engine")).toHaveAttribute("craft", "1k");
+  await expect(page.locator("babylon-scene")).toHaveAttribute("craft", "1k");
 });
 
 test("stored quality override applies without any URL flag (P4)", async ({
@@ -107,11 +113,11 @@ test("stored quality override applies without any URL flag (P4)", async ({
   await page.addInitScript(() => {
     localStorage.setItem("ij-craft-quality", "1k");
   });
-  await page.goto("/?engine=webgl");
-  await page.waitForSelector('space-engine[data-craft-state="ready"]', {
+  await page.goto("/");
+  await page.waitForSelector('babylon-scene[data-craft-state="ready"]', {
     timeout: 20000,
   });
-  await expect(page.locator("space-engine")).toHaveAttribute("craft", "1k");
+  await expect(page.locator("babylon-scene")).toHaveAttribute("craft", "1k");
 });
 
 test("no-WebGL fallback still works with the craft flag on (P4 parity)", async ({
@@ -130,8 +136,8 @@ test("no-WebGL fallback still works with the craft flag on (P4 parity)", async (
   });
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
-  await page.goto("/?craft=2k&engine=webgl");
-  await page.waitForSelector("space-engine");
+  await page.goto("/?craft=2k");
+  await page.waitForSelector("babylon-scene");
   await expect(page.getByText(/ONLINE ·.*LIVE SOURCES/)).toBeVisible({
     timeout: 15000,
   });
@@ -144,18 +150,18 @@ test("no-WebGL fallback still works with the craft flag on (P4 parity)", async (
 test("default page loads the craft via the auto policy (P5 rollout)", async ({
   page,
 }) => {
-  await page.goto("/?engine=webgl");
-  await page.waitForSelector('space-engine[data-craft-state="ready"]', {
+  await page.goto("/");
+  await page.waitForSelector('babylon-scene[data-craft-state="ready"]', {
     timeout: 20000,
   });
-  await expect(page.locator("space-engine")).toHaveAttribute("craft", "2k");
+  await expect(page.locator("babylon-scene")).toHaveAttribute("craft", "2k");
 });
 
 test("?craft=off restores the wireframe (rollout opt-out)", async ({
   page,
 }) => {
-  await page.goto("/?craft=off&engine=webgl");
-  await page.waitForSelector("space-engine");
+  await page.goto("/?craft=off");
+  await page.waitForSelector("babylon-scene");
   await page.waitForTimeout(1500);
-  expect(await page.locator("space-engine[data-craft-state]").count()).toBe(0);
+  expect(await page.locator("babylon-scene[data-craft-state]").count()).toBe(0);
 });

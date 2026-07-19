@@ -10,8 +10,43 @@ figures, and warp star trails — are all **resolved**
 ([TR-056](../test-reports/TR-056.md), [TR-057](../test-reports/TR-057.md), 2026-07-20).
 **One item remains before B6 closes: the post-flip owner device pass** (checklist §A, accepted
 risk at flip — needs the owner's physical iPad/mid-Android hardware, not actionable from this
-desk). The gap analysis itself still lists ~20 smaller, lower-severity gaps (station sprites,
-field-star hover, free-look drag, and others) that are tracked follow-ups, not B6 blockers.
+desk). **GAP-06 through GAP-16 — relativistic aberration/Doppler, ember sparks + idle hull bob,
+free-look drag, field-star + body hover picking, canvas keyboard access, station sprite markers,
+HTML attribute parity, a scoped scroll-cadence port, and the `cosmos:aim`/`cosmos:craft`/
+`cosmos:hover`+`cosmos:unhover` event-contract gaps — are all resolved**
+([TR-058](../test-reports/TR-058.md), 2026-07-20; ADR-0006 amended in place). The gap analysis
+now has only GAP-17 through GAP-27 open (re-pointed E2E specs + non-functional/open-gate items),
+none of which are B6 blockers. **P0 fix landed same day** ([TR-059](../test-reports/TR-059.md)):
+the Milky Way band's `uTex` sampler had no texture bound for its first ~26 frames, which is a
+hard, uncaught WebGPU bind-group exception that killed `scene.render()` for the entire frame —
+the default engine never drew a single frame on real WebGPU hardware. Owner-reported, root-caused
+via live bisection against the running server, fixed with an immediately-bound placeholder
+texture. Not a TR-058 regression (reproduced on the pre-TR-058 base commit); present since
+GAP-03/TR-057, invisible to every prior E2E pass because none of them exercised real WebGPU
+hardware for the full ~26-frame window this bug needed to surface. **GAP-17 through GAP-20
+resolved same day** ([TR-060](../test-reports/TR-060.md)): the pinned E2E specs re-point to the
+default engine again, plus new regression coverage for TR-059's crash class. Two more real bugs
+found doing this properly: `<babylon-scene>` never received its `density`/`constellations`/
+`ship`/`craft` attributes (a stale React ref in `SpaceScene.tsx`), and Babylon's no-WebGL
+fallback had no instant-arrival fast path (unlike the archived engine's `noGL` branch), so
+navigation would stall forever there. Both fixed and verified live. **GAP-21 through GAP-27
+closed 2026-07-20** (this pass): GAP-21 (no adaptive quality governor) got a real fix — a
+demote/promote frame-time governor ported from `space-engine.js`, pure step logic in
+`babylon-tiers.ts` (unit-tested), wired into the render loop, hardened against GPU-resource
+exceptions after a full-suite E2E run surfaced a real fragility (a tier-change mid-frame could
+throw under sustained SwiftShader-class load and silently kill the render loop — now isolated
+per-operation so it can't). GAP-24 (netlify.toml's disabled CSP header) and GAP-26 (a stale
+"legacy-only events" note in `component-flow.mmd`, left over from before GAP-14/15/16 closed)
+were both real doc/config drift, now fixed. GAP-25's checklist self-contradictions (§B3, §E)
+fixed in place, dated. **GAP-22, GAP-23, and GAP-27 partially close**: real, current bundle
+numbers now on record (`budget:check`: 1039.3 KB / 1200 KB gz total JS, 92.9 KB / 300 KB gz
+largest chunk, 646.6 KB / 700 KB gz WASM — all within budget), and GAP-27's automated
+accessibility coverage (axe-core, both engines) plus a direct accessibility-tree structural
+check were confirmed this pass — but the per-device fps/startup rows (checklist §A1-A4) and a
+true manual screen-reader pass remain genuinely owner-only: neither the sandboxed preview pane
+nor Chrome-extension automation available to this session can produce a trustworthy reading
+(the pane doesn't composite real frames — confirmed independently) or operate a real screen
+reader. Named explicitly rather than quietly left open. See TR-062.
 _Phase history below is append-only; read it as a record, not as current state._
 
 B0 complete ([TR-027](../test-reports/TR-027.md)) · **B1 gate decided:

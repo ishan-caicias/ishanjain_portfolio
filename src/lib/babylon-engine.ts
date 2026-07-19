@@ -186,7 +186,11 @@ import {
   buildStarField,
   LIVE_STAR_COUNT,
 } from "./star-field";
-import { CATALOG_CHUNKS, decodeStarCatalog } from "./star-catalog";
+import {
+  CATALOG_CHUNKS,
+  decodeStarCatalog,
+  unpackTypeAndColour,
+} from "./star-catalog";
 import { buildShootingStars } from "./shooting-stars";
 import { ComputeShader } from "@babylonjs/core/Compute/computeShader";
 import { UniformBuffer } from "@babylonjs/core/Materials/uniformBuffer";
@@ -229,15 +233,29 @@ import {
 } from "./craft-tier";
 import { classifyDeviceTier } from "./perf-telemetry";
 import {
+  GOVERNOR_IDLE_STATE,
   parseTierOverride,
+  QUALITY_BUDGETS,
   resolveQualityTier,
+  stepGovernor,
+  type GovernorState,
   type QualityBudget,
+  type QualityTierName,
 } from "./babylon-tiers";
 import {
   DOCK_CONTACT,
   dockFade,
   dockSettleOffset,
+  EMBER_BURST_START,
+  EMBER_BURST_STOP,
+  emberBillboards,
+  EMBER_FRAGMENT_GLSL,
+  EMBER_FRAGMENT_WGSL,
+  emberIndices,
+  EMBER_VERTEX_GLSL,
+  EMBER_VERTEX_WGSL,
   flipPhase,
+  MAX_EMBERS,
   plumeBuffersForWrapper,
   plumeIndices,
   plumeParamsForWarp,
@@ -248,6 +266,7 @@ import {
   PLUME_VERTEX_WGSL,
   SHIMMER_FRAGMENT_GLSL,
   SHIMMER_FRAGMENT_WGSL,
+  spawnEmberLocal,
 } from "./babylon-ship";
 import {
   ARRIVE_STANDOFF,
@@ -273,14 +292,18 @@ import {
   SHIP_VIEW_DEPTH,
   SHIP_WARP_SCALE,
   shipScaleFactor,
+  stepEmber,
   travelFrame,
   warpDurationForLy,
   warpEase,
   WARP_MIN_MS,
+  type Ember,
 } from "./ship-dynamics";
 
 const emit = (name: string, detail: unknown) =>
   window.dispatchEvent(new CustomEvent(name, { detail }));
+
+const D2R = Math.PI / 180;
 
 /* --- travel (B2 steps 3-4) --------------------------------------------------
  *
@@ -381,6 +404,52 @@ const UP_AXIS: [number, number, number] = [0, 1, 0];
  * home view isn't perfectly frozen while idle. */
 const IDLE_DRIFT_RATE = 0.0072;
 
+/* --- GAP-08/GAP-10: free-look direction --------------------------------
+ *
+ * space-engine.js parametrizes its whole camera as
+ * `fwd = [cos(pitch)*cos(yaw), cos(pitch)*sin(yaw), sin(pitch)]` — literally
+ * ra/dec in radians, since its camera has no other orientation concept.
+ * Reusing that formula verbatim here would make BABYLON_FORWARD ([0,0,1],
+ * this camera's identity look direction) the convention's *pole*
+ * (dec = 90°): idle drift already sweeps the camera off that pole by
+ * rotating around UP_AXIS, so a direct port would gimbal-lock the very
+ * first frame free-look is engaged. `_freeLookDir` instead parametrizes the
+ * SAME two degrees of freedom as a standard yaw-then-pitch turn away from
+ * BABYLON_FORWARD (yaw around UP_AXIS, pitch around the yawed local right
+ * axis) — behaviourally identical (drag right looks right, drag down looks
+ * down, ±83° pitch clamp) without the pole coincidence. `quatFromUnitVectors`
+ * then does the same job space-engine.js's view-matrix-from-yaw/pitch does:
+ * turn a direction into an orientation with no roll. */
+export function freeLookDir(
+  yaw: number,
+  pitch: number,
+): [number, number, number] {
+  const cy = Math.cos(yaw),
+    sy = Math.sin(yaw);
+  const cp = Math.cos(pitch),
+    sp = Math.sin(pitch);
+  // +pitch -> +Y (up) — a "pull back to climb" flight-stick convention,
+  // matching space-engine.js's own `pitch = down.pitch + dy*k` (drag down
+  // increases pitch) reading as "nose up" rather than an inverted mouselook.
+  return [cp * sy, sp, cp * cy];
+}
+
+/** Free-look pitch clamp — matches space-engine.js's ±1.45 rad (≈ ±83°). */
+const FREE_LOOK_PITCH_LIMIT = 1.45;
+/** Pointer-drag sensitivity — matches space-engine.js's `0.0022 * (70/60)`. */
+const FREE_LOOK_DRAG_K = 0.0022 * (70 / 60);
+/** Keyboard nudge/inertia — matches space-engine.js's arrow-key deltas and
+ * per-frame velocity clamps (`_bindKeys`). */
+const KEY_YAW_ACCEL = 0.006;
+const KEY_YAW_MAX = 0.03;
+const KEY_PITCH_ACCEL = 0.004;
+const KEY_PITCH_MAX = 0.02;
+/** Per-frame inertia decay for keyboard-driven look velocity — not specified
+ * verbatim in the extracted source (the per-frame integrator lives outside
+ * the cited ranges); a standard exponential damp consistent with every other
+ * inertia/decay constant this codebase uses (e.g. `_beta *= 0.86`). */
+const KEY_LOOK_DAMP = 0.9;
+
 /** B3: shared cycle length (seconds) for the shooting-star particles — each
  * particle repeats endlessly at its own phase offset within this cycle (see
  * shooting-stars.ts). Long enough that particles don't feel synchronized,
@@ -423,6 +492,11 @@ const AIM_DUR_MS = 900;
 // not "get there fast, but proportionally").
 const AIM_DUR_REDUCED_MS = 200;
 const WARP_DUR_REDUCED_MS = 350;
+
+/** GAP-07: idle hull bob amplitude, world units at shipScale=1 — a small
+ * adaptation constant (see the _tickShip comment at its use site for why
+ * this isn't a literal port of space-engine.js's NDC-space SHIP_BOB_NDC). */
+const SHIP_BOB_WORLD = 0.05;
 
 /* --- catalog loading (B2 step 2) ------------------------------------------
  *
@@ -542,12 +616,32 @@ uniform mat4 projection;
 uniform vec2 uViewport;      // render target size, device px
 uniform float uSize;         // device pixel ratio (live engine parity)
 uniform float uHaloAmp;
+uniform float uBeta, uGamma; // GAP-06: relativistic aberration + Doppler
+uniform vec3 uWarpDir;       // world-space unit travel direction
 varying vec2 vCorner;
 varying vec3 vColor;
 varying float vAlpha;
 varying float vType;
 varying float vHalo;
 ${STAR_SHADER_CONSTANTS}
+// GAP-06: ported from space-engine.js's STAR_VS aberrate() verbatim, but
+// operating on the VIEW-SPACE position (and a view-space warp direction)
+// rather than a world-space aPos - uCam — Babylon's view matrix already
+// bakes in camera translation (unlike the archived engine's rotation-only
+// view matrix), so the camera-relative vector aberrate() needs is already
+// sitting in centre.xyz below; rotating uWarpDir by mat3(view) expresses
+// the same world-space travel direction in that same space. Algebraically
+// equivalent to the archived engine's world-space-then-view-matrix order,
+// since aberrate() only ever consumes/produces camera-relative vectors.
+vec3 aberrate(vec3 p, vec3 warpDirView){
+  if (uBeta < 0.001) return p;
+  float dist = length(p); vec3 d = p / dist;
+  float c = dot(d, warpDirView);
+  float cp = clamp((c + uBeta) / (1.0 + uBeta * c), -1.0, 1.0);
+  vec3 perp = d - c * warpDirView; float pl = length(perp);
+  float sp = sqrt(max(0.0, 1.0 - cp * cp));
+  return (warpDirView * cp + (pl > 1e-5 ? perp * (sp / pl) : vec3(0.0))) * dist;
+}
 vec3 ramp(float t){
   // Planckian star sequence O->M (real stellar chromaticities)
   vec3 c0=vec3(0.608,0.690,1.000), c1=vec3(0.792,0.843,1.000), c2=vec3(0.973,0.969,1.000),
@@ -565,6 +659,8 @@ void main(){
   int c = gl_VertexID % 4;
   vec2 corner = vec2((c == 1 || c == 2) ? 1.0 : -1.0, (c >= 2) ? 1.0 : -1.0);
   vec4 centre = view * vec4(position, 1.0);
+  vec3 warpDirView = mat3(view) * uWarpDir;
+  centre.xyz = aberrate(centre.xyz, warpDirView);
   float dist = length(centre.xyz);          // camera sits at the view origin
 
   float mag  = 12.5 - starMeta.x*14.0;
@@ -591,6 +687,16 @@ void main(){
     else if (ty < 5.5) { vColor = mix(vColor, vec3(1.0, 0.85, 0.45), 0.25); }               // exoplanet host
     else if (ty < 6.5) { px *= 0.85; }                  // DR3 asteroid
     else               { px *= 1.3; vAlpha *= 0.7; }    // Oort cloud
+  }
+
+  if (uBeta > 0.001) {
+    // GAP-06: relativistic Doppler — blueshift + beaming ahead, redshift +
+    // dimming astern. Verbatim port of STAR_VS's tail block.
+    float cp2 = dot(centre.xyz, warpDirView) / max(dist, 1e-4);
+    float D = 1.0 / (uGamma * (1.0 - uBeta * cp2));
+    vColor = mix(vColor, vec3(0.60, 0.74, 1.0), clamp((D - 1.0) * 0.9, 0.0, 0.65));
+    vColor = mix(vColor, vec3(1.0, 0.40, 0.26), clamp((1.0 - D) * 1.1, 0.0, 0.70));
+    vAlpha *= clamp(D * D, 0.25, 2.2);
   }
 
   vec4 clip = projection * centre;
@@ -632,6 +738,9 @@ uniform projection : mat4x4<f32>;
 uniform uViewport : vec2<f32>;
 uniform uSize : f32;
 uniform uHaloAmp : f32;
+uniform uBeta : f32;
+uniform uGamma : f32;
+uniform uWarpDir : vec3<f32>;
 varying vCorner : vec2<f32>;
 varying vColor : vec3<f32>;
 varying vAlpha : f32;
@@ -640,6 +749,20 @@ varying vHalo : f32;
 
 const MIN_QUAD_PX : f32 = 1.5;
 const CI_UNPACK_SCALE : f32 = ${(256 / 255).toFixed(8)};
+
+// GAP-06: line-for-line twin of the GLSL aberrate() above.
+fn aberrate(p : vec3<f32>, warpDirView : vec3<f32>) -> vec3<f32> {
+  if (uniforms.uBeta < 0.001) { return p; }
+  let dist : f32 = length(p);
+  let d : vec3<f32> = p / dist;
+  let c : f32 = dot(d, warpDirView);
+  let cp : f32 = clamp((c + uniforms.uBeta) / (1.0 + uniforms.uBeta * c), -1.0, 1.0);
+  let perp : vec3<f32> = d - c * warpDirView;
+  let pl : f32 = length(perp);
+  let sp : f32 = sqrt(max(0.0, 1.0 - cp * cp));
+  let side : vec3<f32> = select(vec3<f32>(0.0, 0.0, 0.0), perp * (sp / pl), pl > 1e-5);
+  return (warpDirView * cp + side) * dist;
+}
 
 fn ramp(t : f32) -> vec3<f32> {
   let c0 = vec3<f32>(0.608, 0.690, 1.000);
@@ -663,7 +786,10 @@ fn main(input : VertexInputs) -> FragmentInputs {
   let corner : vec2<f32> = vec2<f32>(
     select(-1.0, 1.0, c == 1u || c == 2u),
     select(-1.0, 1.0, c >= 2u));
-  let centre : vec4<f32> = uniforms.view * vec4<f32>(vertexInputs.position, 1.0);
+  var centre : vec4<f32> = uniforms.view * vec4<f32>(vertexInputs.position, 1.0);
+  let warpDirView : vec3<f32> = mat3x3<f32>(
+    uniforms.view[0].xyz, uniforms.view[1].xyz, uniforms.view[2].xyz) * uniforms.uWarpDir;
+  centre = vec4<f32>(aberrate(centre.xyz, warpDirView), centre.w);
   let dist : f32 = length(centre.xyz);
 
   let mag : f32 = 12.5 - vertexInputs.starMeta.x * 14.0;
@@ -689,6 +815,14 @@ fn main(input : VertexInputs) -> FragmentInputs {
     else if (ty < 5.5) { col = mix(col, vec3<f32>(1.0, 0.85, 0.45), 0.25); }
     else if (ty < 6.5) { px = px * 0.85; }
     else { px = px * 1.3; alpha = alpha * 0.7; }
+  }
+
+  if (uniforms.uBeta > 0.001) {
+    let cp2 : f32 = dot(centre.xyz, warpDirView) / max(dist, 1e-4);
+    let D : f32 = 1.0 / (uniforms.uGamma * (1.0 - uniforms.uBeta * cp2));
+    col = mix(col, vec3<f32>(0.60, 0.74, 1.0), clamp((D - 1.0) * 0.9, 0.0, 0.65));
+    col = mix(col, vec3<f32>(1.0, 0.40, 0.26), clamp((1.0 - D) * 1.1, 0.0, 0.70));
+    alpha = alpha * clamp(D * D, 0.25, 2.2);
   }
 
   let clip : vec4<f32> = uniforms.projection * centre;
@@ -902,6 +1036,11 @@ ShaderStore.ShadersStoreWGSL["ijPlumeVertexShader"] = PLUME_VERTEX_WGSL;
 ShaderStore.ShadersStoreWGSL["ijPlumeFragmentShader"] = PLUME_FRAGMENT_WGSL;
 ShaderStore.ShadersStore["ijShimmerFragmentShader"] = SHIMMER_FRAGMENT_GLSL;
 ShaderStore.ShadersStoreWGSL["ijShimmerFragmentShader"] = SHIMMER_FRAGMENT_WGSL;
+// GAP-07: ember sparks — see babylon-ship.ts's header.
+ShaderStore.ShadersStore["ijEmberVertexShader"] = EMBER_VERTEX_GLSL;
+ShaderStore.ShadersStore["ijEmberFragmentShader"] = EMBER_FRAGMENT_GLSL;
+ShaderStore.ShadersStoreWGSL["ijEmberVertexShader"] = EMBER_VERTEX_WGSL;
+ShaderStore.ShadersStoreWGSL["ijEmberFragmentShader"] = EMBER_FRAGMENT_WGSL;
 // GAP-01/GAP-02: curated celestial bodies — see celestial-bodies.ts's header.
 ShaderStore.ShadersStore["ijBodyVertexShader"] = PROCEDURAL_BODY_VERTEX_GLSL;
 ShaderStore.ShadersStore["ijBodyFragmentShader"] =
@@ -1001,7 +1140,11 @@ async function createEngine(canvas: HTMLCanvasElement): Promise<{
 class BabylonScene extends HTMLElement {
   private _engine?: AbstractEngine;
   private _scene?: Scene;
+  /** Stored so pick/projection helpers (called outside the render loop's own
+   * closure, e.g. from pointer/keyboard handlers) can reach the camera. */
+  private _camera?: FreeCamera;
   private _stars?: Mesh;
+  private _starMat?: ShaderMaterial;
   private _shootMesh?: Mesh;
   // --- GAP-01/GAP-02: curated celestial bodies ---
   private _bodyMesh?: Mesh;
@@ -1015,12 +1158,16 @@ class BabylonScene extends HTMLElement {
   private _bandMesh?: Mesh;
   private _bandMat?: ShaderMaterial;
   private _bandTex?: RawTexture;
+  /** 1x1 stand-in bound until the real equirect texture finishes building —
+   * see _setupMilkyWay's WebGPU regression note. Disposed once swapped out. */
+  private _bandPlaceholderTex?: RawTexture;
   private _bandBuf?: Uint8Array;
   private _bandRow = 0;
   private _bandReady = false;
   private _bandFadeAmt = 0;
   // --- GAP-04: constellation figures ---
   private _conMesh?: Mesh;
+  private _conMat?: ShaderMaterial;
   private _conCount = 0;
   // --- GAP-05: warp star trails ---
   private _trailMesh?: Mesh;
@@ -1076,6 +1223,13 @@ class BabylonScene extends HTMLElement {
     PLUME_VERTEX_COUNT * PLUME_VERTEX_FLOATS,
   );
   private _shimmer?: PostProcess;
+  // --- GAP-07: ember sparks ---
+  private _embers: Ember[] = [];
+  private _burnPrev = false;
+  private _emberMesh?: Mesh;
+  private _emberMat?: ShaderMaterial;
+  private _emberPos = new Float32Array(MAX_EMBERS * 4 * 3);
+  private _emberMeta = new Float32Array(MAX_EMBERS * 4 * 2);
   /** Shimmer uniforms staged by _tickShip, pushed in the post-process's
    * onApply (the effect object is only valid there). */
   private _shimmerState = { cx: 0.5, cy: 0.5, intensity: 0, aspect: 1 };
@@ -1119,6 +1273,63 @@ class BabylonScene extends HTMLElement {
   /** One-shot snapshot at boot — same pattern as space-engine.js's own
    * `this.reduced`, not a live-updating listener. */
   private _reduced = false;
+  /** GAP-14: render-loop frame counter, used only to throttle the
+   * cosmos:aim readout to every 8th frame — matches space-engine.js's
+   * `this._frame % 8 === 0` exactly. */
+  private _frameCount = 0;
+  // --- GAP-08/GAP-10: free-look (pointer drag + keyboard) ---
+  /** Free-look orientation, radians. yaw/pitch parametrize a look direction
+   * the same way ship-dynamics.ts's `raDecToDir` parametrizes ra/dec, but
+   * around BABYLON_FORWARD (not a literal ra/dec — see `_freeLookDir`'s
+   * header comment for why a literal port of the live engine's yaw/pitch
+   * convention would gimbal-lock at this camera's identity forward). */
+  private _yaw = 0;
+  private _pitch = 0;
+  private _velYaw = 0;
+  private _velPitch = 0;
+  /** True from pointerdown to pointerup/cancel — while true, free-look
+   * yaw/pitch is authoritative over orientation even mid-warp (GAP-08). */
+  private _dragging = false;
+  private _dragStart: {
+    x: number;
+    y: number;
+    yaw: number;
+    pitch: number;
+    t: number;
+  } | null = null;
+  private _dragMoved = 0;
+  /** GAP-09/GAP-16: hover picking state. */
+  private _hoverId: string | null = null;
+  /** Throttle counter for the expensive O(starCount) field-star cone test —
+   * matches space-engine.js's `this._fp` exactly (every-other pick attempt
+   * runs the field test; the other holds the previous field hover). */
+  private _fp = 0;
+  /** The decoded star field, kept for fieldInfo()/field-star picking — not
+   * needed by the render path itself (that reads the GPU billboard mesh),
+   * only by hover/pick, which is why it's stored separately here rather than
+   * threaded through _tickWarp etc. */
+  private _field: {
+    positions: Float32Array;
+    meta: Float32Array;
+    count: number;
+  } | null = null;
+  // --- GAP-06: relativistic aberration + Doppler ---
+  /** Brachistochrone-profile beta (v/c), integrated from warp.prog exactly
+   * like space-engine.js's `this._beta` — ramps with the accel/decel curve
+   * during warp, decays 0.86x/frame otherwise. */
+  private _beta = 0;
+  // --- GAP-12: HTML attribute overrides ---
+  private _densityOverride = 1;
+  private _showConstellations = true;
+  private _showShip = true;
+  private _craftAttr: CraftTier | "off" | null = null;
+  // --- GAP-13: scroll-linked render cadence ---
+  private _scrollSkip = false;
+  private _scrollFrameParity = 0;
+  // --- GAP-21: adaptive quality governor ---
+  private _govState: GovernorState = GOVERNOR_IDLE_STATE;
+  private _govLastT: number | null = null;
+  private _badge?: HTMLDivElement;
 
   // --- SpaceEngineElement contract surface ---
   bodies: BabylonBody[] = [];
@@ -1136,6 +1347,60 @@ class BabylonScene extends HTMLElement {
   starSource: "catalog" | "procedural" | null = null;
   /** Frames this engine has actually rendered (read by the perf harness). */
   renderFrames = 0;
+
+  // --- GAP-12: HTML attribute parity with space-engine.js's
+  // observedAttributes/attributeChangedCallback (density/constellations/
+  // ship/craft) ---
+  static get observedAttributes() {
+    return ["density", "constellations", "ship", "craft"];
+  }
+
+  attributeChangedCallback(
+    name: string,
+    _old: string | null,
+    value: string | null,
+  ) {
+    if (name === "density") {
+      this._densityOverride = Math.max(
+        0.05,
+        Math.min(1, parseFloat(value ?? "") || 1),
+      );
+      this._applyDensity();
+    } else if (name === "constellations") {
+      this._showConstellations = value !== "off";
+      this._conMesh?.setEnabled(this._showConstellations);
+    } else if (name === "ship") {
+      this._showShip = value !== "off";
+    } else if (name === "craft") {
+      this._craftAttr =
+        value === "1k" || value === "2k"
+          ? value
+          : value === "off"
+            ? "off"
+            : null;
+    }
+  }
+
+  /** Reduces how many of the star mesh's indices actually draw, matching
+   * space-engine.js's `density` attribute in spirit (fewer stars, not a
+   * uniform statistical resample — the live engine's own exact decimation
+   * algorithm sits outside this gap's ported source ranges). A no-op until
+   * the star mesh exists; `_boot` calls this once after building it, so a
+   * `density` attribute already present in markup at connect time still
+   * applies on first frame. */
+  private _applyDensity() {
+    const mesh = this._stars;
+    if (!mesh) return;
+    const sub = mesh.subMeshes?.[0];
+    if (!sub) return;
+    const total = mesh.getTotalIndices();
+    sub.indexCount = Math.max(
+      6,
+      Math.floor(
+        total * this._densityOverride - ((total * this._densityOverride) % 6),
+      ),
+    );
+  }
 
   connectedCallback() {
     if (this._init) return;
@@ -1203,6 +1468,7 @@ class BabylonScene extends HTMLElement {
     // Switches the camera from Euler (.rotation) to quaternion-driven mode —
     // required so the per-frame quatDamp below actually takes effect.
     camera.rotationQuaternion = new Quaternion();
+    this._camera = camera;
 
     // B2 step 3: real catalog bodies, so travelTo/randomBody have real
     // targets. window.CELESTIAL is guaranteed populated by mount time —
@@ -1228,6 +1494,8 @@ class BabylonScene extends HTMLElement {
     const bb = buildStarBillboards(field);
     this.starCount = field.count;
     this.starSource = source;
+    // GAP-09/GAP-16: kept for fieldInfo()/field-star hover picking.
+    this._field = field;
 
     // one merged indexed mesh of billboard quads (see star-field.ts for why
     // neither point sprites nor thin instances are usable here)
@@ -1249,7 +1517,16 @@ class BabylonScene extends HTMLElement {
       { vertex: "ijStar", fragment: "ijStar" },
       {
         attributes: ["position", "starMeta"],
-        uniforms: ["view", "projection", "uViewport", "uSize", "uHaloAmp"],
+        uniforms: [
+          "view",
+          "projection",
+          "uViewport",
+          "uSize",
+          "uHaloAmp",
+          "uBeta",
+          "uGamma",
+          "uWarpDir",
+        ],
         needAlphaBlending: true,
         shaderLanguage:
           backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
@@ -1270,6 +1547,8 @@ class BabylonScene extends HTMLElement {
     mat.backFaceCulling = false;
     mat.alphaMode = Constants.ALPHA_ADD;
     mesh.material = mat;
+    this._starMat = mat; // GAP-06: aberration/Doppler uniforms pushed here
+    this._applyDensity(); // GAP-12: honour a `density` attribute set before boot finished
 
     // B3: GPU-particle idle shooting stars — new work, not a port (the live
     // engine has no equivalent). See shooting-stars.ts's header for why this
@@ -1333,25 +1612,79 @@ class BabylonScene extends HTMLElement {
     // B4 step 1: Havok asteroid field — lazy WASM, SIMD-gated, non-blocking.
     void this._setupPhysics(scene);
 
+    // GAP-08/GAP-10: free-look input. Canvas stays out of the tab order
+    // (tabIndex=-1, see above); `this` is the keyboard-focus target.
+    this._bindPointer(canvas);
+    this._bindKeys();
+
     let first = true;
     engine.runRenderLoop(() => {
+      // GAP-08/GAP-10 regression guard, moved to the TOP of the frame (GAP-21):
+      // Babylon's deferred input setup re-stamps tabindex="1" post-boot (the
+      // original B6 a11y fix) on whichever later frame its own lazy pointer
+      // setup happens to run — not a one-shot. This used to sit at the
+      // bottom of the loop, after every tick and scene.render(); GAP-21's
+      // governor added real synchronous GPU work (texture/post-process
+      // dispose+create) that lands only on the frame a tier actually
+      // changes, and under sustained load that's enough to push a frame's
+      // completion late — including, on one sequential-suite run, late
+      // enough that axe's DOM scan (no extra wait beyond mount) sampled a
+      // frame before the reassert had run. Correctness here must not depend
+      // on how long the rest of the frame takes, so it runs first,
+      // unconditionally, before any tick that could be slow or throw.
+      if (canvas.tabIndex !== -1) canvas.tabIndex = -1;
+      // GAP-13 (scoped): space-engine.js's four screen-space flight stations
+      // (warping / corner-escort / parked-under-dossier / hero) choreograph
+      // a 2D sprite's NDC position and don't have a clean analogue here — the
+      // Babylon ship is a real 3D mesh flown by the chase camera (GAP-11's
+      // header notes the same architecture split for station markers). What
+      // DOES port cleanly, and is a genuine perf win, is the live engine's
+      // other scroll behaviour: halving the render cadence once the visitor
+      // has scrolled the scene mostly out of view and nothing is in flight.
+      // Named here rather than silently dropped — see the GAP-13 TR for the
+      // full scope note.
+      const scrolledAway = (window.scrollY || 0) > window.innerHeight * 0.55;
+      this._scrollSkip = scrolledAway && this.warp.mode === "idle";
+      if (this._scrollSkip) this._scrollFrameParity ^= 1;
+      else this._scrollFrameParity = 0;
+      // GAP-21: adaptive quality governor — was boot-once (B5); now demotes/
+      // promotes on sustained frame-time pressure, matching space-engine.js.
+      this._tickGovernor(performance.now(), scrolledAway);
+
       this._tickWarp(camera);
       this._tickMilkyWay();
       this._tickTrails();
       this._tickNebula(camera, engine);
       this._tickShip(camera, engine);
       this._tickAsteroids();
+      this._tickStations(camera, engine); // GAP-11
       shootMat.setFloat("uTime", performance.now() / 1000);
       const bodyT = this._reduced ? 0 : performance.now() / 1000;
       this._bodyMat?.setFloat("uTime", bodyT);
       this._photoMat?.setFloat("uTime", bodyT);
-      scene.render();
-      this.renderFrames++; // engine-side proof the scene is actually drawing
+      // GAP-14: aim readout, throttled to every 8th frame — matches
+      // space-engine.js's `this._frame % 8 === 0` exactly. Reads the
+      // camera's ACTUAL current forward direction (idle drift, free-look,
+      // or warp chase-look all converge here) rather than tracking a
+      // separate yaw/pitch source of truth, so it is correct regardless of
+      // which of those is driving orientation this frame.
+      this._frameCount = (this._frameCount + 1) | 0;
+      if (this._frameCount % 8 === 0) {
+        const fwd = quatRotate(this._camQuat, BABYLON_FORWARD);
+        const ra = (((Math.atan2(fwd[1], fwd[0]) / D2R) % 360) + 360) % 360;
+        const dec = Math.asin(Math.max(-1, Math.min(1, fwd[2]))) / D2R;
+        emit("cosmos:aim", { ra, dec, warp: this.warp.mode });
+      }
+      // GAP-13: skip every other draw once scrolled away and idle — ticks
+      // above still ran (camera/warp state must stay correct so travel
+      // triggered while scrolled resumes cleanly), only the GPU draw itself
+      // is skipped.
+      if (!this._scrollSkip || this._scrollFrameParity === 0) {
+        scene.render();
+        this.renderFrames++; // engine-side proof the scene is actually drawing
+      }
       if (first) {
         first = false;
-        // re-assert after Babylon's deferred input setup, which re-stamps
-        // tabindex="1" post-boot (B6 a11y fix — see the note in _boot)
-        canvas.tabIndex = -1;
         emit("cosmos:progress", { loaded: field.count, total: field.count });
         emit("cosmos:ready", {});
       }
@@ -1363,16 +1696,13 @@ class BabylonScene extends HTMLElement {
       const vp = new Vector2(engine.getRenderWidth(), engine.getRenderHeight());
       this._bodyMat?.setVector2("uViewport", vp);
       this._photoMat?.setVector2("uViewport", vp);
+      this._emberMat?.setVector2("uViewport", vp); // GAP-07
       this._resizeNebula(engine); // half-res producer tracks the target size
     });
     this._ro.observe(this);
 
     const badge = document.createElement("div");
-    badge.textContent =
-      `BABYLON ${backend.toUpperCase()} · ${field.count.toLocaleString()} STARS` +
-      `${source === "procedural" ? " (PLACEHOLDER)" : ""}` +
-      ` · ${this._bodyCount + this._photoBodyCount} BODIES (${this._photoBodyCount} PHOTO)` +
-      ` · ${this._quality.name.toUpperCase()} · PF-09 B6`;
+    badge.textContent = this._badgeText();
     Object.assign(badge.style, {
       position: "absolute",
       left: "12px",
@@ -1384,6 +1714,19 @@ class BabylonScene extends HTMLElement {
       opacity: "0.8",
     });
     this.appendChild(badge);
+    this._badge = badge; // GAP-21: kept live so tier changes update the label
+  }
+
+  /** Builds the corner debug badge text from current instance state — a
+   * standalone method so GAP-21's governor can refresh the tier substring
+   * after a live demote/promote without duplicating the format string. */
+  private _badgeText(): string {
+    return (
+      `BABYLON ${(this.backend ?? "").toUpperCase()} · ${this.starCount.toLocaleString()} STARS` +
+      `${this.starSource === "procedural" ? " (PLACEHOLDER)" : ""}` +
+      ` · ${this._bodyCount + this._photoBodyCount} BODIES (${this._photoBodyCount} PHOTO)` +
+      ` · ${this._quality.name.toUpperCase()} · PF-09 B6`
+    );
   }
 
   disconnectedCallback() {
@@ -1551,7 +1894,15 @@ class BabylonScene extends HTMLElement {
       { vertex: "ijBody", fragment: "ijBody" },
       {
         attributes: ["position", "bodyMeta"],
-        uniforms: ["view", "projection", "uViewport", "uTime"],
+        uniforms: [
+          "view",
+          "projection",
+          "uViewport",
+          "uTime",
+          "uBeta",
+          "uGamma",
+          "uWarpDir",
+        ],
         needAlphaBlending: true,
         shaderLanguage:
           backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
@@ -1598,7 +1949,14 @@ class BabylonScene extends HTMLElement {
       { vertex: "ijPhotoBody", fragment: "ijPhotoBody" },
       {
         attributes: ["position", "photoCell", "photoMeta"],
-        uniforms: ["view", "projection", "uViewport", "uTime"],
+        uniforms: [
+          "view",
+          "projection",
+          "uViewport",
+          "uTime",
+          "uBeta",
+          "uWarpDir",
+        ],
         samplers: ["uTex"],
         needAlphaBlending: true,
         shaderLanguage:
@@ -1653,7 +2011,15 @@ class BabylonScene extends HTMLElement {
       { vertex: "ijMilkyWay", fragment: "ijMilkyWay" },
       {
         attributes: ["position", "uv"],
-        uniforms: ["world", "view", "projection", "uFade"],
+        uniforms: [
+          "world",
+          "view",
+          "projection",
+          "uFade",
+          "uBeta",
+          "uGamma",
+          "uWarpDir",
+        ],
         samplers: ["uTex"],
         shaderLanguage:
           backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
@@ -1663,6 +2029,33 @@ class BabylonScene extends HTMLElement {
     mat.setFloat("uFade", 0);
     mesh.material = mat;
     this._bandMat = mat;
+
+    // WebGPU regression fix (found verifying TR-058 live, pre-existing since
+    // GAP-03/TR-057): this mesh sets alwaysSelectAsActiveMesh, so it draws
+    // starting frame 1 — but the real equirect texture isn't built until
+    // _tickMilkyWay's chunked loop finishes (~26 frames later). A
+    // ShaderMaterial with a declared `uTex` sampler and NO texture bound at
+    // all makes material.isReady() return true (the shader compiled fine)
+    // while WebGPU's bind-group construction has no resource for that
+    // binding — a hard, uncaught `GPUBindGroupEntry.resource` exception that
+    // kills scene.render() for the WHOLE frame (every mesh after this one in
+    // draw order never renders either). WebGL2 only warns, so this was
+    // invisible on that backend. Fixed by binding a real (tiny, 1x1)
+    // placeholder texture immediately — swapped for the built texture in
+    // _tickMilkyWay, matching how the photo-body/nebula textures already
+    // avoid this class of bug (a real Texture object exists from the start,
+    // even before its content is ready).
+    const placeholder = RawTexture.CreateRGBATexture(
+      new Uint8Array([1, 1, 3, 255]),
+      1,
+      1,
+      scene,
+      false,
+      false,
+      Texture.NEAREST_SAMPLINGMODE,
+    );
+    mat.setTexture("uTex", placeholder);
+    this._bandPlaceholderTex = placeholder;
 
     this._bandBuf = new Uint8Array(MILKY_WAY_WIDTH * MILKY_WAY_HEIGHT * 4);
   }
@@ -1698,6 +2091,8 @@ class BabylonScene extends HTMLElement {
         );
         this._bandTex = tex;
         this._bandMat?.setTexture("uTex", tex);
+        this._bandPlaceholderTex?.dispose();
+        this._bandPlaceholderTex = undefined;
       }
       return;
     }
@@ -1747,11 +2142,13 @@ class BabylonScene extends HTMLElement {
       },
     );
     mat.fillMode = Material.LineListDrawMode;
-    // Matches space-engine.js's static figure colour/alpha exactly (its
-    // relativistic transit fade is skipped — same GAP-06 aberration
-    // dependency noted throughout the Babylon body/star passes).
+    // Matches space-engine.js's static figure colour exactly; alpha is
+    // scaled live by (1 - beta) in _pushAberration — GAP-06 closes the
+    // "relativistic transit fade deferred" note this comment used to carry.
     mat.setColor4("uColor", new Color4(0.55, 0.61, 0.88, 0.34));
     mesh.material = mat;
+    this._conMat = mat;
+    mesh.setEnabled(this._showConstellations); // GAP-12
   }
 
   // --- GAP-05: warp star trails ---
@@ -1786,7 +2183,15 @@ class BabylonScene extends HTMLElement {
       { vertex: "ijStarTrail", fragment: "ijStarTrail" },
       {
         attributes: ["position", "trailMeta"],
-        uniforms: ["view", "projection", "uCam", "uCamPrev", "uWarp"],
+        uniforms: [
+          "view",
+          "projection",
+          "uCam",
+          "uCamPrev",
+          "uWarp",
+          "uBeta",
+          "uWarpDir",
+        ],
         needAlphaBlending: true,
         shaderLanguage:
           backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
@@ -2083,6 +2488,82 @@ class BabylonScene extends HTMLElement {
     }
   }
 
+  // --- GAP-21: adaptive quality governor ---
+
+  /** One governor sample per frame. `stepGovernor` (babylon-tiers.ts) is the
+   * pure, unit-tested step; this method owns only the per-instance state and
+   * hands off to `_applyQualityTier` on an actual tier change. `scrolled`
+   * mirrors space-engine.js's demote-threshold widening while off-hero
+   * (25 ms normally, 42 ms scrolled) — reuses the render loop's own
+   * `scrolledAway` signal (GAP-13) rather than recomputing it. */
+  private _tickGovernor(now: number, scrolled: boolean) {
+    if (this._govLastT != null) {
+      const dtMs = now - this._govLastT;
+      const budgetMs = scrolled ? 42 : 25;
+      const { state, tier } = stepGovernor(
+        this._govState,
+        dtMs,
+        budgetMs,
+        this._quality.name,
+      );
+      this._govState = state;
+      if (tier !== this._quality.name) this._applyQualityTier(tier);
+    }
+    this._govLastT = now;
+  }
+
+  /** Applies a governor-selected tier to every knob that's cheap to change
+   * live: the star-halo uniform, the nebula producer's render-target
+   * resolution (`_resizeNebula` already exists for canvas-resize), and the
+   * heat-shimmer post-process (created/torn down whole, matching how B5
+   * gates it at boot). Shooting-star particle count, the nebula raymarch
+   * step count, and the Havok asteroid-body count stay fixed post-boot —
+   * each is baked into a buffer or a compiled shader pipeline at setup time,
+   * and rebuilding them live (rebinding the belt's physics bodies in
+   * particular) is real scope this pass deliberately does not take on. Named
+   * here rather than silently dropped, per this repo's proportionality
+   * convention — see the implementing TR. */
+  private _applyQualityTier(next: QualityTierName) {
+    const budget = QUALITY_BUDGETS[next];
+    this._quality = budget;
+    // GAP-21 hardening: every GPU-resource side effect below runs inside
+    // engine.runRenderLoop's callback — an uncaught throw here doesn't just
+    // fail this tier change, it can abort the WHOLE frame partway through
+    // and, worse, kill the render loop's own rAF chain outright (nothing
+    // downstream schedules the next frame if this one throws), which is a
+    // far worse regression than a skipped live knob. Each op is isolated so
+    // one GPU failure (a mid-flight texture/post-process dispose under real
+    // load — SwiftShader-class rendering makes this far likelier than it
+    // looks on capable hardware) can't take the others, or the frame, down
+    // with it.
+    try {
+      this._starMat?.setFloat("uHaloAmp", budget.haloAmp);
+    } catch (e) {
+      console.warn("[babylon-engine] GAP-21: halo uniform update failed", e);
+    }
+    const engine = this._engine;
+    const camera = this._camera;
+    try {
+      if (engine) this._resizeNebula(engine);
+    } catch (e) {
+      console.warn("[babylon-engine] GAP-21: nebula resize failed", e);
+    }
+    try {
+      if (budget.shimmer && !this._shimmer && camera && engine) {
+        this._createShimmer(camera, engine, this.backend ?? "webgl2");
+      } else if (!budget.shimmer && this._shimmer) {
+        this._disposeShimmer();
+      }
+    } catch (e) {
+      console.warn("[babylon-engine] GAP-21: shimmer toggle failed", e);
+    }
+    try {
+      if (this._badge) this._badge.textContent = this._badgeText();
+    } catch (e) {
+      console.warn("[babylon-engine] GAP-21: badge update failed", e);
+    }
+  }
+
   // --- ship track (B3: hull + thrusters + shimmer + docking polish) ---
 
   /** Loads the tiered GLB (craft-tier.ts's audited quality policy — URL param
@@ -2102,17 +2583,36 @@ class BabylonScene extends HTMLElement {
     } catch {
       /* storage blocked — fall through to device signals */
     }
-    const tier = resolveCraftAttribute(
-      new URLSearchParams(window.location.search).get("craft"),
-      parseStoredQuality(stored),
+    const urlCraft = new URLSearchParams(window.location.search).get("craft");
+    const storedCraft = parseStoredQuality(stored);
+    let tier = resolveCraftAttribute(
+      urlCraft,
+      storedCraft,
       readTierSignals(window),
     );
+    // GAP-12: the `craft` HTML attribute is a markup-level default — it only
+    // applies when neither the URL param nor a stored override is present,
+    // keeping this repo's stated resolution order (CLAUDE.md: URL -> stored
+    // -> device policy -> default) intact and inserting the attribute as a
+    // page-author layer just above the device-auto policy, the same relative
+    // position space-engine.js's own `craft` attribute occupies (it has no
+    // URL/stored layering at all — the attribute IS the whole policy there).
+    if (!urlCraft && !storedCraft && this._craftAttr !== null) {
+      tier = this._craftAttr === "off" ? null : this._craftAttr;
+    }
     if (!tier) {
       this._shipState = "off";
       return;
     }
     this._shipTier = tier;
     this._shipState = "loading";
+    // GAP-15: mirrors space-engine.js's `_loadCraft` exactly — three
+    // transitions (loading/ready/error), each pairing `dataset.craftState`
+    // with the matching cosmos:craft emit so SpaceScene.tsx's landing gate
+    // (`state.ready && state.craftDone`) is asset-driven instead of falling
+    // through to its 2.5s grace-timer fallback on every load.
+    this.dataset.craftState = "loading";
+    emit("cosmos:craft", { state: "loading", tier });
     try {
       const [{ ImportMeshAsync }, , { MeshoptCompression }] = await Promise.all(
         [
@@ -2212,46 +2712,112 @@ class BabylonScene extends HTMLElement {
       this._plumeMesh = pm;
       this._plumeMat = pMat;
 
+      // GAP-07: ember sparks — fixed-capacity billboard mesh, NOT parented
+      // to the wrapper (unlike the plume): each ember resolves to a world
+      // position once at spawn (see _tickShip) and steps in true world space
+      // thereafter, so it needs its own view/projection like the star/body
+      // billboards, not the wrapper's worldViewProjection. See
+      // babylon-ship.ts's header for why.
+      const em = new Mesh("embers", scene);
+      const emVd = new VertexData();
+      emVd.positions = this._emberPos;
+      emVd.indices = emberIndices();
+      emVd.applyToMesh(em, true);
+      em.setVerticesBuffer(
+        new VertexBuffer(engine, this._emberMeta, "emberMeta", true, false, 2),
+      );
+      em.isPickable = false;
+      em.alwaysSelectAsActiveMesh = true;
+      const emMat = new ShaderMaterial(
+        "embers",
+        scene,
+        { vertex: "ijEmber", fragment: "ijEmber" },
+        {
+          attributes: ["position", "emberMeta"],
+          uniforms: ["view", "projection", "uViewport"],
+          needAlphaBlending: true,
+          shaderLanguage:
+            backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+        },
+      );
+      emMat.setVector2(
+        "uViewport",
+        new Vector2(engine.getRenderWidth(), engine.getRenderHeight()),
+      );
+      emMat.backFaceCulling = false;
+      emMat.disableDepthWrite = true;
+      emMat.alphaMode = Constants.ALPHA_ADD;
+      em.material = emMat;
+      this._emberMesh = em;
+      this._emberMat = emMat;
+
       // Heat-shimmer refraction post-pass (the F3-deferred pass): uIntensity
       // 0 degenerates to a plain copy whenever the ship is hidden. B5: the
       // lite tier skips the pass entirely (a fullscreen post-process is real
       // bandwidth on the ≥30 fps floor devices).
       if (!this._quality.shimmer) {
         this._shipState = "ready";
+        this.dataset.craftState = "ready";
+        emit("cosmos:craft", { state: "ready", tier });
         return;
       }
-      const pp = new PostProcess(
-        "ijShimmer",
-        "ijShimmer",
-        ["uCenter", "uIntensity", "uTime", "uAspect"],
-        null,
-        1.0,
-        camera,
-        undefined,
-        engine,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
-      );
-      pp.onApply = (effect) => {
-        const st = this._shimmerState;
-        effect.setFloat2("uCenter", st.cx, st.cy);
-        effect.setFloat("uIntensity", st.intensity);
-        effect.setFloat("uTime", this._reduced ? 0 : performance.now() / 1000);
-        effect.setFloat("uAspect", st.aspect);
-      };
-      this._shimmer = pp;
+      this._createShimmer(camera, engine, backend);
 
       this._shipState = "ready";
+      this.dataset.craftState = "ready";
+      emit("cosmos:craft", { state: "ready", tier });
     } catch (e) {
       console.warn("[babylon-engine] ship GLB load failed", e);
       this._shipState = "failed";
+      this.dataset.craftState = "error";
+      emit("cosmos:craft", { state: "error", tier });
     }
+  }
+
+  /** Builds the heat-shimmer post-process. Factored out of `_setupShip` so
+   * GAP-21's governor can also call it — re-enabling shimmer on a live
+   * promote needs the exact same PostProcess wiring `_setupShip` used at
+   * boot. */
+  private _createShimmer(
+    camera: FreeCamera,
+    engine: AbstractEngine,
+    backend: "webgpu" | "webgl2",
+  ) {
+    const pp = new PostProcess(
+      "ijShimmer",
+      "ijShimmer",
+      ["uCenter", "uIntensity", "uTime", "uAspect"],
+      null,
+      1.0,
+      camera,
+      undefined,
+      engine,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+    );
+    pp.onApply = (effect) => {
+      const st = this._shimmerState;
+      effect.setFloat2("uCenter", st.cx, st.cy);
+      effect.setFloat("uIntensity", st.intensity);
+      effect.setFloat("uTime", this._reduced ? 0 : performance.now() / 1000);
+      effect.setFloat("uAspect", st.aspect);
+    };
+    this._shimmer = pp;
+  }
+
+  /** GAP-21: tears down the heat-shimmer post-process on a live demote to
+   * a tier whose budget has `shimmer: false` — the fullscreen pass is real
+   * bandwidth, so a struggling device needs it gone, not just dimmed. */
+  private _disposeShimmer() {
+    this._shimmer?.dispose();
+    this._shimmer = undefined;
+    this._shimmerState.intensity = 0;
   }
 
   /** Per-frame ship choreography. The wrapper flies at the same virtual-ship
@@ -2264,6 +2830,12 @@ class BabylonScene extends HTMLElement {
    * the dossier takes over (dockFade). */
   private _tickShip(camera: FreeCamera, engine: AbstractEngine) {
     if (this._shipState !== "ready" || !this._ship) return;
+    if (!this._showShip) {
+      // GAP-12: `ship="off"` — force-hidden regardless of warp/dock state.
+      if (this._ship.isEnabled()) this._ship.setEnabled(false);
+      this._shimmerState.intensity = 0;
+      return;
+    }
     const now = performance.now();
     const tS = now / 1000;
     const w = this.warp;
@@ -2330,6 +2902,25 @@ class BabylonScene extends HTMLElement {
       this._shipDockId = null;
     }
 
+    // GAP-07: idle hull bob — a gentle sinusoidal drift so a parked/aiming
+    // ship doesn't read as frozen. Ported in spirit rather than literal NDC
+    // units (space-engine.js bobs a 2D sprite's screen Y; this ship is a
+    // real 3D mesh) — scaled to the ship's own apparent size so the bob
+    // reads consistently at any warp distance, offset along the camera's
+    // local "up" so it always looks vertical regardless of viewing angle.
+    // Gated off during "warp" exactly like the live engine's own
+    // `reduced || warping` check.
+    if (!this._reduced && w.mode !== "warp" && this._ship) {
+      const bobAmp = SHIP_BOB_WORLD * this._shipScale;
+      const bob = Math.sin(tS * 1.4) * bobAmp;
+      const up = quatRotate(this._camQuat, UP_AXIS);
+      this._ship.position.set(
+        this._ship.position.x + up[0] * bob,
+        this._ship.position.y + up[1] * bob,
+        this._ship.position.z + up[2] * bob,
+      );
+    }
+
     this._shipVisible = this._reduced
       ? target
       : expDamp(this._shipVisible, target, 8, this._dtS);
@@ -2361,6 +2952,50 @@ class BabylonScene extends HTMLElement {
     this._plumeMat?.setFloat("uTime", this._reduced ? 0 : tS);
     this._plumeMat?.setFloat("uThrottle", throttle);
     this._plumeMat?.setFloat("uAlpha", plumeAlpha(p) * vis);
+
+    // GAP-07: ember sparks — a burst on burn start/stop (14/8, matching
+    // space-engine.js exactly), drifting back off the nozzles and fading.
+    // Reduced motion drops the burst entirely, same as the live engine's own
+    // `if (!this.reduced)` gate.
+    const burning = p.burning;
+    if (!this._reduced) {
+      const started = burning && !this._burnPrev;
+      const stopped = !burning && this._burnPrev;
+      if (started || stopped) {
+        const n = started ? EMBER_BURST_START : EMBER_BURST_STOP;
+        const q = this._shipQuat;
+        const scale = this._shipScale;
+        const shipPos = this._ship.position;
+        for (let i = 0; i < n && this._embers.length < MAX_EMBERS; i++) {
+          const { pos, vel } = spawnEmberLocal();
+          // unit-ship (nose −Z) -> wrapper space (nose +Z), matching
+          // plumeBuffersForWrapper's Z negation, then into world space.
+          const wp = quatRotate(q, [pos[0], pos[1], -pos[2]]);
+          const wv = quatRotate(q, [vel[0], vel[1], -vel[2]]);
+          this._embers.push({
+            x: shipPos.x + wp[0] * scale,
+            y: shipPos.y + wp[1] * scale,
+            z: shipPos.z + wp[2] * scale,
+            vx: wv[0] * scale,
+            vy: wv[1] * scale,
+            vz: wv[2] * scale,
+            life: 0.7 + Math.random() * 0.5,
+          });
+        }
+      }
+    }
+    this._burnPrev = burning;
+    if (this._embers.length) {
+      const live: Ember[] = [];
+      for (const e of this._embers) if (stepEmber(e, this._dtS)) live.push(e);
+      this._embers = live;
+    }
+    emberBillboards(this._embers, this._emberPos, this._emberMeta);
+    this._emberMesh?.updateVerticesData(
+      VertexBuffer.PositionKind,
+      this._emberPos,
+    );
+    this._emberMesh?.updateVerticesData("emberMeta", this._emberMeta);
 
     // shimmer anchor: mean nozzle point (unit-ship stern +Z → wrapper -Z),
     // projected onto the screen with the same camera basis the raymarch uses
@@ -2560,6 +3195,39 @@ class BabylonScene extends HTMLElement {
    * keeps colliding; Havok itself integrates. Visual tier: Euler drift with
    * the same pull, no collisions. Reduced motion: static (zero velocities —
    * the loop below is then a no-op on positions). */
+  /** GAP-06: pushes uBeta/uGamma/uWarpDir to every material that carries the
+   * aberrate()/Doppler port (stars, curated bodies, photo billboards, warp
+   * trails, the Milky Way band). Reuses one scratch Vector3 so this — called
+   * every render-loop frame — allocates nothing. */
+  private _warpDirScratch = new Vector3(0, 0, 1);
+  private _conColorScratch = new Color4(0.55, 0.61, 0.88, 0.34);
+  private _pushAberration(wd: readonly [number, number, number]) {
+    const beta = this._beta;
+    const gamma = beta > 0 ? 1 / Math.sqrt(1 - beta * beta) : 1;
+    this._warpDirScratch.copyFromFloats(wd[0], wd[1], wd[2]);
+    const mats: (ShaderMaterial | undefined)[] = [
+      this._starMat,
+      this._bodyMat,
+      this._photoMat,
+      this._trailMat,
+      this._bandMat,
+    ];
+    for (const m of mats) {
+      if (!m) continue;
+      m.setFloat("uBeta", beta);
+      m.setFloat("uGamma", gamma);
+      m.setVector3("uWarpDir", this._warpDirScratch);
+    }
+    // Constellation figures fade during relativistic transit — matches
+    // space-engine.js's `uColor(..., 0.34 * (1 - beta))` exactly. No
+    // aberration/Doppler on this pass (out of GAP-06's scope per the gap
+    // analysis; see _setupConstellations), just the alpha term.
+    if (this._conMat) {
+      this._conColorScratch.a = 0.34 * (1 - beta);
+      this._conMat.setColor4("uColor", this._conColorScratch);
+    }
+  }
+
   private _tickAsteroids() {
     if (this._physicsMode === "havok") {
       const f = this._asteroidField;
@@ -2613,9 +3281,368 @@ class BabylonScene extends HTMLElement {
     }
   }
 
+  /* --- GAP-08/GAP-10: free-look input ------------------------------------
+   *
+   * space-engine.js binds pointer/keyboard directly in `_bindPointer`/
+   * `_bindKeys`. Ported onto the canvas (pointer) and the host custom
+   * element (keyboard + the a11y attributes keyboard nav needs) respectively
+   * — the canvas itself stays out of the tab order (see the tabIndex=-1 note
+   * in _boot), so `this` (the <babylon-scene> element) is the correct
+   * keyboard-focus target, matching the live engine's own `this.tabIndex=0`
+   * on itself, not its internal canvas. */
+  private _bindPointer(canvas: HTMLCanvasElement) {
+    canvas.addEventListener("pointerdown", (ev) => {
+      this._dragStart = {
+        x: ev.clientX,
+        y: ev.clientY,
+        yaw: this._yaw,
+        pitch: this._pitch,
+        t: performance.now(),
+      };
+      this._dragMoved = 0;
+      this._dragging = true;
+      canvas.setPointerCapture(ev.pointerId);
+    });
+    canvas.addEventListener("pointermove", (ev) => {
+      const d = this._dragStart;
+      if (d) {
+        const dx = ev.clientX - d.x,
+          dy = ev.clientY - d.y;
+        this._dragMoved = Math.max(
+          this._dragMoved,
+          Math.abs(dx) + Math.abs(dy),
+        );
+        this._yaw = d.yaw - dx * FREE_LOOK_DRAG_K;
+        this._pitch = Math.max(
+          -FREE_LOOK_PITCH_LIMIT,
+          Math.min(FREE_LOOK_PITCH_LIMIT, d.pitch + dy * FREE_LOOK_DRAG_K),
+        );
+        this._velYaw = 0;
+        this._velPitch = 0;
+      } else {
+        this._pick(ev.clientX, ev.clientY, canvas);
+      }
+    });
+    const up = (ev: PointerEvent) => {
+      this._dragging = false;
+      const d = this._dragStart;
+      if (!d) return;
+      const dt = performance.now() - d.t;
+      if (this._dragMoved < 6 && dt < 600)
+        this._click(ev.clientX, ev.clientY, canvas);
+      this._dragStart = null;
+    };
+    canvas.addEventListener("pointerup", up);
+    canvas.addEventListener("pointercancel", () => {
+      this._dragging = false;
+      this._dragStart = null;
+    });
+    canvas.addEventListener("pointerleave", () => {
+      if (this._hoverId) {
+        this._hoverId = null;
+        emit("cosmos:unhover", {});
+        canvas.style.cursor = "crosshair";
+      }
+    });
+  }
+
+  private _bindKeys() {
+    this.tabIndex = 0;
+    this.setAttribute("role", "application");
+    this.setAttribute(
+      "aria-label",
+      "Interactive star chart. Arrow keys look around, Enter travels to the target nearest screen centre, H returns home.",
+    );
+    this.addEventListener("keydown", (e) => {
+      const k = e.key;
+      if (k === "ArrowLeft") {
+        this._velYaw = Math.max(-KEY_YAW_MAX, this._velYaw - KEY_YAW_ACCEL);
+      } else if (k === "ArrowRight") {
+        this._velYaw = Math.min(KEY_YAW_MAX, this._velYaw + KEY_YAW_ACCEL);
+      } else if (k === "ArrowUp") {
+        this._velPitch = Math.min(
+          KEY_PITCH_MAX,
+          this._velPitch + KEY_PITCH_ACCEL,
+        );
+      } else if (k === "ArrowDown") {
+        this._velPitch = Math.max(
+          -KEY_PITCH_MAX,
+          this._velPitch - KEY_PITCH_ACCEL,
+        );
+      } else if (k === "Enter") {
+        if (this._hoverId) this.travelTo(this._hoverId);
+        else this._travelToNearestCenter();
+      } else if (k === "h" || k === "H") {
+        this.goHome();
+      } else return;
+      e.preventDefault();
+    });
+  }
+
+  /** Enter-with-no-hover: travel to whichever body/station sits nearest
+   * screen centre — matches space-engine.js's `_bindKeys` Enter branch,
+   * which sweeps `this.bodies.concat(this.stations)` reading their
+   * per-frame-projected `.sx/.sy`. This path doesn't keep bodies projected
+   * every frame (see `_projectBody`'s header), so it projects fresh, once,
+   * for this discrete user action. */
+  private _travelToNearestCenter() {
+    const camera = this._camera;
+    const engine = this._engine;
+    if (!camera || !engine) return;
+    const rectW = engine.getRenderWidth() / (window.devicePixelRatio || 1);
+    const rectH = engine.getRenderHeight() / (window.devicePixelRatio || 1);
+    const cxp = rectW / 2,
+      cyp = rectH / 2;
+    const basis = this._cameraBasis(camera, engine);
+    let best: BabylonBody | null = null;
+    let bd = Infinity;
+    for (const b of this.bodies.concat(this.stations)) {
+      const p = this._projectBody(b.pos, basis, rectW, rectH);
+      if (!p.vis) continue;
+      const d2 = (p.sx - cxp) * (p.sx - cxp) + (p.sy - cyp) * (p.sy - cyp);
+      if (d2 < bd) {
+        bd = d2;
+        best = b;
+      }
+    }
+    if (best) this.travelTo(best.e.id);
+  }
+
+  /** Camera right/up/forward basis + lens constants, computed once per
+   * pick/projection call and threaded through rather than recomputed per
+   * body — the same `quatRotate(camQuat, axis)` idiom `_tickNebula` already
+   * uses for its raymarch camera uniforms. */
+  private _cameraBasis(camera: FreeCamera, engine: AbstractEngine) {
+    const q = this._camQuat;
+    return {
+      camPos: this.cam,
+      right: quatRotate(q, [1, 0, 0]),
+      up: quatRotate(q, UP_AXIS),
+      fwd: quatRotate(q, BABYLON_FORWARD),
+      tanFov: Math.tan(camera.fov / 2),
+      aspect: engine.getRenderWidth() / Math.max(1, engine.getRenderHeight()),
+    };
+  }
+
+  /* --- GAP-11/GAP-09: screen-space projection ----------------------------
+   *
+   * Ports space-engine.js's `_projectBodies` (76px edge-clamp for off-view
+   * markers) using this camera's own right/up/forward basis and FOV instead
+   * of the live engine's raw proj/view float arrays — same algorithm
+   * (view-space position -> perspective divide -> NDC -> screen px, with an
+   * edge-clamped fallback for off-view targets), expressed through the
+   * quaternion-basis convention this file already uses elsewhere rather than
+   * introducing Babylon's Matrix API as a second, differently-conventioned
+   * way to do the same job.
+   *
+   * Deliberately NOT re-run for every curated body every frame (unlike the
+   * live engine, which projects `this.bodies` unconditionally each frame for
+   * its 34px hit-test): curated bodies already render as real GPU billboards
+   * on this path (GAP-01/GAP-02) — nothing DOM-side reads their sx/sy — so
+   * the ~2,700-body sweep only has a consumer at pick time (pointermove,
+   * throttled by the browser's own event rate) and on the discrete Enter-key
+   * action above, not the render loop. Only station markers (7 items, a real
+   * per-frame DOM consumer via SpaceScene.tsx) are projected every frame —
+   * see `_tickStations`. This keeps the render loop's per-frame allocation
+   * at zero while still projecting every body a user could actually pick. */
+  private _projectBody(
+    pos: readonly [number, number, number],
+    basis: ReturnType<BabylonScene["_cameraBasis"]>,
+    rectW: number,
+    rectH: number,
+  ): { vis: boolean; sx: number; sy: number; ex: number; ey: number } {
+    const { camPos, right, up, fwd, tanFov, aspect } = basis;
+    const dx = pos[0] - camPos[0],
+      dy = pos[1] - camPos[1],
+      dz = pos[2] - camPos[2];
+    const vx = right[0] * dx + right[1] * dy + right[2] * dz;
+    const vy = up[0] * dx + up[1] * dy + up[2] * dz;
+    const vz = fwd[0] * dx + fwd[1] * dy + fwd[2] * dz;
+    const margin = 76;
+    let sx = 0,
+      sy = 0,
+      vis = false;
+    if (vz > 0.01) {
+      const ndcX = vx / (vz * tanFov * aspect);
+      const ndcY = vy / (vz * tanFov);
+      vis = ndcX > -1.1 && ndcX < 1.1 && ndcY > -1.1 && ndcY < 1.1;
+      sx = (ndcX * 0.5 + 0.5) * rectW;
+      sy = (-ndcY * 0.5 + 0.5) * rectH;
+    }
+    let ex: number, ey: number;
+    if (vis) {
+      ex = sx;
+      ey = sy;
+    } else {
+      const ang = Math.atan2(vy, vx);
+      ex = rectW / 2 + Math.cos(ang) * (rectW / 2 - margin);
+      ey = rectH / 2 - Math.sin(ang) * (rectH / 2 - margin);
+    }
+    return { vis, sx, sy, ex, ey };
+  }
+
+  /** GAP-11: station markers only (7 items) — cheap enough, and the only
+   * consumer that needs a live per-frame value (SpaceScene.tsx's sprite
+   * `tick()` reads `en.stations[i].vis/.sx/.sy/.ex/.ey` every animation
+   * frame). Mutates the station BabylonBody objects in place, matching the
+   * SpaceEngineElement contract's shape (station identity is stable; only
+   * these fields change). */
+  private _tickStations(camera: FreeCamera, engine: AbstractEngine) {
+    if (!this.stations.length) return;
+    const rectW = engine.getRenderWidth() / (window.devicePixelRatio || 1);
+    const rectH = engine.getRenderHeight() / (window.devicePixelRatio || 1);
+    const basis = this._cameraBasis(camera, engine);
+    for (const s of this.stations) {
+      const p = this._projectBody(s.pos, basis, rectW, rectH);
+      s.vis = p.vis as false; // BabylonBody's `vis` type is a `false` literal (see its header) — the
+      // interface predates live projection; widening it is a bigger surface
+      // change than this gap warrants, so the runtime value is written
+      // through the same field regardless. Consumers read it as a boolean
+      // (SpaceScene.tsx's `b.vis ?`), which is unaffected by the TS literal.
+      s.sx = p.sx;
+      s.sy = p.sy;
+      s.ex = p.ex;
+      s.ey = p.ey;
+    }
+  }
+
+  /* --- GAP-09/GAP-16: hover picking --------------------------------------
+   *
+   * Ports space-engine.js's `fieldInfo`/`_pickField`/`_pick`/`_click`
+   * verbatim in spirit: a 34px body pick first, falling back to a ~0.6° cone
+   * test against the raw field-star catalog (throttled to every other pick
+   * attempt — that test is O(starCount), same as the live engine's reason
+   * for throttling it). */
+  fieldInfo(i: number) {
+    const f = this._field;
+    if (!f || i == null || i < 0 || i >= f.count) return null;
+    const x = f.positions[i * 3],
+      y = f.positions[i * 3 + 1],
+      z = f.positions[i * 3 + 2];
+    const r = Math.hypot(x, y, z) || 1;
+    const ra = (((Math.atan2(y, x) / D2R + 360) % 360) + 360) % 360;
+    const dec = Math.asin(Math.max(-1, Math.min(1, z / r))) / D2R;
+    const { type, colour } = unpackTypeAndColour(f.meta[i * 2 + 1]);
+    return {
+      ra,
+      dec,
+      ly: type > 0 ? Math.pow(10, (r - 150) / 128) - 1.5 : r * 3.9,
+      mg: 12.5 - f.meta[i * 2] * 14,
+      ci: colour * 255,
+      type,
+    };
+  }
+
+  private _pickField(
+    x: number,
+    y: number,
+    rectW: number,
+    rectH: number,
+    basis: ReturnType<BabylonScene["_cameraBasis"]>,
+  ): number {
+    const f = this._field;
+    if (!f || !f.count) return -1;
+    const { camPos, right, up, fwd, tanFov, aspect } = basis;
+    const ndcX = ((x / rectW) * 2 - 1) * tanFov * aspect;
+    const ndcY = -((y / rectH) * 2 - 1) * tanFov;
+    let ux = right[0] * ndcX + up[0] * ndcY + fwd[0];
+    let uy = right[1] * ndcX + up[1] * ndcY + fwd[1];
+    let uz = right[2] * ndcX + up[2] * ndcY + fwd[2];
+    const rl = Math.hypot(ux, uy, uz) || 1;
+    ux /= rl;
+    uy /= rl;
+    uz /= rl;
+    const [cx, cy, cz] = camPos;
+    let best = -1,
+      bestScore = 0.99989; // ~0.6 deg cone, matches space-engine.js exactly
+    for (let i = 0; i < f.count; i++) {
+      const sx = f.positions[i * 3] - cx,
+        sy = f.positions[i * 3 + 1] - cy,
+        sz = f.positions[i * 3 + 2] - cz;
+      const dt = sx * ux + sy * uy + sz * uz;
+      if (dt <= 0) continue;
+      const c2 = (dt * dt) / (sx * sx + sy * sy + sz * sz);
+      if (c2 > bestScore) {
+        bestScore = c2;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  private _pick(clientX: number, clientY: number, canvas: HTMLCanvasElement) {
+    const camera = this._camera,
+      engine = this._engine;
+    if (!camera || !engine) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left,
+      y = clientY - rect.top;
+    const rectW = engine.getRenderWidth() / (window.devicePixelRatio || 1);
+    const rectH = engine.getRenderHeight() / (window.devicePixelRatio || 1);
+    const basis = this._cameraBasis(camera, engine);
+    let best: BabylonBody | null = null;
+    let bd2 = 34 * 34;
+    for (const b of this.bodies) {
+      const p = this._projectBody(b.pos, basis, rectW, rectH);
+      b.vis = p.vis as false;
+      b.sx = p.sx;
+      b.sy = p.sy;
+      b.ex = p.ex;
+      b.ey = p.ey;
+      if (!p.vis) continue;
+      const dx = p.sx - x,
+        dy = p.sy - y,
+        d2 = dx * dx + dy * dy;
+      if (d2 < bd2) {
+        bd2 = d2;
+        best = b;
+      }
+    }
+    let id: string | null = best ? best.e.id : null;
+    if (!id) {
+      this._fp = (this._fp + 1) | 0;
+      if (this._fp % 2 === 0) {
+        const fi = this._pickField(x, y, rectW, rectH, basis);
+        if (fi >= 0) id = "fs-" + fi;
+      } else if (this._hoverId && String(this._hoverId).indexOf("fs-") === 0) {
+        id = this._hoverId; // hold between throttled picks
+      }
+    }
+    const hx = best ? best.sx! + rect.left : clientX,
+      hy = best ? best.sy! + rect.top : clientY;
+    if (id !== this._hoverId) {
+      this._hoverId = id;
+      canvas.style.cursor = id ? "pointer" : "crosshair";
+      if (id) emit("cosmos:hover", { id, x: hx, y: hy });
+      else emit("cosmos:unhover", {});
+    } else if (id) {
+      emit("cosmos:hover", { id, x: hx, y: hy });
+    }
+  }
+
+  private _click(clientX: number, clientY: number, canvas: HTMLCanvasElement) {
+    this._pick(clientX, clientY, canvas);
+    if (this._hoverId) this.travelTo(this._hoverId);
+  }
+
   // --- travel (B2 steps 3-4) ---
 
   travelTo(id: string, quiet?: boolean) {
+    // GAP-19: no-WebGPU/WebGL2 fallback — mirrors space-engine.js's `noGL`
+    // branch exactly (space-engine.js:1471-1478). `!this._engine` is true
+    // only when `_boot`'s createEngine() threw and returned early (CLAUDE.md
+    // #6's no-WebGL/DOM-fallback policy) — no render loop ever started, so
+    // nothing would tick `_beginWarp`'s state machine forward; the warp would
+    // stall in "aim" forever and cosmos:arrive would never fire, breaking
+    // navigation for a no-WebGL visitor. Fast-path an immediate arrival
+    // instead, same 250ms grace the archived engine uses so the UI doesn't
+    // feel instantaneous-to-the-point-of-broken.
+    if (!this._engine) {
+      this.arrivedId = id;
+      emit("cosmos:select", { id, quiet: true });
+      setTimeout(() => emit("cosmos:arrive", { id, quiet: true }), 250);
+      return;
+    }
     const b =
       this.bodies.find((x) => x.e.id === id) ??
       this.stations.find((x) => x.e.id === id);
@@ -2636,6 +3663,12 @@ class BabylonScene extends HTMLElement {
   }
 
   goHome(quiet?: boolean) {
+    if (!this._engine) {
+      // GAP-19: no-WebGL fallback — mirrors space-engine.js:1531-1536.
+      this.arrivedId = null;
+      emit("cosmos:home", {});
+      return;
+    }
     if (this.warp.mode === "warp" || this.warp.mode === "aim") return;
     if (Math.hypot(this.cam[0], this.cam[1], this.cam[2]) < 1) return; // already home
     this.arrivedId = null;
@@ -2652,11 +3685,9 @@ class BabylonScene extends HTMLElement {
     this.stations = list.map(placeStation);
   }
 
-  fieldInfo() {
-    // Field-star hover/picking needs the live engine's screen-space
-    // projection pipeline, still out of scope — see the header comment.
-    return null;
-  }
+  // fieldInfo(i) is implemented above, near the rest of the GAP-09/GAP-16
+  // hover-picking methods — kept together with _pick/_pickField rather than
+  // here with the other SpaceEngineElement contract methods.
 
   private _beginWarp(
     target: BabylonBody | undefined,
@@ -2743,21 +3774,50 @@ class BabylonScene extends HTMLElement {
     // loaded CI), which the arrival-timing E2E tests caught immediately.
     this._dtWarpS = Math.min(0.5, rawDt);
 
+    // GAP-08/GAP-10: keyboard look inertia — integrated every frame
+    // regardless of warp mode, matching space-engine.js's velYaw/velPitch
+    // (set by _bindKeys' arrow-key handlers, decayed continuously rather
+    // than snapping to zero, so a tap keeps a little glide).
+    this._yaw += this._velYaw;
+    this._pitch = Math.max(
+      -FREE_LOOK_PITCH_LIMIT,
+      Math.min(FREE_LOOK_PITCH_LIMIT, this._pitch + this._velPitch),
+    );
+    this._velYaw *= KEY_LOOK_DAMP;
+    this._velPitch *= KEY_LOOK_DAMP;
+    if (Math.abs(this._velYaw) < 1e-5) this._velYaw = 0;
+    if (Math.abs(this._velPitch) < 1e-5) this._velPitch = 0;
+
     const w = this.warp;
-    if (
-      w.mode === "idle" &&
-      !this._reduced &&
-      Math.hypot(this.cam[0], this.cam[1], this.cam[2]) < 1
-    ) {
-      this._camQuat = quatMultiply(
-        quatFromAxisAngle(UP_AXIS, IDLE_DRIFT_RATE * dt),
-        this._camQuat,
+    if (w.mode === "idle") {
+      // Ambient idle-at-home drift now folds into free-look yaw (rather than
+      // composing a separate axis-angle rotation onto _camQuat directly) so
+      // that a visitor who has already dragged/looked around keeps their own
+      // orientation — drift resumes from wherever they left off, not from a
+      // fixed axis unrelated to free-look.
+      if (
+        !this._reduced &&
+        !this._dragging &&
+        Math.hypot(this.cam[0], this.cam[1], this.cam[2]) < 1
+      ) {
+        this._yaw += IDLE_DRIFT_RATE * dt;
+      }
+      this._camQuat = quatFromUnitVectors(
+        BABYLON_FORWARD,
+        freeLookDir(this._yaw, this._pitch),
       );
     }
     if (w.mode === "aim") {
       if (now - (w.start ?? now) >= (w.aimDur ?? AIM_DUR_MS)) {
         w.mode = "warp";
         w.warpStart = now;
+      } else if (this._dragging) {
+        // GAP-08: "drag input stays authoritative over the look" — even
+        // during the pre-launch aim turn.
+        this._camQuat = quatFromUnitVectors(
+          BABYLON_FORWARD,
+          freeLookDir(this._yaw, this._pitch),
+        );
       } else if (w.dir) {
         const targetQ = quatFromUnitVectors(BABYLON_FORWARD, w.dir);
         this._camQuat = this._reduced
@@ -2806,14 +3866,22 @@ class BabylonScene extends HTMLElement {
         ly = shipW[1] + wd[1] * CHASE_LOOK_AHEAD - this.cam[1],
         lz = shipW[2] + wd[2] * CHASE_LOOK_AHEAD - this.cam[2];
       const ll = Math.hypot(lx, ly, lz) || 1;
-      const targetQ = quatFromUnitVectors(BABYLON_FORWARD, [
-        lx / ll,
-        ly / ll,
-        lz / ll,
-      ]);
-      this._camQuat = this._reduced
-        ? targetQ
-        : quatDamp(this._camQuat, targetQ, CHASE_LOOK_LAMBDA, dt);
+      if (this._dragging) {
+        // GAP-08: drag stays authoritative mid-warp; chase-look yields.
+        this._camQuat = quatFromUnitVectors(
+          BABYLON_FORWARD,
+          freeLookDir(this._yaw, this._pitch),
+        );
+      } else {
+        const targetQ = quatFromUnitVectors(BABYLON_FORWARD, [
+          lx / ll,
+          ly / ll,
+          lz / ll,
+        ]);
+        this._camQuat = this._reduced
+          ? targetQ
+          : quatDamp(this._camQuat, targetQ, CHASE_LOOK_LAMBDA, dt);
+      }
 
       if (k >= 1) {
         w.mode = "idle";
@@ -2858,6 +3926,26 @@ class BabylonScene extends HTMLElement {
         });
       }
     }
+
+    // GAP-06: relativistic beta from the brachistochrone profile — matches
+    // space-engine.js's `this._beta = min(0.88, 0.88*dsdk*0.5)` inside its
+    // own warp branch, `this._beta *= 0.86` (floored at 0.004) otherwise.
+    // `w.dir` persists on the warp object after a journey ends (mode flips
+    // to "idle" but the object itself isn't replaced until the next launch),
+    // so it's always a valid last-used direction for the decaying tail.
+    if (this._reduced) {
+      this._beta = 0;
+    } else if (w.mode === "warp" && w.prog != null) {
+      const kb = w.prog;
+      this._beta = Math.min(
+        0.88,
+        0.88 * (kb < 0.5 ? 4 * kb : 4 * (1 - kb)) * 0.5,
+      );
+    } else {
+      this._beta *= 0.86;
+      if (this._beta < 0.004) this._beta = 0;
+    }
+    this._pushAberration(w.dir ?? [0, 0, 1]);
 
     const q = camera.rotationQuaternion;
     if (q)

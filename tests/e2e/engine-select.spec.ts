@@ -62,6 +62,18 @@ test("default page mounts the BABYLON engine (ADR-0006 cutover), telemetry repor
     .poll(async () => (await perf(page)).startupMs !== null, { timeout: 20000 })
     .toBe(true);
 
+  // GAP-20: this assertion moved to the ?engine=webgl test at the B6 cutover
+  // and never came back to the new default test — the shipping default's
+  // render loop went unasserted. `cosmos:ready` (what startupMs waits on)
+  // fires before sustained frame production (CLAUDE.md #18: "assert
+  // behaviour, not readiness"), so the poll above alone doesn't prove the
+  // scene is actually drawing. TR-059 is exactly the class of defect this
+  // was blind to: `scene.render()` threw on every frame while `cosmos:ready`
+  // had already fired, and no default-path test read `frames` to notice.
+  await expect
+    .poll(async () => (await perf(page)).frames, { timeout: 10000 })
+    .toBeGreaterThan(0);
+
   expect(pageErrors).toEqual([]);
 });
 
@@ -840,6 +852,160 @@ test("babylon: chase-camera choreography drives the real WarpOverlay phase/veloc
   expect(finalCam[0]).toBeCloseTo(to![0], 6);
   expect(finalCam[1]).toBeCloseTo(to![1], 6);
   expect(finalCam[2]).toBeCloseTo(to![2], 6);
+});
+
+test("babylon: GAP-17 — the flight sequence runs accel → flip → decel in strict order via the real HUD", async ({
+  page,
+}) => {
+  // GAP-17's remaining gap after the "chase-camera choreography" test above:
+  // that test asserts accel and decel appear, but not the FLIP window between
+  // them, and not that the ordering is strict. This is the direct Babylon-
+  // native equivalent of flight-v3.spec.ts's synthetic-tick "burn → flip →
+  // brake → arrive" test — driven by the real render loop and real timers
+  // instead (that spec's 3 remaining synthetic-tick tests stay pinned to
+  // ?engine=webgl; they poke space-engine.js-specific internals — `_tick()`,
+  // `.gl` — that have no Babylon equivalent, see that file's header).
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+  await expect
+    .poll(
+      async () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) =>
+            (
+              el as HTMLElement & { sceneStats(): Record<string, unknown> }
+            ).sceneStats(),
+          )
+          .then((s) => s.starSource),
+      { timeout: 20000 },
+    )
+    .toBe("catalog");
+
+  // Same deterministic target as the choreography test above, for the same
+  // reason: polaris (ly 433, dec 89.26°) is provably clear of the asteroid
+  // belt's proximity-slowdown tube, so the phase windows land on schedule.
+  //
+  // The flip window is only k∈[0.47,0.53] — ~6% of polaris's ~3.2s journey,
+  // roughly 195ms of wall clock. Asserting it via DOM TEXT (as first
+  // attempted) is fragile: React's own state-update batching can coalesce
+  // several cosmos:warp events into one render, and if "flip" and "decel"
+  // both land in the same batch only the last one ever paints — a false
+  // negative on ordering that's actually correct, just never rendered).
+  // Capturing the cosmos:warp EVENT STREAM directly (same technique
+  // flight-v3.spec.ts's synthetic-tick harness uses, just with the real
+  // clock instead of manual ticks) sidesteps React's render layer entirely
+  // and asserts the engine's actual phase sequence, which is what GAP-17 is
+  // really about.
+  const result = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const en = document.querySelector("babylon-scene") as unknown as {
+          travelTo(id: string): void;
+          arrivedId: string | null;
+        };
+        const phases: string[] = [];
+        const onWarp = ((e: CustomEvent) => {
+          const p = e.detail?.phase as string | undefined;
+          if (p && phases[phases.length - 1] !== p) phases.push(p);
+        }) as EventListener;
+        const onArrive = ((e: CustomEvent) => {
+          window.removeEventListener("cosmos:warp", onWarp);
+          window.removeEventListener("cosmos:arrive", onArrive);
+          resolve({ phases, arrivedId: e.detail?.id as string });
+        }) as EventListener;
+        window.addEventListener("cosmos:warp", onWarp);
+        window.addEventListener("cosmos:arrive", onArrive);
+        en.travelTo("polaris");
+        setTimeout(() => {
+          window.removeEventListener("cosmos:warp", onWarp);
+          window.removeEventListener("cosmos:arrive", onArrive);
+          resolve({ phases, arrivedId: null, timedOut: true });
+        }, 10000);
+      }),
+  );
+
+  const r = result as { phases: string[]; arrivedId: string | null };
+  expect(r.phases.indexOf("accel")).toBe(0);
+  expect(r.phases.indexOf("flip")).toBeGreaterThan(r.phases.indexOf("accel"));
+  expect(r.phases.indexOf("decel")).toBeGreaterThan(r.phases.indexOf("flip"));
+  expect(r.arrivedId).toBe("polaris");
+});
+
+test("babylon: GAP-17/GAP-08 — free-look drag stays authoritative over the chase mid-flight", async ({
+  page,
+}) => {
+  // Direct Babylon port of flight-v3.spec.ts's wall-clock "free-look drag
+  // stays authoritative" test (that one drives the archived engine via real
+  // clicks/mouse events too, not synthetic ticks — genuinely portable, just
+  // pointed at the wrong engine since the B6 cutover). `_yaw`/`_dragging` are
+  // babylon-engine.ts's private fields — still readable at runtime, same
+  // pattern this suite already uses for other private-field reads.
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message));
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+  await expect
+    .poll(
+      async () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) =>
+            (
+              el as HTMLElement & { sceneStats(): Record<string, unknown> }
+            ).sceneStats(),
+          )
+          .then((s) => s.starSource),
+      { timeout: 20000 },
+    )
+    .toBe("catalog");
+
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .locator("ul")
+    .first()
+    .getByRole("link", { name: "About" })
+    .click();
+  await page.waitForFunction(
+    () => {
+      const en = document.querySelector("babylon-scene") as unknown as {
+        warp?: { mode: string };
+      } | null;
+      return en?.warp?.mode === "warp";
+    },
+    { timeout: 10000 },
+  );
+
+  // drag mid-warp: while the pointer is down the chase must not write the look
+  const vp = page.viewportSize();
+  const cx = (vp?.width ?? 1280) / 2,
+    cy = (vp?.height ?? 720) / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 220, cy + 60, { steps: 8 });
+  const during = await page.evaluate(() => {
+    const en = document.querySelector("babylon-scene") as unknown as {
+      _yaw: number;
+      _dragging: boolean;
+    };
+    return { yaw: en._yaw, dragging: en._dragging };
+  });
+  expect(during.dragging).toBe(true);
+  // held still: the chase would pan the yaw; authoritative drag pins it
+  await page.waitForTimeout(250);
+  const held = await page.evaluate(
+    () =>
+      (document.querySelector("babylon-scene") as unknown as { _yaw: number })
+        ._yaw,
+  );
+  expect(Math.abs(held - during.yaw)).toBeLessThan(1e-6);
+  await page.mouse.up();
+
+  // released: the chase re-engages and the journey still completes cleanly
+  await expect(page.getByRole("dialog", { name: "What I Do" })).toBeVisible({
+    timeout: 15000,
+  });
+  expect(pageErrors).toEqual([]);
 });
 
 test("babylon: distance-scaled travel — a near body warps faster than a far one", async ({
