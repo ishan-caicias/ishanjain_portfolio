@@ -295,6 +295,79 @@ test("babylon: GAP-02 photographic bodies — travelling to a real atlas-mapped 
   expect(pageErrors).toEqual([]);
 });
 
+test("babylon: GAP-03/04/05 — galactic band, constellation figures, and warp trails all build console-clean", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") consoleErrors.push(m.text());
+  });
+  page.on("pageerror", (e) => pageErrors.push(e.message));
+
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type GapStats = {
+    bandReady: boolean;
+    bandMeshReady: boolean;
+    bandTextureReady: boolean;
+    bandFade: number;
+    constellationSegments: number;
+    constellationMeshReady: boolean;
+    trailMeshReady: boolean;
+    trailVisible: boolean;
+    trailWarpSpeed: number;
+  };
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (el as HTMLElement & { sceneStats(): GapStats }).sceneStats(),
+      );
+
+  // GAP-03: the band's 1024x512 grid is built progressively (20 rows/frame),
+  // so poll rather than assume it lands by the first read.
+  await expect
+    .poll(async () => (await readStats()).bandReady, { timeout: 20000 })
+    .toBe(true);
+  const idle = await readStats();
+  expect(idle.bandMeshReady).toBe(true);
+  expect(idle.bandTextureReady).toBe(true);
+
+  // GAP-04: real catalog entries carry .fig data, so this is never zero on
+  // the real page (as opposed to the pure-module test's synthetic fixtures).
+  expect(idle.constellationMeshReady).toBe(true);
+  expect(idle.constellationSegments).toBeGreaterThan(0);
+
+  // GAP-05: trails must be GATED OFF at idle (no false-positive streaking)...
+  expect(idle.trailMeshReady).toBe(true);
+  expect(idle.trailVisible).toBe(false);
+  expect(idle.trailWarpSpeed).toBeLessThanOrEqual(0.4);
+
+  // ...and gate ON while the camera is actually moving during a real warp —
+  // assert behaviour, not readiness (CLAUDE.md rule), by driving travel
+  // through the engine's own imperative API rather than inspecting state.
+  await page.evaluate(() => {
+    (
+      document.querySelector("babylon-scene") as unknown as {
+        randomBody: () => void;
+      }
+    ).randomBody();
+  });
+  await page.waitForTimeout(700); // land mid-acceleration-burn
+  const warping = await readStats();
+  expect(warping.trailVisible).toBe(true);
+  expect(warping.trailWarpSpeed).toBeGreaterThan(0.4);
+
+  // WebGPU validates shader modules asynchronously — materialReady proves
+  // nothing (TR-045); zero console output is the assertion that actually
+  // catches a broken texture bind, a bad line-list fillMode, or a reserved-
+  // identifier-class failure across all three new shader-twin pairs.
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
 test("babylon: shooting-star GLSL twin compiles and renders on the default (WebGL2 fallback) project", async ({
   page,
 }) => {

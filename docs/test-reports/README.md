@@ -58,3 +58,4 @@
 | [TR-054](TR-054.md) | 2026-07-19 | TR-053 root-caused (SwiftShader context loss, not a broken harness) + 2 missed cutover pins fixed  | READY TO PROCEED                    |
 | [TR-055](TR-055.md) | 2026-07-19 | Docs drift audit + root CLAUDE.md + README rewrite + `docs:check` CI drift gate                    | READY TO PROCEED                    |
 | [TR-056](TR-056.md) | 2026-07-20 | GAP-01/GAP-02 closed: curated bodies + photographic DSO billboards render on the Babylon path      | READY TO PROCEED                    |
+| [TR-057](TR-057.md) | 2026-07-20 | GAP-03/GAP-04/GAP-05 closed: Milky Way band, constellation figures, warp star trails               | READY TO PROCEED                    |

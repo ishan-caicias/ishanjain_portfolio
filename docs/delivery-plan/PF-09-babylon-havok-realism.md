@@ -3,14 +3,15 @@
 **Date:** 2026-07-18
 **Status:** **B0–B6 DELIVERED — cutover executed 2026-07-19; B6 not yet closed.** The default
 engine is Babylon ([ADR-0006](../adr/0006-babylon-default-cutover.md) Accepted,
-[TR-053](../test-reports/TR-053.md)/[TR-054](../test-reports/TR-054.md)). GAP-01/GAP-02 from the
-[cutover gap analysis](../analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md) — curated
-destination bodies and the photographic DSO layer were not rendered on the Babylon path — are
-**resolved** ([TR-056](../test-reports/TR-056.md), 2026-07-20). **One item remains before B6
-closes: the post-flip owner device pass** (checklist §A, accepted risk at flip — needs the
-owner's physical iPad/mid-Android hardware, not actionable from this desk). The gap analysis
-itself still lists ~23 smaller, lower-severity gaps (station sprites, field-star hover,
-free-look drag, and others) that are tracked follow-ups, not B6 blockers.
+[TR-053](../test-reports/TR-053.md)/[TR-054](../test-reports/TR-054.md)). GAP-01 through GAP-05
+from the [cutover gap analysis](../analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md) —
+curated destination bodies, the photographic DSO layer, the Milky Way band, constellation
+figures, and warp star trails — are all **resolved**
+([TR-056](../test-reports/TR-056.md), [TR-057](../test-reports/TR-057.md), 2026-07-20).
+**One item remains before B6 closes: the post-flip owner device pass** (checklist §A, accepted
+risk at flip — needs the owner's physical iPad/mid-Android hardware, not actionable from this
+desk). The gap analysis itself still lists ~20 smaller, lower-severity gaps (station sprites,
+field-star hover, free-look drag, and others) that are tracked follow-ups, not B6 blockers.
 _Phase history below is append-only; read it as a record, not as current state._
 
 B0 complete ([TR-027](../test-reports/TR-027.md)) · **B1 gate decided:

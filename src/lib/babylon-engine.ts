@@ -118,9 +118,40 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
 import { CreateIcoSphereVertexData } from "@babylonjs/core/Meshes/Builders/icoSphereBuilder";
+import { CreateSphereVertexData } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { Material } from "@babylonjs/core/Materials/material";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
+import {
+  buildMilkyWayRow,
+  MILKY_WAY_FRAGMENT_GLSL,
+  MILKY_WAY_FRAGMENT_WGSL,
+  MILKY_WAY_HEIGHT,
+  MILKY_WAY_ROWS_PER_CHUNK,
+  MILKY_WAY_SPHERE_RADIUS,
+  MILKY_WAY_VERTEX_GLSL,
+  MILKY_WAY_VERTEX_WGSL,
+  MILKY_WAY_WIDTH,
+} from "./milky-way";
+import {
+  buildConstellationLines,
+  CONSTELLATION_FRAGMENT_GLSL,
+  CONSTELLATION_FRAGMENT_WGSL,
+  CONSTELLATION_RADIUS,
+  CONSTELLATION_VERTEX_GLSL,
+  CONSTELLATION_VERTEX_WGSL,
+} from "./constellations";
+import {
+  advanceTrailCamera,
+  buildStarTrails,
+  trailFade,
+  trailsVisible,
+  STAR_TRAIL_FRAGMENT_GLSL,
+  STAR_TRAIL_FRAGMENT_WGSL,
+  STAR_TRAIL_VERTEX_GLSL,
+  STAR_TRAIL_VERTEX_WGSL,
+} from "./star-trails";
 // SIDE-EFFECT import required: Mesh.createInstance() throws "InstancedMesh
 // needs to be imported before" unless the class module has executed (it
 // patches the factory onto Mesh) — a type-only import erases and does NOT
@@ -188,6 +219,7 @@ import {
   quatRotate,
 } from "./nebula-field";
 import type { Quat } from "./ship-dynamics";
+import type { CelestialFigure } from "@/data/celestial/celestial.d.ts";
 import {
   CRAFT_QUALITY_STORAGE_KEY,
   parseStoredQuality,
@@ -275,6 +307,7 @@ interface BabylonBody {
     c?: string | null;
     img?: string | null;
     sp?: string | null;
+    fig?: CelestialFigure;
   };
   dir: [number, number, number];
   pos: [number, number, number];
@@ -295,6 +328,7 @@ function placeBody(e: {
   c?: string | null;
   img?: string | null;
   sp?: string | null;
+  fig?: CelestialFigure;
 }): BabylonBody {
   const { dir, pos } = bodyWorldPosition(e.ra, e.dec, e.ly);
   return { e, dir, pos, vis: false };
@@ -883,6 +917,27 @@ ShaderStore.ShadersStoreWGSL["ijPhotoBodyVertexShader"] =
   PHOTO_BODY_VERTEX_WGSL;
 ShaderStore.ShadersStoreWGSL["ijPhotoBodyFragmentShader"] =
   PHOTO_BODY_FRAGMENT_WGSL;
+// GAP-03/04/05 — see milky-way.ts / constellations.ts / star-trails.ts headers.
+ShaderStore.ShadersStore["ijMilkyWayVertexShader"] = MILKY_WAY_VERTEX_GLSL;
+ShaderStore.ShadersStore["ijMilkyWayFragmentShader"] = MILKY_WAY_FRAGMENT_GLSL;
+ShaderStore.ShadersStoreWGSL["ijMilkyWayVertexShader"] = MILKY_WAY_VERTEX_WGSL;
+ShaderStore.ShadersStoreWGSL["ijMilkyWayFragmentShader"] =
+  MILKY_WAY_FRAGMENT_WGSL;
+ShaderStore.ShadersStore["ijConstellationVertexShader"] =
+  CONSTELLATION_VERTEX_GLSL;
+ShaderStore.ShadersStore["ijConstellationFragmentShader"] =
+  CONSTELLATION_FRAGMENT_GLSL;
+ShaderStore.ShadersStoreWGSL["ijConstellationVertexShader"] =
+  CONSTELLATION_VERTEX_WGSL;
+ShaderStore.ShadersStoreWGSL["ijConstellationFragmentShader"] =
+  CONSTELLATION_FRAGMENT_WGSL;
+ShaderStore.ShadersStore["ijStarTrailVertexShader"] = STAR_TRAIL_VERTEX_GLSL;
+ShaderStore.ShadersStore["ijStarTrailFragmentShader"] =
+  STAR_TRAIL_FRAGMENT_GLSL;
+ShaderStore.ShadersStoreWGSL["ijStarTrailVertexShader"] =
+  STAR_TRAIL_VERTEX_WGSL;
+ShaderStore.ShadersStoreWGSL["ijStarTrailFragmentShader"] =
+  STAR_TRAIL_FRAGMENT_WGSL;
 
 async function createEngine(canvas: HTMLCanvasElement): Promise<{
   engine: AbstractEngine;
@@ -956,6 +1011,22 @@ class BabylonScene extends HTMLElement {
   private _photoTex?: Texture;
   private _bodyCount = 0;
   private _photoBodyCount = 0;
+  // --- GAP-03: Milky Way band ---
+  private _bandMesh?: Mesh;
+  private _bandMat?: ShaderMaterial;
+  private _bandTex?: RawTexture;
+  private _bandBuf?: Uint8Array;
+  private _bandRow = 0;
+  private _bandReady = false;
+  private _bandFadeAmt = 0;
+  // --- GAP-04: constellation figures ---
+  private _conMesh?: Mesh;
+  private _conCount = 0;
+  // --- GAP-05: warp star trails ---
+  private _trailMesh?: Mesh;
+  private _trailMat?: ShaderMaterial;
+  private _camPrevTrail: [number, number, number] = [0, 0, 0];
+  private _trailWarpSpeed = 0;
   // --- volumetric nebulae (B3) ---
   private _nebulaMode: "compute" | "fragment" | null = null;
   private _nebulaTex?: BaseTexture;
@@ -1149,6 +1220,7 @@ class BabylonScene extends HTMLElement {
         c: e.c,
         img: e.img,
         sp: e.sp,
+        fig: e.fig,
       }),
     );
 
@@ -1242,6 +1314,13 @@ class BabylonScene extends HTMLElement {
     // never delaying cosmos:ready).
     await this._setupCelestialBodies(scene, engine, backend);
 
+    // GAP-03/04/05: galactic band, constellation figures, warp star trails.
+    // Synchronous, cheap geometry/material setup — the band's actual texture
+    // fills in progressively via _tickMilkyWay (see that method).
+    this._setupMilkyWay(scene, backend);
+    this._setupConstellations(scene, backend);
+    this._setupStarTrails(scene, engine, backend, field);
+
     // B3: volumetric nebulae — tier-gated producer (WebGPU compute / WebGL2
     // ProceduralTexture) + shared fullscreen composite. See nebula-field.ts.
     this._setupNebula(scene, engine, backend);
@@ -1257,6 +1336,8 @@ class BabylonScene extends HTMLElement {
     let first = true;
     engine.runRenderLoop(() => {
       this._tickWarp(camera);
+      this._tickMilkyWay();
+      this._tickTrails();
       this._tickNebula(camera, engine);
       this._tickShip(camera, engine);
       this._tickAsteroids();
@@ -1346,6 +1427,20 @@ class BabylonScene extends HTMLElement {
         ? this._photoMesh.material.isReady(this._photoMesh)
         : false,
       photoBodyTextureReady: this._photoTex?.isReady() ?? false,
+      // GAP-03: Milky Way band diagnostics.
+      bandReady: this._bandReady,
+      bandFade: Math.round(this._bandFadeAmt * 1000) / 1000,
+      bandTextureReady: this._bandTex?.isReady() ?? false,
+      bandMeshReady: this._bandMesh ? this._bandMesh.isReady(true) : false,
+      // GAP-04: constellation figure diagnostics.
+      constellationSegments: this._conCount,
+      constellationMeshReady: this._conMesh
+        ? this._conMesh.isReady(true)
+        : false,
+      // GAP-05: warp star trail diagnostics.
+      trailWarpSpeed: Math.round(this._trailWarpSpeed * 1000) / 1000,
+      trailVisible: this._trailMesh?.isVisible ?? false,
+      trailMeshReady: this._trailMesh ? this._trailMesh.isReady(true) : false,
       // B3: volumetric nebula diagnostics.
       nebulaMode: this._nebulaMode,
       nebulaVolumes: NEBULA_VOLUMES.length,
@@ -1530,6 +1625,210 @@ class BabylonScene extends HTMLElement {
     const tex = new Texture("/assets/atlas.jpg", scene);
     this._photoTex = tex;
     photoMat.setTexture("uTex", tex);
+  }
+
+  // --- GAP-03: Milky Way band ---
+
+  /** Builds the background sphere + material; the texture itself is filled
+   * in progressively by `_tickMilkyWay` (see milky-way.ts's header for why
+   * this can't run in one synchronous call). */
+  private _setupMilkyWay(scene: Scene, backend: "webgpu" | "webgl2") {
+    const mesh = new Mesh("milkyWay", scene);
+    this._bandMesh = mesh;
+    const vd = CreateSphereVertexData({
+      diameter: MILKY_WAY_SPHERE_RADIUS * 2,
+      segments: 24,
+    });
+    vd.applyToMesh(mesh, false);
+    // Renders behind everything regardless of draw order — the same
+    // mechanism Babylon's own scene.createDefaultSkybox() uses, not a
+    // rendering-group/depth-write special case.
+    mesh.infiniteDistance = true;
+    mesh.isPickable = false;
+    mesh.alwaysSelectAsActiveMesh = true;
+
+    const mat = new ShaderMaterial(
+      "milkyWay",
+      scene,
+      { vertex: "ijMilkyWay", fragment: "ijMilkyWay" },
+      {
+        attributes: ["position", "uv"],
+        uniforms: ["world", "view", "projection", "uFade"],
+        samplers: ["uTex"],
+        shaderLanguage:
+          backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+      },
+    );
+    mat.backFaceCulling = false; // the camera sits inside the sphere
+    mat.setFloat("uFade", 0);
+    mesh.material = mat;
+    this._bandMat = mat;
+
+    this._bandBuf = new Uint8Array(MILKY_WAY_WIDTH * MILKY_WAY_HEIGHT * 4);
+  }
+
+  /** Chunked texture build (MILKY_WAY_ROWS_PER_CHUNK rows/frame — the
+   * benchmarked full-grid cost, ~300ms+, would stall many frames if done in
+   * one call) followed by a slow fade-in once the single upload lands. */
+  private _tickMilkyWay() {
+    if (!this._bandReady) {
+      if (!this._bandBuf) return;
+      const end = Math.min(
+        MILKY_WAY_HEIGHT,
+        this._bandRow + MILKY_WAY_ROWS_PER_CHUNK,
+      );
+      for (; this._bandRow < end; this._bandRow++) {
+        buildMilkyWayRow(
+          this._bandBuf,
+          this._bandRow,
+          MILKY_WAY_WIDTH,
+          MILKY_WAY_HEIGHT,
+        );
+      }
+      if (this._bandRow >= MILKY_WAY_HEIGHT) {
+        this._bandReady = true;
+        const tex = RawTexture.CreateRGBATexture(
+          this._bandBuf,
+          MILKY_WAY_WIDTH,
+          MILKY_WAY_HEIGHT,
+          this._scene ?? null,
+          true,
+          false,
+          Texture.TRILINEAR_SAMPLINGMODE,
+        );
+        this._bandTex = tex;
+        this._bandMat?.setTexture("uTex", tex);
+      }
+      return;
+    }
+    if (this._bandFadeAmt < 1) {
+      this._bandFadeAmt = Math.min(
+        1,
+        this._bandFadeAmt + (this._reduced ? 1 : 0.012),
+      );
+      this._bandMat?.setFloat("uFade", this._bandFadeAmt);
+    }
+  }
+
+  // --- GAP-04: constellation figures ---
+
+  private _setupConstellations(scene: Scene, backend: "webgpu" | "webgl2") {
+    const lines = buildConstellationLines(
+      this.bodies.map((b) => ({ fig: b.e.fig })),
+      CONSTELLATION_RADIUS,
+    );
+    this._conCount = lines.count;
+    if (lines.count === 0) return;
+
+    const mesh = new Mesh("constellations", scene);
+    this._conMesh = mesh;
+    const vd = new VertexData();
+    vd.positions = lines.positions;
+    // Non-indexed line list — an identity index array so this mesh follows
+    // the same indexed-draw path every other custom mesh here uses, rather
+    // than relying on Babylon's less-exercised unindexed-draw fallback.
+    const indices = new Uint32Array(lines.count * 2);
+    for (let i = 0; i < indices.length; i++) indices[i] = i;
+    vd.indices = indices;
+    vd.applyToMesh(mesh, false);
+    mesh.isPickable = false;
+    mesh.alwaysSelectAsActiveMesh = true;
+
+    const mat = new ShaderMaterial(
+      "constellations",
+      scene,
+      { vertex: "ijConstellation", fragment: "ijConstellation" },
+      {
+        attributes: ["position"],
+        uniforms: ["view", "projection", "uColor"],
+        needAlphaBlending: true,
+        shaderLanguage:
+          backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+      },
+    );
+    mat.fillMode = Material.LineListDrawMode;
+    // Matches space-engine.js's static figure colour/alpha exactly (its
+    // relativistic transit fade is skipped — same GAP-06 aberration
+    // dependency noted throughout the Babylon body/star passes).
+    mat.setColor4("uColor", new Color4(0.55, 0.61, 0.88, 0.34));
+    mesh.material = mat;
+  }
+
+  // --- GAP-05: warp star trails ---
+
+  private _setupStarTrails(
+    scene: Scene,
+    engine: AbstractEngine,
+    backend: "webgpu" | "webgl2",
+    field: StarField,
+  ) {
+    const trails = buildStarTrails(field);
+    if (trails.count === 0) return;
+
+    const mesh = new Mesh("starTrails", scene);
+    this._trailMesh = mesh;
+    const vd = new VertexData();
+    vd.positions = trails.positions;
+    const indices = new Uint32Array(trails.vertexCount);
+    for (let i = 0; i < indices.length; i++) indices[i] = i;
+    vd.indices = indices;
+    vd.applyToMesh(mesh, false);
+    mesh.setVerticesBuffer(
+      new VertexBuffer(engine, trails.meta, "trailMeta", false, false, 2),
+    );
+    mesh.isPickable = false;
+    mesh.alwaysSelectAsActiveMesh = true;
+    mesh.isVisible = false; // gated per-frame by _tickTrails
+
+    const mat = new ShaderMaterial(
+      "starTrails",
+      scene,
+      { vertex: "ijStarTrail", fragment: "ijStarTrail" },
+      {
+        attributes: ["position", "trailMeta"],
+        uniforms: ["view", "projection", "uCam", "uCamPrev", "uWarp"],
+        needAlphaBlending: true,
+        shaderLanguage:
+          backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+      },
+    );
+    mat.fillMode = Material.LineListDrawMode;
+    mat.alphaMode = Constants.ALPHA_ADD;
+    mesh.material = mat;
+    this._trailMat = mat;
+  }
+
+  /** Advances the lagged "previous camera" and gates/fades the trail mesh —
+   * matches space-engine.js's per-frame trail update exactly (see
+   * star-trails.ts's header for the view-space correction this needs on
+   * Babylon, where `view` already bakes in camera translation). */
+  private _tickTrails() {
+    if (!this._trailMesh || !this._trailMat) return;
+    this._trailWarpSpeed = advanceTrailCamera(
+      this.cam,
+      this._camPrevTrail,
+      this._reduced,
+    );
+    const visible = trailsVisible(
+      this._trailWarpSpeed,
+      this._reduced,
+      this._quality.name !== "lite",
+    );
+    this._trailMesh.isVisible = visible;
+    if (!visible) return;
+    this._trailMat.setVector3(
+      "uCam",
+      new Vector3(this.cam[0], this.cam[1], this.cam[2]),
+    );
+    this._trailMat.setVector3(
+      "uCamPrev",
+      new Vector3(
+        this._camPrevTrail[0],
+        this._camPrevTrail[1],
+        this._camPrevTrail[2],
+      ),
+    );
+    this._trailMat.setFloat("uWarp", trailFade(this._trailWarpSpeed));
   }
 
   // --- volumetric nebulae (B3) ---

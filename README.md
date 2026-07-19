@@ -100,6 +100,8 @@ project's source of truth for decisions and verification history.
 - **Curated destinations**: every catalog body renders as a type-shaded beacon (star, planet,
   nebula, galaxy, cluster, deep field), with real NASA/ESA photographic imagery and lit rotating
   globes for the 267-body atlas-mapped subset.
+- **Sky backdrop**: a procedural Milky Way band, constellation figures for named star patterns,
+  and radial star-streak trails during warp.
 - **Known post-cutover deltas**: the Babylon path still has no field-star hover, station sprite
   markers, or free-look drag — tracked in
   [the cutover gap analysis](docs/analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md).
