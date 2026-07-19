@@ -8,8 +8,11 @@ CONDITIONAL GO** ([ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md)) o
 (WebGPU badge) and 3 (billboard memory) still gate the B6 cutover · **B2 CODE-COMPLETE — all 6
 steps done** ([TR-036](../test-reports/TR-036.md), [TR-038](../test-reports/TR-038.md),
 [TR-040](../test-reports/TR-040.md), [TR-041](../test-reports/TR-041.md),
-[TR-042](../test-reports/TR-042.md)); one exit condition open — **owner real-device fps/startup
-re-measurement**, same as the B1 gate — before B3 (volumetric & particle rendering) starts.
+[TR-042](../test-reports/TR-042.md)); one exit condition remains open — **owner real-device
+fps/startup re-measurement**, same as the B1 gate ([TR-043](../test-reports/TR-043.md) flags the
+first attempt's readings as not yet trustworthy). **B3 (volumetric & particle rendering) IN
+PROGRESS at owner direction** ([TR-044](../test-reports/TR-044.md)) — starting before that
+condition closes, not because it closed.
 **Supersedes:** [ADR-0002](../adr/0002-in-engine-glb-ship-renderer.md) (zero runtime 3D deps) —
 conditionally, per [ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md), written at the B1
 gate from measured desktop data. The current engine remains the shipping default until the
@@ -197,6 +200,26 @@ GPU-particle **thrusters** (retire the F3 plume), GPU-particle **idle shooting s
 refraction post-pass** deferred from F3, and docking-approach polish. Tier-gated: WebGL2 fallback
 keeps the simpler billboards.
 **Exit:** thrusters/nebulae/shimmer read as real volumetric FX; fallback tier still coherent.
+
+**IN PROGRESS 2026-07-19.** **Sequencing decision, recorded before starting:** three of the five
+items — thrusters, heat-shimmer (`space-engine.js` places it explicitly "behind the nozzle"), and
+docking-approach polish — are ship-attached, and **no ship mesh exists on the Babylon path yet**
+(`craft-loader.ts` is a hand-rolled raw-WebGL loader, not portable to Babylon without its own
+build-out; the camera has played the "ship" role throughout B2). These three are **blocked** on an
+unscoped Babylon ship-mesh loading track, not silently dropped. Volumetric nebulae (WebGPU compute)
+is unblocked but a materially larger effort of its own, deferred to its own increment.
+
+✅ **Idle shooting stars done ([TR-044](../test-reports/TR-044.md))** — new work, not a port (the
+live engine has no equivalent at all). Genuinely GPU-driven: every particle's position and fade are
+computed in the vertex shader from `uTime` alone, zero per-frame CPU cost, unlike the live engine's
+CPU-stepped F3 embers. 140 unit · 61 E2E.
+
+**⚠ Regression, found and fixed same-day ([TR-045](../test-reports/TR-045.md)).** The WGSL twin
+used `meta`/`ref` — reserved WGSL keywords — which blanked the **entire scene** (star field
+included) on real WebGPU hardware, undetected by TR-044's own verification (`materialReady: true`
+reported regardless, since WebGPU shader validation is asynchronous). Owner caught it on the live
+demo server. Fixed; the verification gap (no console-error check) is closed in
+`webgpu-hardware.spec.ts`.
 
 ### B4 — Havok physics showcase ⭐ (the portfolio centrepiece)
 

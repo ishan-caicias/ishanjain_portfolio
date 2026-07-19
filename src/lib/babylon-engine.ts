@@ -74,6 +74,7 @@ import {
   LIVE_STAR_COUNT,
 } from "./star-field";
 import { CATALOG_CHUNKS, decodeStarCatalog } from "./star-catalog";
+import { buildShootingStars } from "./shooting-stars";
 import type { Quat } from "./ship-dynamics";
 import {
   ARRIVE_STANDOFF,
@@ -176,6 +177,12 @@ const UP_AXIS: [number, number, number] = [0, 1, 0];
  * spin (~14.5 minutes per revolution), not a feature — just enough that the
  * home view isn't perfectly frozen while idle. */
 const IDLE_DRIFT_RATE = 0.0072;
+
+/** B3: shared cycle length (seconds) for the shooting-star particles — each
+ * particle repeats endlessly at its own phase offset within this cycle (see
+ * shooting-stars.ts). Long enough that particles don't feel synchronized,
+ * short enough that the sky doesn't read as empty for long stretches. */
+const SHOOTING_STAR_CYCLE_S = 5;
 
 /** idle: parked. aim: launch-turn preview before the burn (position holds).
  * warp: the eased chase-camera flight itself. Mirrors space-engine.js's
@@ -509,6 +516,121 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   fragmentOutputs.color = vec4<f32>(fragmentInputs.vColor, a * fragmentInputs.vAlpha);
 }`;
 
+/* Shooting stars (B3): tapered quad per particle, entirely GPU-driven — the
+ * vertex shader computes each particle's current head/tail position and fade
+ * purely from uTime, using the per-particle (position, dir, meta) attributes
+ * built once by shooting-stars.ts. No per-frame CPU stepping or re-upload,
+ * unlike the live engine's CPU-stepped ember pattern (see that file's header
+ * for why). Corner winding matches star-field.ts (0,1 = head; 2,3 = tail),
+ * pinned by shooting-stars.ts's cornerIsHead/particleAge/particleFade JS
+ * mirrors so this arithmetic has an off-GPU check the same way the star
+ * billboard corner derivation does. */
+ShaderStore.ShadersStore["ijShootVertexShader"] = `
+precision highp float;
+attribute vec3 position;      // spawn/head-at-age-0 point
+attribute vec3 starDir;       // unit direction of travel
+attribute vec4 shootMeta;     // speed, length, width, seed
+uniform mat4 view, projection;
+uniform float uTime;
+uniform float uCycleS;
+varying float vAlpha;
+varying float vHead;
+void main(){
+  int c = gl_VertexID % 4;
+  bool isHead = c < 2;
+  float speed = shootMeta.x, len = shootMeta.y, width = shootMeta.z, seed = shootMeta.w;
+  float age = mod(uTime + seed * uCycleS, uCycleS);
+  vec3 head = position + starDir * speed * age;
+  vec3 base = isHead ? head : head - starDir * len;
+
+  // "ref" is a reserved WGSL identifier (see the WGSL twin below) — named
+  // refAxis here too so both twins use the same identifier for the same
+  // quantity, matching the codebase's line-for-line-parallel convention.
+  vec3 refAxis = abs(starDir.z) > 0.999 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
+  vec3 right = normalize(cross(starDir, refAxis));
+  float side = (c == 0 || c == 3) ? -1.0 : 1.0;
+  float w = isHead ? width : width * 0.15; // taper to a near-point tail
+  vec3 worldPos = base + right * side * w * 0.5;
+
+  gl_Position = projection * view * vec4(worldPos, 1.0);
+
+  float t = clamp(age / uCycleS, 0.0, 1.0);
+  float fadeIn = clamp(t / 0.08, 0.0, 1.0);
+  float fadeOut = t <= 0.65 ? 1.0 : clamp(1.0 - (t - 0.65) / 0.35, 0.0, 1.0);
+  vAlpha = fadeIn * fadeOut;
+  vHead = isHead ? 1.0 : 0.0;
+}`;
+ShaderStore.ShadersStore["ijShootFragmentShader"] = `
+precision highp float;
+varying float vAlpha;
+varying float vHead;
+void main(){
+  // brighter, whiter at the head; dimmer, cooler toward the tail
+  vec3 col = mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 1.0, 0.98), vHead);
+  gl_FragColor = vec4(col, vAlpha * mix(0.35, 0.9, vHead));
+}`;
+
+// "meta" and "ref" are RESERVED WGSL IDENTIFIERS (part of the spec's
+// reserved-word list for future language extensions). Using either as an
+// attribute/variable name fails shader-module creation with a
+// GPUValidationError — and because Babylon submits a scene's draws in one
+// command buffer, that single invalid pipeline silently blanked the ENTIRE
+// frame (the star field included), not just this mesh. Caught via a real
+// device's console output (`WebGPU uncaptured error ... 'meta' is a reserved
+// keyword`), not by shader compilation alone — Babylon's isReady()/
+// materialReady checks do not surface this class of validation failure, and
+// neither TR-039's WGSL-compiles check nor the GLSL-only pixel-proof E2E
+// test (bundled Chromium has no real adapter — TR-039) exercised the actual
+// WGSL runtime path. See TR-045.
+ShaderStore.ShadersStoreWGSL["ijShootVertexShader"] = `
+attribute position : vec3<f32>;
+attribute starDir : vec3<f32>;
+attribute shootMeta : vec4<f32>;
+uniform view : mat4x4<f32>;
+uniform projection : mat4x4<f32>;
+uniform uTime : f32;
+uniform uCycleS : f32;
+varying vAlpha : f32;
+varying vHead : f32;
+
+@vertex
+fn main(input : VertexInputs) -> FragmentInputs {
+  let c : u32 = vertexInputs.vertexIndex % 4u;
+  let isHead : bool = c < 2u;
+  let speed : f32 = vertexInputs.shootMeta.x;
+  let len : f32 = vertexInputs.shootMeta.y;
+  let width : f32 = vertexInputs.shootMeta.z;
+  let seed : f32 = vertexInputs.shootMeta.w;
+  let age : f32 = (uniforms.uTime + seed * uniforms.uCycleS) % uniforms.uCycleS;
+  let head : vec3<f32> = vertexInputs.position + vertexInputs.starDir * speed * age;
+  let base : vec3<f32> = select(head - vertexInputs.starDir * len, head, isHead);
+
+  let refAxis : vec3<f32> = select(
+    vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(1.0, 0.0, 0.0), abs(vertexInputs.starDir.z) > 0.999);
+  let right : vec3<f32> = normalize(cross(vertexInputs.starDir, refAxis));
+  let side : f32 = select(1.0, -1.0, c == 0u || c == 3u);
+  let w : f32 = select(width * 0.15, width, isHead);
+  let worldPos : vec3<f32> = base + right * side * w * 0.5;
+
+  vertexOutputs.position = uniforms.projection * uniforms.view * vec4<f32>(worldPos, 1.0);
+
+  let t : f32 = clamp(age / uniforms.uCycleS, 0.0, 1.0);
+  let fadeIn : f32 = clamp(t / 0.08, 0.0, 1.0);
+  let fadeOut : f32 = select(clamp(1.0 - (t - 0.65) / 0.35, 0.0, 1.0), 1.0, t <= 0.65);
+  vertexOutputs.vAlpha = fadeIn * fadeOut;
+  vertexOutputs.vHead = select(0.0, 1.0, isHead);
+}`;
+ShaderStore.ShadersStoreWGSL["ijShootFragmentShader"] = `
+varying vAlpha : f32;
+varying vHead : f32;
+
+@fragment
+fn main(input : FragmentInputs) -> FragmentOutputs {
+  let col : vec3<f32> = mix(
+    vec3<f32>(0.75, 0.82, 1.0), vec3<f32>(1.0, 1.0, 0.98), fragmentInputs.vHead);
+  fragmentOutputs.color = vec4<f32>(col, fragmentInputs.vAlpha * mix(0.35, 0.9, fragmentInputs.vHead));
+}`;
+
 async function createEngine(canvas: HTMLCanvasElement): Promise<{
   engine: AbstractEngine;
   backend: "webgpu" | "webgl2";
@@ -546,6 +668,7 @@ class BabylonScene extends HTMLElement {
   private _engine?: AbstractEngine;
   private _scene?: Scene;
   private _stars?: Mesh;
+  private _shootMesh?: Mesh;
   private _ro?: ResizeObserver;
   private _init = false;
   private _lastFrameMs?: number;
@@ -672,9 +795,44 @@ class BabylonScene extends HTMLElement {
     mat.alphaMode = Constants.ALPHA_ADD;
     mesh.material = mat;
 
+    // B3: GPU-particle idle shooting stars — new work, not a port (the live
+    // engine has no equivalent). See shooting-stars.ts's header for why this
+    // is fully GPU-driven (zero per-frame CPU cost after this setup).
+    const shoot = buildShootingStars();
+    const shootMesh = new Mesh("shootingStars", scene);
+    this._shootMesh = shootMesh;
+    const shootVd = new VertexData();
+    shootVd.positions = shoot.positions;
+    shootVd.indices = shoot.indices;
+    shootVd.applyToMesh(shootMesh, false);
+    shootMesh.setVerticesBuffer(
+      new VertexBuffer(engine, shoot.dirs, "starDir", false, false, 3),
+    );
+    shootMesh.setVerticesBuffer(
+      new VertexBuffer(engine, shoot.meta, "shootMeta", false, false, 4),
+    );
+    shootMesh.alwaysSelectAsActiveMesh = true;
+    const shootMat = new ShaderMaterial(
+      "shootingStars",
+      scene,
+      { vertex: "ijShoot", fragment: "ijShoot" },
+      {
+        attributes: ["position", "starDir", "shootMeta"],
+        uniforms: ["view", "projection", "uTime", "uCycleS"],
+        needAlphaBlending: true,
+        shaderLanguage:
+          backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+      },
+    );
+    shootMat.setFloat("uCycleS", SHOOTING_STAR_CYCLE_S);
+    shootMat.backFaceCulling = false;
+    shootMat.alphaMode = Constants.ALPHA_ADD;
+    shootMesh.material = shootMat;
+
     let first = true;
     engine.runRenderLoop(() => {
       this._tickWarp(camera);
+      shootMat.setFloat("uTime", performance.now() / 1000);
       scene.render();
       this.renderFrames++; // engine-side proof the scene is actually drawing
       if (first) {
@@ -716,6 +874,7 @@ class BabylonScene extends HTMLElement {
    * the owner's devices during the B1 gate measurement. */
   sceneStats() {
     const m = this._stars;
+    const shoot = this._shootMesh;
     return {
       backend: this.backend,
       starCount: this.starCount,
@@ -726,6 +885,13 @@ class BabylonScene extends HTMLElement {
       totalVertices: m ? m.getTotalVertices() : -1,
       totalIndices: m ? m.getTotalIndices() : -1,
       materialReady: m?.material ? m.material.isReady(m) : false,
+      // B3: shooting-star particle diagnostics.
+      shootMeshReady: shoot ? shoot.isReady(true) : false,
+      shootTotalVertices: shoot ? shoot.getTotalVertices() : -1,
+      shootTotalIndices: shoot ? shoot.getTotalIndices() : -1,
+      shootMaterialReady: shoot?.material
+        ? shoot.material.isReady(shoot)
+        : false,
     };
   }
 

@@ -138,6 +138,36 @@ test("babylon renders the REAL catalog, not the procedural placeholder", async (
   expect((await readStats()).starCount).toBe(168959);
 });
 
+test("babylon: shooting-star GLSL twin compiles and renders on the default (WebGL2 fallback) project", async ({
+  page,
+}) => {
+  // B3. The bundled-chromium project (this test's environment) has no real
+  // WebGPU adapter (TR-039), so it always exercises the GLSL twin via the
+  // WebGL2 fallback — this is the path CI actually runs continuously, unlike
+  // webgpu-hardware.spec.ts's opt-in real-hardware WGSL check.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (
+          el as HTMLElement & { sceneStats(): Record<string, unknown> }
+        ).sceneStats(),
+      );
+
+  await expect
+    .poll(async () => (await readStats()).shootMeshReady, { timeout: 20000 })
+    .toBe(true);
+
+  const stats = await readStats();
+  expect(stats.shootMaterialReady).toBe(true);
+  // 24 particles * 4 verts, 24 * 6 indices — see shooting-stars.ts's default count.
+  expect(stats.shootTotalVertices).toBe(96);
+  expect(stats.shootTotalIndices).toBe(144);
+});
+
 test("babylon: RNG mission control button drives real travel through the real UI", async ({
   page,
 }) => {

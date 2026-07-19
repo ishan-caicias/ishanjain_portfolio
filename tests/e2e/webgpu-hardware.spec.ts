@@ -79,6 +79,19 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
   const browser = await realAdapterOrSkip();
   try {
     const page = await browser.newPage();
+    // TR-045: WebGPU shader-module creation does NOT throw synchronously on
+    // invalid WGSL — Babylon's isReady()/materialReady report true regardless,
+    // because the browser validates asynchronously and reports failures via
+    // an "uncaptured error" device event, which only ever surfaces as a
+    // console message. A shader using a RESERVED WGSL IDENTIFIER (`meta`,
+    // `ref` — real example, see git history) shipped with materialReady:true
+    // and zero thrown exceptions, yet silently blanked the entire frame. This
+    // listener is what would have caught it; materialReady alone did not.
+    const consoleIssues: string[] = [];
+    page.on("console", (m) => {
+      if (m.type() === "error" || m.type() === "warning")
+        consoleIssues.push(m.text());
+    });
     await page.goto(`${BASE_URL}/?engine=babylon`);
     await page.waitForSelector("babylon-scene", { timeout: 15000 });
 
@@ -93,6 +106,11 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
       .poll(async () => (await readStats(page)).starSource, { timeout: 20000 })
       .not.toBeNull();
 
+    // Let a few frames actually render before checking for async validation
+    // errors — the uncaptured-error event fires on first submission of the
+    // offending pipeline, not at shader-module creation time.
+    await page.waitForTimeout(1000);
+
     const stats = await readStats(page);
 
     // This is ADR-0003 condition 2's exact assertion, run in an automatable
@@ -103,6 +121,19 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
     expect(stats.starSource).toBe("catalog");
     expect(stats.starCount).toBe(168959);
     expect(Number(stats.activeIndices)).toBeGreaterThan(0);
+
+    // B3: the shooting-star WGSL twin compiles and its mesh is ready too — a
+    // second, independent shader pair on the same real adapter. A WGSL syntax
+    // error here (unlike a TS type error) only ever surfaces at shader-compile
+    // time, so this is the one place that would actually catch it.
+    expect(stats.shootMeshReady).toBe(true);
+    expect(stats.shootMaterialReady).toBe(true);
+    expect(Number(stats.shootTotalVertices)).toBeGreaterThan(0);
+
+    // The check that actually catches TR-045's class of bug: no WebGPU
+    // validation errors, no reserved-keyword/parse errors, nothing async that
+    // materialReady's synchronous check can't see.
+    expect(consoleIssues).toEqual([]);
 
     await page.close();
   } finally {
