@@ -19,6 +19,12 @@ jobs:
       - run: npm ci
       - run: npx prettier --check .
       - run: npx eslint .
+      # Mechanical documentation-drift gate (engine-default contradictions,
+      # ADR status vs index, TR index completeness, broken links in
+      # current-state docs). Added as a STEP in this existing job, not a new
+      # job, so the branch-protection ruleset's required status-check names
+      # stay valid (TR-034).
+      - run: npm run docs:check
 
   typecheck:
     name: Type Check

@@ -54,4 +54,6 @@
 | [TR-050](TR-050.md) | 2026-07-19 | B4 COMPLETE: impulse-driven impact camera shake + docking contact (steps 3-4)                      | READY TO PROCEED                    |
 | [TR-051](TR-051.md) | 2026-07-19 | B5 code-complete: unified quality-tier system (full/balanced/lite); mobile rows gated on owner     | READY TO PROCEED                    |
 | [TR-052](TR-052.md) | 2026-07-19 | B6 hardening: CI bundle+perf gates, a11y re-audit (real tabindex fix), cutover checklist, ADR-0006 | READY TO PROCEED                    |
-| [TR-053](TR-053.md) | 2026-07-19 | B6 cutover executed (ADR-0006 Accepted, babylon default) — BLOCKED: 2 legacy-harness tests red     | **BLOCKED** (owner disposition due) |
+| [TR-053](TR-053.md) | 2026-07-19 | B6 cutover executed (ADR-0006 Accepted, babylon default) — BLOCKED: 2 legacy-harness tests red     | ~~BLOCKED~~ superseded by TR-054    |
+| [TR-054](TR-054.md) | 2026-07-19 | TR-053 root-caused (SwiftShader context loss, not a broken harness) + 2 missed cutover pins fixed  | READY TO PROCEED                    |
+| [TR-055](TR-055.md) | 2026-07-19 | Docs drift audit + root CLAUDE.md + README rewrite + `docs:check` CI drift gate                    | READY TO PROCEED                    |

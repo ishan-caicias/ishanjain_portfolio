@@ -18,7 +18,8 @@ src/
 │   └── ui/          → Reusable presentational primitives
 ├── content/         → Domain data objects (typed, importable)
 ├── data/celestial/  → Ported Hipparcos/Gaia/SDSS catalog data
-├── lib/             → WebGL space-engine (custom element) + render helpers
+├── lib/             → Both 3D engines behind the dual-engine seam, + pure render/
+│                       flight/photometry modules (see "The Dual-Engine Seam" below)
 ├── layouts/         → Page-level HTML templates
 ├── pages/           → Route definitions
 ├── styles/          → Design tokens and global CSS
@@ -38,11 +39,11 @@ src/
 
 Three top-level islands ship JavaScript to the client:
 
-1. **SpaceScene** (`client:load`) - Mounts the `<space-engine>` WebGL custom element (168K+
-   real Hipparcos/Gaia/SDSS objects), plus the always-visible chrome under
-   `islands/space/` (HUD, mission control bar, hover tooltip, warp overlay, collector-card
-   and section-overlay dossiers, station sprites). Loaded immediately as it's the hero
-   background. Degrades to a static CSS starfield (`_domFallback()` in `space-engine.js`)
+1. **SpaceScene** (`client:load`) - Resolves which engine to mount via `engine-select.ts`
+   and mounts either `<babylon-scene>` (the default) or `<space-engine>` (archived), plus
+   the always-visible chrome under `islands/space/` (HUD, mission control bar, hover
+   tooltip, warp overlay, collector-card and section-overlay dossiers, station sprites).
+   Loaded immediately as it's the hero background. Degrades to a static CSS starfield
    if WebGL is unavailable, with navigation still functional.
 2. **AstronautMascot** (`client:idle`) - Floating SVG mascot. Hydrated when browser is idle.
 3. **MissionControl** (`client:visible`) - Footer quick-links panel. Hydrated when scrolled into view.
@@ -56,15 +57,40 @@ content/*.ts  →  sections/*.astro  →  Server-rendered HTML
                                           ↓
                               React islands hydrate on demand
                                           ↓
-                    SpaceScene dynamically imports space-engine.js +
-                    celestial-*.js catalog data (client-only, browser APIs)
+                    SpaceScene resolves the engine (engine-select.ts) and
+                    dynamically imports babylon-engine.ts (default) or
+                    space-engine.js (?engine=webgl), + celestial-*.js
+                    catalog data (client-only, browser APIs)
                                           ↓
-                    <space-engine> mounts, emits cosmos:* events
-                    (progress, ready, hover, select, warp, arrive, home)
+                    <babylon-scene> or <space-engine> mounts, emits cosmos:*
+                    events (progress, ready, select, warp, arrive, home —
+                    plus aim, hover, unhover, craft on the legacy engine only)
                                           ↓
                     SpaceScene listens and drives HUD/dossier/overlay state;
                     header nav links warp via document-level click delegation
 ```
+
+## The Dual-Engine Seam
+
+`src/lib/engine-select.ts` is the single decision point. Resolution order — **URL param →
+stored override → default** — mirrors `craft-tier.ts` and the quality-tier resolver.
+
+| Path            | Element                                 | Backend                 | Status                                                                                       |
+| --------------- | --------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------- |
+| default         | `<babylon-scene>` (`babylon-engine.ts`) | WebGPU, WebGL2 fallback | **Shipping** since the PF-09 B6 cutover ([ADR-0006](../adr/0006-babylon-default-cutover.md)) |
+| `?engine=webgl` | `<space-engine>` (`space-engine.js`)    | WebGL1                  | **Archived in place** — fully functional for one release as the rollback lever               |
+
+Both engines implement the same contract: the `cosmos:*` event bus and the imperative
+`travelTo` / `goHome` / `randomBody` / `setStations` surface that `SpaceScene` drives. They are
+**not** at feature parity — the Babylon path's known gaps are registered in
+[the cutover gap analysis](../analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md).
+Rollback procedure: [engine-cutover runbook](../runbooks/2026-07-19-engine-cutover-rollback.md).
+
+Babylon-path modules: `babylon-engine.ts` (scene, stars, warp state machine),
+`babylon-ship.ts` (hull, plume, shimmer), `babylon-asteroids.ts` (Havok belt),
+`babylon-tiers.ts` (full/balanced/lite budgets), `nebula-field.ts` (volumetric raymarch,
+GLSL/WGSL twins), plus engine-agnostic `ship-dynamics.ts`, `star-field.ts`,
+`star-catalog.ts`, `perf-telemetry.ts`.
 
 ## Theme System
 
@@ -87,6 +113,12 @@ Focus on React islands since they contain the interactive logic:
 - **MissionControl**: Panel toggle, keyboard accessibility, clipboard API
 - **spaceHelpers.ts**: Pure computation logic extracted from the space scene (formatting,
   rarity colours, field-star dossier synthesis) so it's testable independent of React/WebGL
+- **Pure engine modules**: flight dynamics, star photometry/billboard packing, catalog
+  decode, nebula raymarch mirrors, plume/asteroid builders, tier + craft + engine
+  resolvers — all engine-agnostic and testable without a GPU
+
+Shader source is unit-tested as **strings** (both GLSL and WGSL twins) — this is what
+catches reserved-identifier and twin-divergence defects that no compiler cross-checks.
 
 ### E2E Tests (Playwright)
 
@@ -95,7 +127,17 @@ Focus on integration and user journeys:
 - **Navigation**: Section scrolling (classic view), mobile menu, skip link
 - **Space Scene**: Mount + live catalog data, travel-mode-by-default, nav-link warp →
   dossier open/close, RNG travel, travel/scroll mode toggle, WebGL fallback, reduced motion
-- **Accessibility**: axe-core scan, heading hierarchy, keyboard navigation, semantic landmarks
+- **Engine seam**: default mounts Babylon, `?engine=webgl` mounts the archived engine,
+  catalog identity, tier resolution, nebula/ship/Havok integration, pixel proofs
+- **Accessibility**: axe-core scan on **both** engine paths, heading hierarchy, keyboard
+  navigation, semantic landmarks
+- **Console hygiene**: `page-load-console.spec.ts` is the only spec listening from
+  navigation start — the regression guard for CSP violations and dead directives
+- **Real hardware**: `webgpu-hardware.spec.ts` (local only, `channel: "chrome"`) validates
+  the WGSL/WebGPU path on a real GPU; skips when no adapter is available
+
+Current counts live in [../test-reports/README.md](../test-reports/README.md), not here —
+counts drift, indexes don't.
 
 ### Why Not Test Astro Components?
 
@@ -105,10 +147,16 @@ Astro components render to static HTML at build time. Testing them would effecti
 
 - **Zero JS by default**: Astro ships no JavaScript for static sections
 - **Islands architecture**: React bundles are code-split per component
-- **WebGL space engine**: Adaptive quality tiers, DPR clamp, and a no-WebGL DOM fallback;
-  the ~7MB initial texture/catalog payload lazy-loads DSO imagery only on arrival (the
-  bulk of the 38MB asset folder never loads unless visited) - see
-  [delivery-plan/PF-07-space-portfolio-webgl.md](delivery-plan/PF-07-space-portfolio-webgl.md)
+- **Quality tiers**: the Babylon path resolves `full`/`balanced`/`lite` once at boot from
+  backend + device signals (`babylon-tiers.ts`), gating star halo, shooting-star count,
+  nebula raymarch steps, asteroid count and the shimmer pass; the archived WebGL engine
+  has its own adaptive governor. Both clamp DPR and keep a no-WebGL DOM fallback - see
+  [../delivery-plan/PF-07-space-portfolio-webgl.md](../delivery-plan/PF-07-space-portfolio-webgl.md)
+- **Lazy payloads**: Babylon core, `@babylonjs/loaders`, the Havok WASM and the craft GLBs
+  are lazy chunks reached only on their own path; DSO imagery loads only on arrival
+- **CI budget gates**: `npm run budget:check` enforces total JS, largest-single-chunk (the
+  barrel-import canary) and WASM ceilings; `tests/e2e/perf-budgets.spec.ts` guards
+  CI-class startup/fps regression — neither substitutes for per-device budget rows
 - **requestAnimationFrame**: Paused/throttled when tab is hidden
 - **prefers-reduced-motion**: Halves/shortens engine animation durations and clamps every
   DC-layer CSS keyframe via a blanket rule in `global.css`
@@ -138,7 +186,16 @@ user input, so hardening is browser-enforced:
 - **Response headers**: `public/_headers` (Netlify/Cloudflare Pages) — `nosniff`, HSTS,
   `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, COOP/CORP.
 - **Static-CSS discipline**: inline `<style>` must not be injected at runtime (it can't be hashed
-  by the CSP) — put such CSS in `global.css` instead.
+  by the CSP) — put such CSS in `global.css` instead. React islands must also never SSR a
+  `style="…"` attribute; style attributes are never coverable by hashes (TR-016).
+- **Scoped capability directives**, each with recorded rationale — do not strip:
+  `script-src 'self' 'wasm-unsafe-eval'` (meshopt WASM, not JS eval),
+  `connect-src 'self' blob:` and `worker-src 'self' blob:` (Babylon unpacks GLB textures to
+  blob URLs and fetches them on the WebGPU path — omitting this loads the hull
+  geometry-less on WebGPU only, while WebGL2 passes), `img-src 'self' data: blob:`.
+- **`astro.config.mjs` is the single source of CSP truth.** `public/_headers` deliberately
+  carries no CSP; `netlify.toml`'s commented header-CSP is a standing hazard that must
+  mirror astro.config if ever enabled.
 
 Full OWASP audit and rationale: [`../security/`](../security/). Upgrade decisions:
 [`../adr/0001-dependency-and-framework-upgrade.md`](../adr/0001-dependency-and-framework-upgrade.md).

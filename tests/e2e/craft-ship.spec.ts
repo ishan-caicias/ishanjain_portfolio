@@ -16,7 +16,10 @@ for (const tier of ["1k", "2k"] as const) {
   test(`?craft=${tier} loads the textured craft without errors`, async ({
     page,
   }) => {
-    await page.goto(`/?craft=${tier}`);
+    // engine=webgl per this file's archival pin (TR-054: this goto was the one
+    // the ADR-0006 cutover missed, so it still resolved to the Babylon default
+    // and waited forever for a <space-engine> that never mounts)
+    await page.goto(`/?craft=${tier}&engine=webgl`);
     // Listeners attach post-goto, matching the suite's established convention
     // (space-scene.spec.ts): page-load-time noise is out of scope here — the
     // craft-specific failure detector is the data-craft-state assertion below.

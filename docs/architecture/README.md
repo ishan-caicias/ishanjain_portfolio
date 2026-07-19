@@ -4,10 +4,10 @@ System and solution architecture for the space portfolio. Design decisions that
 shape the codebase live here; the visual diagrams that illustrate them are in
 [`diagrams/`](diagrams/).
 
-| Document                                                                               | Scope                                                                                             |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [overview.md](overview.md)                                                             | Astro islands architecture, domain-driven `src/` layout, component boundaries, WebGL space-engine |
-| [graphics-physics-engine-evaluation](2026-07-18-graphics-physics-engine-evaluation.md) | 2026-07-18 evaluation: Babylon+Havok vs Three+Rapier; Godot/PlayCanvas ruled out; spike framing   |
+| Document                                                                               | Scope                                                                                               |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| [overview.md](overview.md)                                                             | Astro islands architecture, domain-driven `src/` layout, component boundaries, the dual-engine seam |
+| [graphics-physics-engine-evaluation](2026-07-18-graphics-physics-engine-evaluation.md) | 2026-07-18 evaluation: Babylon+Havok vs Three+Rapier; Godot/PlayCanvas ruled out; spike framing     |
 
 ## Diagrams (`diagrams/`)
 

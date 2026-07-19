@@ -25,7 +25,8 @@ gated volumetric nebulae (WebGPU compute / WebGL2 fragment), the GLB hull with f
 thrusters + heat shimmer + docking contact, the Havok asteroid field with proximity slowdown,
 deflection, impact shake — all behind a formal quality-tier system (full/balanced/lite) with
 reduced-motion and no-WebGL parity, 216 unit / 66 E2E green, CI bundle + perf-regression gates
-(TR-027 … TR-052). The legacy WebGL1 engine remains the shipping default.
+(TR-027 … TR-052). _(Context written pre-flip: the legacy WebGL1 engine was the shipping
+default at that point. It is now archived behind `?engine=webgl` — see the Status header.)_
 
 ## Decision (upon acceptance)
 

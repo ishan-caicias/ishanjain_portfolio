@@ -1,7 +1,16 @@
 # PF-09 Babylon + Havok Realism Engine
 
 **Date:** 2026-07-18
-**Status:** IN PROGRESS — B0 complete ([TR-027](../test-reports/TR-027.md)) · **B1 gate decided:
+**Status:** **B0–B6 DELIVERED — cutover executed 2026-07-19; B6 not yet closed.** The default
+engine is Babylon ([ADR-0006](../adr/0006-babylon-default-cutover.md) Accepted,
+[TR-053](../test-reports/TR-053.md)/[TR-054](../test-reports/TR-054.md)). Two items remain
+before B6 closes: the **post-flip owner device pass** (checklist §A, accepted risk at flip) and
+disposition of the **cutover gap analysis**
+([GAP-01/GAP-02](../analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md) — curated
+destination bodies and the photographic DSO layer are not rendered on the Babylon path).
+_Phase history below is append-only; read it as a record, not as current state._
+
+B0 complete ([TR-027](../test-reports/TR-027.md)) · **B1 gate decided:
 CONDITIONAL GO** ([ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md)) on desktop evidence ·
 **mobile condition DISCHARGED 2026-07-19** on real Android (Babylon 60 fps / 678 ms vs current
 60 fps / 1745 ms, budget ≥ 40 fps · ≤ 4.0 s) — the primary open risk is closed; conditions 2
@@ -26,12 +35,13 @@ docking contact: [TR-048](../test-reports/TR-048.md), [TR-049](../test-reports/T
 knob; mobile budget rows gated on the owner's devices. **B6 desk items DONE 2026-07-19**
 ([TR-052](../test-reports/TR-052.md)) — CI bundle+perf gates, a11y re-audit (real tabindex fix),
 cutover checklist + rollback runbook + [ADR-0006](../adr/0006-babylon-default-cutover.md)
-(Proposed). **PF-09 now blocks solely on the owner device pass + the §B3 disposition; then the
-one-line cutover.**
+(then Proposed). **CUTOVER EXECUTED 2026-07-19** — §B3 dispositioned Option A and the §A device
+rows accepted as post-flip risk by owner decision; ADR-0006 Accepted and the default flipped
+([TR-053](../test-reports/TR-053.md), [TR-054](../test-reports/TR-054.md)).
 **Supersedes:** [ADR-0002](../adr/0002-in-engine-glb-ship-renderer.md) (zero runtime 3D deps) —
 conditionally, per [ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md), written at the B1
-gate from measured desktop data. The current engine remains the shipping default until the
-mobile condition is discharged.
+gate from measured desktop data. _(That condition was discharged 2026-07-19 on real Android;
+the legacy WebGL1 engine is now archived behind `?engine=webgl`, not the shipping default.)_
 **Basis:** [Graphics/physics engine evaluation + Babylon cost addendum](../architecture/2026-07-18-graphics-physics-engine-evaluation.md),
 building on PF-08 ([DELIVERED](PF-08-flight-v3.md), 67 unit / 48 E2E).
 

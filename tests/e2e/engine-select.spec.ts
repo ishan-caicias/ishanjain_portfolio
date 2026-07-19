@@ -788,14 +788,23 @@ test("babylon: idle-at-home view drifts slowly rather than staying frozen (owner
   expect(delta).toBeGreaterThan(0);
 });
 
+// Engine-agnostic since the ADR-0006 cutover (TR-054): this test asserts the
+// OPT-IN MECHANISM, not which renderer is mounted, so it follows the default
+// rather than being pinned to the archived engine. It previously hard-coded
+// `space-engine` + "ENGINE webgl" and so silently stopped exercising the
+// default the moment that default became Babylon.
+// The Babylon line carries an extra backend segment ("ENGINE babylon · WEBGL2
+// · TIER full") that the legacy line does not, hence the tolerant middle.
+const PERF_OVERLAY = /ENGINE (webgl|babylon).*· TIER/;
+
 test("perf overlay is opt-in via ?perf=1", async ({ page }) => {
   await page.goto("/");
-  await page.waitForSelector("space-engine");
-  await expect(page.getByText(/ENGINE webgl · TIER/)).toHaveCount(0);
+  await page.waitForSelector("space-engine, babylon-scene");
+  await expect(page.getByText(PERF_OVERLAY)).toHaveCount(0);
 
   await page.goto("/?perf=1");
-  await page.waitForSelector("space-engine");
-  await expect(page.getByText(/ENGINE webgl · TIER/)).toBeVisible({
+  await page.waitForSelector("space-engine, babylon-scene");
+  await expect(page.getByText(PERF_OVERLAY)).toBeVisible({
     timeout: 10000,
   });
 });

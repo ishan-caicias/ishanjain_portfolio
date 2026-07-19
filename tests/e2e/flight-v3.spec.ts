@@ -21,6 +21,16 @@
  * stays covered wall-clock by space-scene.spec.ts and the drag spec below.
  * Each spec also waits for the engine's nav stations to register: travelTo
  * before SpaceScene calls setStations() is a silent no-op.
+ *
+ * The harness ALSO requires a live GL context (TR-054). `_tick()` no-ops
+ * outright while the context is lost (space-engine.js:1970), and the synthetic
+ * loop is synchronous — a context lost mid-loop can never be restored inside
+ * it, because restoration is delivered as a DOM event. Headless SwiftShader
+ * drops and restores this page's context ~2 s in (~1 s outage, engine recovers
+ * correctly via _rebuildGL), which is precisely when these specs used to begin
+ * ticking: every tick no-opped, the warp state machine froze in "aim", and the
+ * specs reported 0 warp samples. That read as "the aim math doesn't advance
+ * under manual ticking" — it was an unstated precondition, not broken math.
  */
 import { expect, test, type Page } from "@playwright/test";
 
@@ -35,6 +45,45 @@ const waitForStations = (page: Page) =>
     { timeout: 15000 },
   );
 
+/** Gate the synthetic-tick harness on a CONTINUOUSLY healthy GL context.
+ * Any loss resets the stability window, so this clears only once the context
+ * has survived a span longer than the observed SwiftShader outage — and after
+ * the craft load (which shares the context) has settled either way. */
+const waitForLiveContext = (page: Page) =>
+  page.waitForFunction(
+    () => {
+      const w = window as unknown as { __ctxStableFrom?: number };
+      const en = document.querySelector("space-engine") as unknown as {
+        gl?: { isContextLost: () => boolean } | null;
+        _ctxLost?: boolean;
+        dataset?: DOMStringMap;
+      } | null;
+      const healthy =
+        !!en &&
+        !!en.gl &&
+        !en._ctxLost &&
+        !en.gl.isContextLost() &&
+        en.dataset?.craftState !== "loading";
+      if (!healthy) {
+        w.__ctxStableFrom = 0;
+        return false;
+      }
+      const t = performance.now();
+      if (!w.__ctxStableFrom) {
+        w.__ctxStableFrom = t;
+        return false;
+      }
+      return t - w.__ctxStableFrom > 1500;
+    },
+    { timeout: 25000 },
+  );
+
+/** Both preconditions, in the order the engine satisfies them. */
+const waitForTickableEngine = async (page: Page) => {
+  await waitForStations(page);
+  await waitForLiveContext(page);
+};
+
 /** Run a full synthetic journey to st-about at a simulated 60 fps and return
  * everything the specs assert on. Resumes the live rAF loop afterwards. */
 const flyToAbout = (page: Page) =>
@@ -48,8 +97,16 @@ const flyToAbout = (page: Page) =>
       pitch: number;
       arrivedId: string | null;
       warp: { mode: string };
+      gl: { isContextLost: () => boolean } | null;
+      _ctxLost: boolean;
+      _frame: number;
     };
     cancelAnimationFrame(en._raf);
+    // _tick() is a no-op while the context is lost; a loss here would silently
+    // produce zero samples, so surface it as a first-class result (TR-054).
+    const ctxDown = () => !en.gl || en._ctxLost || en.gl.isContextLost();
+    let ctxLostDuringRun = ctxDown();
+    const framesAtStart = en._frame;
     const phases: string[] = [];
     const arrived: string[] = [];
     const onWarp = ((e: CustomEvent) => {
@@ -69,6 +126,10 @@ const flyToAbout = (page: Page) =>
     for (let f = 0; f < 400 && !en.arrivedId; f++) {
       now += 16;
       en._tick(now);
+      if (ctxDown()) {
+        ctxLostDuringRun = true;
+        break;
+      }
       if (en.warp.mode === "aim") {
         aimYaws.push(en.yaw);
         aimPitches.push(en.pitch);
@@ -82,6 +143,10 @@ const flyToAbout = (page: Page) =>
     const spread = (a: number[]) =>
       a.length ? Math.max(...a) - Math.min(...a) : -1;
     return {
+      ctxLostDuringRun,
+      // proof the synthetic ticks actually reached the render loop rather than
+      // being swallowed by the lost-context guard
+      ticksApplied: en._frame - framesAtStart,
       phases,
       arrived,
       arrivedId: en.arrivedId,
@@ -100,9 +165,13 @@ test("a full journey emits the flight sequence burn → flip → brake → arriv
   page.on("pageerror", (err) => pageErrors.push(err.message));
   await page.goto("/?engine=webgl");
   await page.waitForSelector("space-engine");
-  await waitForStations(page);
+  await waitForTickableEngine(page);
 
   const r = await flyToAbout(page);
+
+  // the harness only means anything if the ticks reached the render loop
+  expect(r.ctxLostDuringRun).toBe(false);
+  expect(r.ticksApplied).toBeGreaterThan(100);
 
   // ordered flight profile: accelerate, flip at midpoint, decelerate, arrive
   expect(r.phases.indexOf("accel")).toBe(0);
@@ -120,9 +189,13 @@ test("chase camera pans the look mid-warp without any input", async ({
 }) => {
   await page.goto("/?engine=webgl");
   await page.waitForSelector("space-engine");
-  await waitForStations(page);
+  await waitForTickableEngine(page);
 
   const r = await flyToAbout(page);
+
+  // the harness only means anything if the ticks reached the render loop
+  expect(r.ctxLostDuringRun).toBe(false);
+  expect(r.ticksApplied).toBeGreaterThan(100);
 
   // the whole 2.4 s warp was observed frame-by-frame at simulated 60 fps
   expect(r.warpSamples).toBeGreaterThanOrEqual(100);
@@ -134,12 +207,16 @@ test("launch points at the click: camera holds during aim while the ship turns",
 }) => {
   await page.goto("/?engine=webgl");
   await page.waitForSelector("space-engine");
-  await waitForStations(page);
+  await waitForTickableEngine(page);
 
   // F2 amendment: the aim phase no longer eases the camera onto the target —
   // the ship's orientation damp does the turning. The view holds exactly
   // still for the whole 900 ms aim window, then the warp chase takes over.
   const r = await flyToAbout(page);
+
+  // the harness only means anything if the ticks reached the render loop
+  expect(r.ctxLostDuringRun).toBe(false);
+  expect(r.ticksApplied).toBeGreaterThan(100);
 
   expect(r.aimSamples).toBeGreaterThanOrEqual(50); // ~56 frames of aim
   expect(r.aimYawSpread).toBeLessThan(1e-9);

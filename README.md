@@ -28,17 +28,20 @@ npm run dev        # Start dev server at localhost:4321
 | `npm run test:e2e`      | Run E2E tests (Playwright; build first)        |
 | `npm run test:e2e:ui`   | Run E2E tests with Playwright UI               |
 | `npm run assets:craft`  | Rebuild the tiered ship GLB assets             |
+| `npm run budget:check`  | CI bundle-size gate (needs `dist/`)            |
+| `npm run docs:check`    | Documentation-drift gate (indexes, links)      |
 
 ## Tech Stack
 
 - **Framework**: [Astro](https://astro.build) 7 (static output, islands architecture)
 - **Interactive Islands**: [React](https://react.dev) 19 (hydrated on demand)
 - **Styling**: [TailwindCSS](https://tailwindcss.com) v4 (CSS-first `@theme` tokens)
-- **3D — shipping default**: bespoke WebGL1 engine (`src/lib/space-engine.js` custom element),
-  168,959 real Hipparcos/Gaia/SDSS objects
-- **3D — migration target**: [Babylon.js](https://www.babylonjs.com) 8 on **WebGPU** (WebGL2
-  fallback), behind `?engine=babylon` — volumetric compute-raymarched nebulae, GLB ship with
-  thruster/shimmer FX, and a [Havok](https://www.havok.com) physics asteroid field (lazy WASM)
+- **3D — shipping default**: [Babylon.js](https://www.babylonjs.com) 8 on **WebGPU** (WebGL2
+  fallback) — 168,959 real Hipparcos/Gaia/SDSS objects as photometric billboards, volumetric
+  compute-raymarched nebulae, GLB ship with thruster/shimmer FX, and a
+  [Havok](https://www.havok.com) physics asteroid field (lazy WASM)
+- **3D — archived legacy**: bespoke WebGL1 engine (`src/lib/space-engine.js` custom element),
+  still shipped behind `?engine=webgl` as the cutover rollback lever
 - **Animation**: CSS animations + [Motion](https://motion.dev) (React islands)
 - **Testing**: [Vitest](https://vitest.dev) + React Testing Library + [Playwright](https://playwright.dev)
 - **CI**: GitHub Actions (lint → typecheck → unit test → build → E2E)
@@ -72,8 +75,8 @@ src/
 ├── content/             # Typed data (experience, skills, etc.)
 ├── data/celestial/      # PNG-packed Hipparcos/Gaia/SDSS catalog data (generated)
 ├── lib/                 # Engines + pure modules:
-│   │                    #   space-engine.js (WebGL1, default)
-│   │                    #   babylon-engine.ts (Babylon/WebGPU path)
+│   │                    #   babylon-engine.ts (Babylon/WebGPU — the default)
+│   │                    #   space-engine.js (WebGL1 — archived, ?engine=webgl)
 │   │                    #   ship-dynamics, star-field/catalog, nebula-field,
 │   │                    #   babylon-ship, babylon-asteroids, craft-tier, engine-select
 ├── layouts/             # BaseLayout with SEO + meta
@@ -88,12 +91,17 @@ project's source of truth for decisions and verification history.
 
 ## Interactive Features
 
-- **Space Scene**: star-flight hero with relativistic warp travel between portfolio sections,
-  each docked to a real celestial object. Degrades to a static CSS starfield with full
-  navigation if WebGL is unavailable.
-- **Babylon path** (in migration): cinematic chase-camera journeys with accel/flip/decel burns,
-  a GLB fighter with layered thruster plume + heat shimmer, volumetric nebulae that reveal on
-  approach, and a rigid-body asteroid belt with idle collisions (Havok).
+- **Space Scene**: star-flight hero with warp travel between portfolio sections, each docked to
+  a real celestial object. Degrades to a static CSS starfield with full navigation if WebGL is
+  unavailable.
+- **Cinematic flight** (default Babylon path): chase-camera journeys with accel/flip/decel
+  burns, a GLB fighter with layered thruster plume + heat shimmer, volumetric nebulae that
+  reveal on approach, and a rigid-body asteroid belt with idle collisions (Havok).
+- **Known post-cutover deltas**: the Babylon path does not yet render curated destination
+  bodies or the photographic DSO layer, and has no field-star hover, station sprite markers, or
+  free-look drag — all tracked in
+  [the cutover gap analysis](docs/analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md).
+  `?engine=webgl` still has them.
 - **Classic View Toggle**: switch between travel mode and a traditional scrolling page.
 - **Astronaut Mascot**: floating SVG that drifts toward active sections (desktop only).
 - **Mission Control**: footer panel with quick links (Resume, LinkedIn, GitHub, Copy Bio).
