@@ -7,6 +7,14 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  ARRIVE_STANDOFF,
+  bodyDepth,
+  bodyWorldPosition,
+  raDecToDir,
+  warpDurationForLy,
+  warpEase,
+  WARP_MAX_MS,
+  WARP_MIN_MS,
   buildPlumeVertices,
   CHASE_ELEVATION,
   CHASE_OFFSET_REST,
@@ -441,5 +449,127 @@ describe("P3 arrival rim tint", () => {
     expect(rimColorAt(9)).toEqual([...RIM_ARRIVED]);
     const mid = rimColorAt(0.5);
     expect(mid[0]).toBeCloseTo((RIM_COOL[0] + RIM_ARRIVED[0]) / 2, 10);
+  });
+});
+
+describe("PF-09 B2 step 3 — shared body-position math", () => {
+  // Pinned against space-engine.js's private raDecToDir/_buildBodies formulas
+  // (not importable — a plain script, not a module) so the Babylon camera
+  // travels to the exact same coordinates the live engine's star field and
+  // bodies already occupy. A drift here silently sends the Babylon camera to
+  // the wrong place while every unit test of the destination math still passes
+  // in isolation — that's exactly the failure mode this test exists to catch.
+  it("raDecToDir matches the live engine's convention at cardinal points", () => {
+    expect(raDecToDir(0, 0)).toEqual([1, 0, 0]);
+    const dec90 = raDecToDir(0, 90);
+    expect(dec90[0]).toBeCloseTo(0, 10);
+    expect(dec90[1]).toBeCloseTo(0, 10);
+    expect(dec90[2]).toBeCloseTo(1, 10);
+    const ra90 = raDecToDir(90, 0);
+    expect(ra90[0]).toBeCloseTo(0, 10);
+    expect(ra90[1]).toBeCloseTo(1, 10);
+  });
+
+  it("raDecToDir always returns a unit vector", () => {
+    for (const [ra, dec] of [
+      [37, 19],
+      [250, -20.5],
+      [8, 14.2],
+      [-40, -85],
+    ]) {
+      const [x, y, z] = raDecToDir(ra, dec);
+      expect(Math.hypot(x, y, z)).toBeCloseTo(1, 10);
+    }
+  });
+
+  it("bodyDepth matches space-engine.js's _buildBodies formula exactly", () => {
+    expect(bodyDepth(0)).toBeCloseTo(150 + 128 * Math.log10(0.001 + 1.5), 10);
+    expect(bodyDepth(null)).toBe(bodyDepth(0)); // (ly || 0.001) — null/0 fold together
+    expect(bodyDepth(8.6)).toBeCloseTo(150 + 128 * Math.log10(8.6 + 1.5), 10);
+  });
+
+  it("bodyDepth increases monotonically with distance", () => {
+    expect(bodyDepth(1000)).toBeGreaterThan(bodyDepth(100));
+    expect(bodyDepth(100)).toBeGreaterThan(bodyDepth(1));
+  });
+
+  it("bodyWorldPosition places pos along dir at the computed depth", () => {
+    const { dir, pos, depth } = bodyWorldPosition(37.3, 19.2, 444);
+    expect(depth).toBeCloseTo(bodyDepth(444), 10);
+    expect(pos[0]).toBeCloseTo(dir[0] * depth, 8);
+    expect(pos[1]).toBeCloseTo(dir[1] * depth, 8);
+    expect(pos[2]).toBeCloseTo(dir[2] * depth, 8);
+  });
+
+  it("ARRIVE_STANDOFF matches the live engine's parked distance", () => {
+    expect(ARRIVE_STANDOFF).toBe(38);
+  });
+});
+
+describe("PF-09 B2 step 4 — warpEase", () => {
+  it("is 0 at t=0, 1 at t=1, 0.5 at the midpoint", () => {
+    expect(warpEase(0)).toBe(0);
+    expect(warpEase(1)).toBe(1);
+    expect(warpEase(0.5)).toBeCloseTo(0.5, 10);
+  });
+
+  it("is monotonically non-decreasing across [0,1]", () => {
+    let prev = -Infinity;
+    for (let t = 0; t <= 1; t += 0.05) {
+      const v = warpEase(t);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      prev = v;
+    }
+  });
+
+  it("accelerates into the midpoint and decelerates out of it (S-curve)", () => {
+    // ease-in-out: the first quarter covers less ground than the second
+    // quarter, and by symmetry the same holds mirrored at the far end.
+    expect(warpEase(0.25)).toBeLessThan(warpEase(0.5) - warpEase(0.25));
+    expect(1 - warpEase(0.75)).toBeLessThan(warpEase(0.75) - warpEase(0.5));
+  });
+});
+
+describe("PF-09 B2 step 5 — warpDurationForLy (new formula, not a port)", () => {
+  it("returns the floor for ly <= 0 (home / solar-system bodies)", () => {
+    expect(warpDurationForLy(0)).toBe(WARP_MIN_MS);
+    expect(warpDurationForLy(-5)).toBe(WARP_MIN_MS);
+    expect(warpDurationForLy(0.0000158)).toBeGreaterThanOrEqual(WARP_MIN_MS);
+  });
+
+  it("is monotonically non-decreasing with distance", () => {
+    // Real catalog values, ascending: Moon, Sun, Sirius, Aldebaran, Pleiades,
+    // Betelgeuse, Orion Nebula, a distant SDSS galaxy, the catalog's max.
+    const lys = [
+      0.0000158, 8.6, 65, 444, 548, 1344, 237_000_000, 13_000_000_000,
+    ];
+    let prev = -Infinity;
+    for (const ly of lys) {
+      const d = warpDurationForLy(ly);
+      expect(d).toBeGreaterThanOrEqual(prev);
+      prev = d;
+    }
+  });
+
+  it("stays within [WARP_MIN_MS, WARP_MAX_MS] across the catalog's full range", () => {
+    for (const ly of [0, 1, 8.6, 1344, 1e6, 1e9, 13_000_000_000]) {
+      const d = warpDurationForLy(ly);
+      expect(d).toBeGreaterThanOrEqual(WARP_MIN_MS);
+      expect(d).toBeLessThanOrEqual(WARP_MAX_MS);
+    }
+  });
+
+  it("clamps to the ceiling for ultra-distant catalog entries (confirmed up to 13B ly)", () => {
+    expect(warpDurationForLy(13_000_000_000)).toBe(WARP_MAX_MS);
+    expect(warpDurationForLy(1e15)).toBe(WARP_MAX_MS); // never exceeds it
+  });
+
+  it("spends visibly more time on Orion Nebula (1,344 ly) than on Sirius (8.6 ly)", () => {
+    // The delivery plan's own example: "near hops are quick; multi-hundred-ly
+    // journeys spend longer at cruise" — checked against real named bodies,
+    // not synthetic values.
+    const sirius = warpDurationForLy(8.6);
+    const orionNebula = warpDurationForLy(1344);
+    expect(orionNebula).toBeGreaterThan(sirius + 500);
   });
 });

@@ -9,6 +9,7 @@ import {
   CORNERS,
   LIVE_STAR_COUNT,
 } from "@/lib/star-field";
+import { unpackTypeAndColour } from "@/lib/star-catalog";
 
 describe("buildStarField", () => {
   it("produces the requested count with matching buffer lengths", () => {
@@ -103,12 +104,25 @@ describe("buildStarField", () => {
       );
       expect(d).toBeLessThanOrEqual(radius + 1e-3);
       expect(d).toBeGreaterThan(0);
-      const size = f.meta[i * 2];
-      const colorT = f.meta[i * 2 + 1];
-      expect(size).toBeGreaterThanOrEqual(0.3);
-      expect(size).toBeLessThanOrEqual(1.0);
-      expect(colorT).toBeGreaterThanOrEqual(0);
-      expect(colorT).toBeLessThanOrEqual(1);
+      // B2 step 2: meta now carries catalog quantities, not a size factor.
+      const magNorm = f.meta[i * 2];
+      const { type, colour } = unpackTypeAndColour(f.meta[i * 2 + 1]);
+      expect(magNorm).toBeGreaterThanOrEqual(0);
+      expect(magNorm).toBeLessThanOrEqual(1);
+      expect(type).toBe(0); // the placeholder is all plain stars
+      expect(colour).toBeGreaterThanOrEqual(0);
+      expect(colour).toBeLessThanOrEqual(1);
     }
+  });
+
+  // The placeholder's actual defect was not its positions but its uniform
+  // brightness: every star fully lit read as ~6x the live engine's density
+  // (TR-037). The fallback must approximate the real faint-weighted shape, or
+  // an asset failure quietly reintroduces the bug it was written to fix.
+  it("fallback magnitudes are faint-weighted, not uniform", () => {
+    const f = buildStarField(20000, 400, 11);
+    let faint = 0;
+    for (let i = 0; i < f.count; i++) if (f.meta[i * 2] < 0.25) faint++;
+    expect(faint / f.count).toBeGreaterThan(0.5);
   });
 });

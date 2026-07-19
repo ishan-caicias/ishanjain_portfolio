@@ -442,6 +442,118 @@ export function viewToNdc(
   return [v[0] / (depth * tanHalf * aspect), v[1] / (depth * tanHalf)];
 }
 
+/* ---------- PF-09 B2 step 3: shared body-position math ---------- */
+
+/** Ra/Dec (degrees) -> unit direction vector. Matches space-engine.js's private
+ * `raDecToDir` exactly (same sky-to-xyz convention the star catalog assets were
+ * baked with — see star-catalog.ts), so a body placed here sits in the same
+ * coordinate space as the star field either engine draws. Not re-exported from
+ * space-engine.js (a plain script, not a module) — duplicated deliberately
+ * rather than refactoring the live/default-path engine for this. */
+export function raDecToDir(ra: number, dec: number): [number, number, number] {
+  const d2r = Math.PI / 180;
+  const cd = Math.cos(dec * d2r);
+  return [
+    cd * Math.cos(ra * d2r),
+    cd * Math.sin(ra * d2r),
+    Math.sin(dec * d2r),
+  ];
+}
+
+/** Logarithmic world-space depth for a body at distance `ly`. Matches
+ * space-engine.js's `_buildBodies` exactly, so a body's travel distance reads
+ * the same across engines. */
+export function bodyDepth(ly: number | null | undefined): number {
+  return 150 + 128 * Math.log10((ly || 0.001) + 1.5);
+}
+
+export interface BodyPlacement {
+  dir: [number, number, number];
+  pos: [number, number, number];
+  depth: number;
+}
+
+/** Places a catalog body (ra, dec, ly) in world space. */
+export function bodyWorldPosition(
+  ra: number,
+  dec: number,
+  ly: number | null | undefined,
+): BodyPlacement {
+  const dir = raDecToDir(ra, dec);
+  const depth = bodyDepth(ly);
+  return {
+    dir,
+    pos: [dir[0] * depth, dir[1] * depth, dir[2] * depth],
+    depth,
+  };
+}
+
+/** How far short of a body's exact position the camera parks — matches
+ * space-engine.js's travelTo (arriving exactly at the point sprite would clip
+ * through it). */
+export const ARRIVE_STANDOFF = 38;
+
+/** Warp-path easing (ease-in-out quad) — the live engine's accel/decel curve
+ * for the ship's world-space position along a warp (space-engine.js's private
+ * `ease`, not importable). Distinct from any UI/CSS easing; this specifically
+ * shapes the brachistochrone-style burn-flip-burn profile the chase-camera
+ * choreography and the accel/flip/decel HUD readout are both keyed off. */
+export function warpEase(t: number): number {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+/* ---------- PF-09 B2 step 5: distance-scaled travel ----------------------
+ *
+ * NOT a port — the live engine hardcodes warpDur at a fixed 2400 ms
+ * (900 ms reduced) regardless of target distance; there is no existing
+ * formula to carry over. This is new pure math designed for Babylon, keyed
+ * off `ly` per the delivery plan ("near hops are quick; multi-hundred-ly
+ * journeys spend longer at cruise ... so speed communicates distance").
+ *
+ * The SAME `warpEase` accel-flip-decel curve is kept — not replaced with a
+ * literal constant-velocity plateau — and simply stretched over a longer
+ * duration for far targets. An ease-in-out-quad's velocity already peaks
+ * near its midpoint and decays toward both ends; stretched over more
+ * wall-clock time, that near-peak middle region reads as a longer cruise
+ * without inventing a new curve shape or touching the existing accel/flip/
+ * decel phase thresholds (which key off the fraction `k`, not the duration).
+ *
+ * Log-scaled, not linear: `ly` spans from ~0 (solar system) to 13+ billion
+ * (the catalog's most distant SDSS galaxies, confirmed against the shipped
+ * data) — a linear mapping would make a single deep-catalog click take
+ * either an absurd wait or force every near hop to be instant. Log10 keeps
+ * the whole practical range (Sirius at 8.6 ly through Orion Nebula at
+ * 1,344 ly) spread across most of the duration band, then clamps everything
+ * beyond ~10,000 ly to the same ceiling — distance keeps communicating
+ * "far", it just stops linearly extending the wait past a reasonable cap.
+ */
+
+/** Fastest a warp can complete — the floor for `ly` -> 0 and for goHome. */
+export const WARP_MIN_MS = 1400;
+/** Slowest a warp can complete, regardless of how distant the target is. */
+export const WARP_MAX_MS = 4200;
+/** log10(ly+1) range the duration is linearly interpolated across before
+ * clamping — 0 (ly=0) to 4 (ly=10,000), covering every named catalog body
+ * (Orion Nebula at 1,344 ly is inside this range) before the ceiling takes over. */
+const WARP_LOG_LY_MIN = 0;
+const WARP_LOG_LY_MAX = 4;
+
+/** Warp duration (ms) for a journey of `ly` light-years. Monotonically
+ * increasing, bounded to [WARP_MIN_MS, WARP_MAX_MS]. `ly <= 0` (home, solar
+ * system bodies) returns the floor. */
+export function warpDurationForLy(ly: number): number {
+  if (!(ly > 0)) return WARP_MIN_MS;
+  const logLy = Math.log10(ly + 1);
+  const frac = Math.min(
+    1,
+    Math.max(
+      0,
+      (logLy - WARP_LOG_LY_MIN) / (WARP_LOG_LY_MAX - WARP_LOG_LY_MIN),
+    ),
+  );
+  return WARP_MIN_MS + (WARP_MAX_MS - WARP_MIN_MS) * frac;
+}
+
 /** Engine-glow intensity cast onto the rear hull, by plume phase (PF-08 F0). */
 export function engineGlowIntensity(p: PlumeParams): number {
   if (p.burning) return 1.3;

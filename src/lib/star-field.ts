@@ -9,17 +9,35 @@
  *
  * Deterministic (seeded LCG, no Math.random) so it is unit-testable and so the
  * spike renders the same field on every run / device during measurement.
+ *
+ * **B2 step 2 (2026-07-19):** the real catalog now ships via star-catalog.ts and
+ * is what the engine draws. This generator is retained as the offline/asset-
+ * failure fallback (and as the deterministic fixture for tests), and was updated
+ * to emit the same photometric `meta` semantics so the two are interchangeable.
  */
+import { packTypeAndColour } from "./star-catalog";
 
 export interface StarField {
   /** xyz per point (count * 3). */
   positions: Float32Array;
-  /** [size 0..1, colorT 0..1] per point (count * 2). */
+  /** Per point (count * 2):
+   *   [0] magnitude byte / 255 — the shader applies Pogson's law to it
+   *   [1] object type + colour index / 256 (see star-catalog.ts packing)
+   *
+   * **B2 step 2 semantics change.** These were `[size 0..1, colourT 0..1]`
+   * during B1, when the field was procedural and every star was drawn at
+   * uniform size and full brightness — the cause of the ~6x apparent density
+   * against the live engine (TR-037). Both fields now carry catalog quantities
+   * and the shader derives size and alpha photometrically, so the procedural
+   * generator and the real decoder produce interchangeable buffers.
+   */
   meta: Float32Array;
   count: number;
 }
 
-/** Live catalog point count (see TR-023 / space-engine stream). */
+/** Live catalog point count (see TR-023 / space-engine stream). Confirmed at
+ * B2 step 2 against the shipped assets: 117,964 Hipparcos + 50,995 Gaia deep
+ * records = exactly this. */
 export const LIVE_STAR_COUNT = 168959;
 
 /** Billboard-quad geometry for the star field (4 verts + 6 indices per star).
@@ -58,7 +76,8 @@ export const LIVE_STAR_COUNT = 168959;
 export interface StarBillboards {
   /** star centre xyz, repeated per corner (verts * 3). */
   positions: Float32Array;
-  /** size, colourT (verts * 2). The quad corner is NOT stored — see below. */
+  /** magNorm, type+colour (verts * 2) — see StarField. The quad corner is NOT
+   * stored; both shader twins derive it from the vertex id (see below). */
   meta: Float32Array;
   indices: Uint32Array;
   vertexCount: number;
@@ -134,8 +153,14 @@ export function buildStarField(
     positions[i * 3] = Math.cos(th) * r * rr;
     positions[i * 3 + 1] = Math.sin(th) * r * rr;
     positions[i * 3 + 2] = u * rr;
-    meta[i * 2] = 0.3 + rnd() * 0.7; // point size factor
-    meta[i * 2 + 1] = rnd(); // colour-ramp t (O→M)
+    // Magnitude byte, faint-weighted. A real catalog's magnitude distribution
+    // is steeply skewed toward faint objects (measured on stars-hip.png: ~80%
+    // of records fall in the lower two octiles of the byte range), and it is
+    // that skew — not the count — that makes the live sky read correctly. A
+    // uniform draw here was the B1 placeholder's actual defect (TR-037), so the
+    // fallback approximates the shape rather than reproducing the bug.
+    meta[i * 2] = Math.pow(rnd(), 2.2) * 0.75;
+    meta[i * 2 + 1] = packTypeAndColour(0, Math.floor(rnd() * 256));
   }
   return { positions, meta, count };
 }

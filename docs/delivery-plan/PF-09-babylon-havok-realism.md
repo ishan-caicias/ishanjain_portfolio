@@ -5,7 +5,11 @@
 CONDITIONAL GO** ([ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md)) on desktop evidence ·
 **mobile condition DISCHARGED 2026-07-19** on real Android (Babylon 60 fps / 678 ms vs current
 60 fps / 1745 ms, budget ≥ 40 fps · ≤ 4.0 s) — the primary open risk is closed; conditions 2
-(WebGPU badge) and 3 (billboard memory) still gate the B6 cutover · **B2 next**.
+(WebGPU badge) and 3 (billboard memory) still gate the B6 cutover · **B2 CODE-COMPLETE — all 6
+steps done** ([TR-036](../test-reports/TR-036.md), [TR-038](../test-reports/TR-038.md),
+[TR-040](../test-reports/TR-040.md), [TR-041](../test-reports/TR-041.md),
+[TR-042](../test-reports/TR-042.md)); one exit condition open — **owner real-device fps/startup
+re-measurement**, same as the B1 gate — before B3 (volumetric & particle rendering) starts.
 **Supersedes:** [ADR-0002](../adr/0002-in-engine-glb-ship-renderer.md) (zero runtime 3D deps) —
 conditionally, per [ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md), written at the B1
 gate from measured desktop data. The current engine remains the shipping default until the
@@ -124,17 +128,53 @@ in-shader from `@builtin(vertex_index)` / `gl_VertexID`, so per-star attributes 
 catalog is built into the final layout rather than migrated twice:
 
 1. **Vertex expansion** — rewrite the star buffer path + WGSL/GLSL twins; memory measured.
+   ✅ **Done 2026-07-19 ([TR-036](../test-reports/TR-036.md))** — 21.9 → 16.8 MiB.
 2. **Real catalog swap** — replace `buildStarField`'s seeded-LCG placeholder with the actual
    Gaia/Hipparcos catalog and port the photometric shader.
+   ✅ **Done 2026-07-19 ([TR-038](../test-reports/TR-038.md))** — 168,959 records decoded from the
+   same PNG-packed assets the live engine streams; both shader twins run the photometric path
+   (Pogson → flux → size/alpha) plus all 7 deep-layer classes. Closes the ~6× density gap
+   ([TR-037](../test-reports/TR-037.md)). 107 unit · 53 E2E; per-vertex buffer still 2 floats.
 3. **Flight model port** — wire the existing pure, unit-tested `ship-dynamics.ts` to a Babylon
    camera (damped spring + quaternion slerp).
+   ✅ **Done 2026-07-19 ([TR-040](../test-reports/TR-040.md))** — `travelTo`/`goHome`/`randomBody`
+   wired for real: position via damped spring (`SHIP_SPRING_OMEGA`/`ZETA`, reused as-is — a linear
+   spring's settle time is distance-independent), orientation via quaternion slerp toward the
+   travel direction. Fixed a blocking prerequisite found during inspection: `SpaceScene.tsx`'s
+   `engineEl()` only ever queried `space-engine`, so nothing wired into `<babylon-scene>` in steps
+   1–2 was reachable from the real UI. 113 unit · 55 E2E, including a new test that drives travel
+   through the actual RNG button, not the engine's internals. Chase-camera waypoint choreography,
+   launch-turn, arrival framing, and screen-space station projection deliberately deferred to step
+   4; distance-scaled pacing to step 5.
 4. **Chase camera · launch-at-click · arrival framing** — the PF-08 choreography.
+   ✅ **Done 2026-07-19 ([TR-041](../test-reports/TR-041.md))** — step 3's damped-spring stand-in
+   replaced with the real eased path + waypoint chase offset (`chaseOffsetAt`/`travelFrame`), a
+   launch-at-click orientation preview during "aim," and arrival framing that falls out of the
+   chase-look damping rather than needing separate code. Accel/flip/decel + apparent-velocity HUD
+   readout ported too — `WarpOverlay` now renders identically on either engine. Camera lands
+   exactly on target (`cam(1) = to` by waypoint-table construction, verified to 6 decimal places in
+   E2E, not just asserted). 116 unit · 56 E2E.
 5. **Distance-scaled travel** — velocity profile keyed off `ly`.
+   ✅ **Done 2026-07-19 ([TR-042](../test-reports/TR-042.md))** — new math (`warpDurationForLy`,
+   log-scaled and bounded to 1.4–4.2 s), not a port: the live engine hardcodes a fixed warp
+   duration regardless of distance, so there was nothing to carry over. Checked against the shipped
+   catalog's full range (0 to 13 billion ly) before picking bounds. Same accel-flip-decel curve as
+   step 4, stretched over a longer duration for far targets — no new easing shape invented.
 6. **Reduced-motion parity.**
+   ✅ **Done 2026-07-19 ([TR-042](../test-reports/TR-042.md))** — ported directly from
+   `space-engine.js`'s `reduced` branches: fixed short durations (200/350 ms, overriding step 5's
+   formula entirely), `CHASE_OFFSET_REST` instead of the waypoint offset, snapped (not damped)
+   orientation. One-shot `matchMedia` snapshot at boot, matching the live engine's own pattern.
 
 **Exit:** the PF-08 journey reproduces on Babylon, now with distance-driven pacing; star memory
-materially below the B1 figure; suite green. **Re-measure fps/startup after this phase** — the B1
-readings were taken on procedural stars with no ship and are an upper bound (TR-035).
+materially below the B1 figure; suite green. All three conditions ✅. **Re-measure fps/startup
+after this phase** — the B1 readings were taken on procedural stars with no ship and are an upper
+bound (TR-035) — is the one exit condition still open: it needs the owner's real device, the same
+as the B1 gate itself (TR-032/033 established this can't be substituted with CI or desktop-browser
+readings). **B2 is code-complete; all six sub-steps shipped and verified
+([TR-036](../test-reports/TR-036.md), [TR-038](../test-reports/TR-038.md),
+[TR-040](../test-reports/TR-040.md), [TR-041](../test-reports/TR-041.md),
+[TR-042](../test-reports/TR-042.md)).**
 
 ### B3 — Volumetric & particle rendering
 

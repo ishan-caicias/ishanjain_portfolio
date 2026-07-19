@@ -48,7 +48,15 @@ interface SpaceSceneProps {
 }
 
 function engineEl(): SpaceEngineElement | null {
-  return document.querySelector("space-engine") as SpaceEngineElement | null;
+  // PF-09 B2 step 3: only one of the two custom elements is ever mounted at a
+  // time (the ternary below picks by engineKind), so a combined selector is
+  // safe. Before this fix, every host-driven call (travelTo, goHome, HUD sync,
+  // station sprites) queried "space-engine" unconditionally and silently
+  // no-op'd on the Babylon path — nothing added to <babylon-scene> was
+  // reachable from the real UI, only from its own self-running preview.
+  return document.querySelector(
+    "space-engine, babylon-scene",
+  ) as SpaceEngineElement | null;
 }
 
 function catalog(): CelestialEntry[] {
@@ -716,8 +724,9 @@ export default function SpaceScene({
   return (
     <>
       {engineKind === "babylon" ? (
-        // PF-09 B0: no ref — the host drives via querySelector("space-engine")
-        // (null here), so its engine calls no-op while this preview self-runs.
+        // PF-09 B2 step 3: no ref (SpaceEngineElement typing targets the
+        // custom-element contract, not a React ref) — the host drives it via
+        // engineEl()'s combined querySelector above, same as space-engine.
         <babylon-scene style={engineStyle} />
       ) : (
         <space-engine ref={engineRef} style={engineStyle} />

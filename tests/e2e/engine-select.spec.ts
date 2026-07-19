@@ -109,6 +109,276 @@ test("babylon actually renders the instanced star billboards (pixel proof)", asy
   expect(lit).toBeGreaterThan(100);
 });
 
+test("babylon renders the REAL catalog, not the procedural placeholder", async ({
+  page,
+}) => {
+  // B2 step 2. The placeholder fallback exists so an asset failure still draws
+  // a sky — which means the pixel proof above passes either way. Without this
+  // assertion a broken catalog fetch would look exactly like success, and the
+  // ~6x density defect (TR-037) would silently return.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  // <babylon-scene> is in the DOM before the catalog fetch/decode resolves, so
+  // poll rather than sampling once — a single read races the async boot.
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (
+          el as HTMLElement & { sceneStats(): Record<string, unknown> }
+        ).sceneStats(),
+      );
+
+  await expect
+    .poll(async () => (await readStats()).starSource, { timeout: 20000 })
+    .toBe("catalog");
+
+  // 117,964 Hipparcos + 50,995 Gaia deep records, decoded from the shipped PNGs
+  expect((await readStats()).starCount).toBe(168959);
+});
+
+test("babylon: RNG mission control button drives real travel through the real UI", async ({
+  page,
+}) => {
+  // B2 step 3. This is the end-to-end regression test for the bug the owner's
+  // pushback this session led to fixing: SpaceScene.tsx's engineEl() queried
+  // "space-engine" unconditionally, so on the Babylon path every host-driven
+  // call (travelTo, goHome, HUD sync) silently no-op'd — nothing wired into
+  // <babylon-scene> was reachable from the actual UI, only from its own
+  // self-running preview. Exercising the RNG button (not calling travelTo()
+  // directly) is the point: it proves the full chain — button click →
+  // SpaceScene → engineEl() → randomBody() → travelTo() → cosmos:* events →
+  // HUD React state — not just the engine's internals in isolation.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (
+          el as HTMLElement & { sceneStats(): Record<string, unknown> }
+        ).sceneStats(),
+      );
+  // wait past the async boot (catalog decode + body population) before
+  // interacting, same race class as the catalog-source test above.
+  await expect
+    .poll(async () => (await readStats()).starSource, { timeout: 20000 })
+    .toBe("catalog");
+
+  await page.getByRole("button", { name: "RNG" }).click();
+
+  // Same HUD assertion space-scene.spec.ts uses for the live engine — proves
+  // the UI layer is engine-agnostic, driven by cosmos:* events either engine
+  // can emit, not by space-engine-specific internals. This fires as soon as
+  // travel STARTS (cosmos:select), not once it completes.
+  await expect(page.getByText("STATION-KEEPING")).toHaveCount(0, {
+    timeout: 10000,
+  });
+
+  // And the engine-side proof of actual ARRIVAL (the spring settling +
+  // cosmos:arrive firing), not just a UI label that changed for an unrelated
+  // reason. Poll rather than a single read — the spring takes a couple of
+  // seconds to settle after the click above.
+  const readArrivedId = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate(
+        (el) => (el as unknown as { arrivedId: string | null }).arrivedId,
+      );
+  await expect.poll(readArrivedId, { timeout: 10000 }).not.toBeNull();
+
+  const cam = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as unknown as { cam: [number, number, number] }).cam);
+  expect(Math.hypot(cam[0], cam[1], cam[2])).toBeGreaterThan(50);
+});
+
+test("babylon: chase-camera choreography drives the real WarpOverlay phase/velocity readout and lands exactly on target", async ({
+  page,
+}) => {
+  // B2 step 4. WarpOverlay is engine-agnostic — it renders purely off React
+  // state.warp, populated from cosmos:warp events. If babylon-engine.ts emits
+  // the same {t, phase, vC, ly} shape the live engine does, the SAME transit
+  // HUD text should appear for a Babylon journey with zero UI changes. This
+  // is the most direct proof the ported choreography (not just camera math in
+  // isolation) is wired correctly end to end.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (
+          el as HTMLElement & { sceneStats(): Record<string, unknown> }
+        ).sceneStats(),
+      );
+  await expect
+    .poll(async () => (await readStats()).starSource, { timeout: 20000 })
+    .toBe("catalog");
+
+  await page.getByRole("button", { name: "RNG" }).click();
+
+  // Aim phase (~900ms) holds position, then warp starts: the accel readout
+  // should appear well inside the ~1.1s accel window (k < 0.47 of 2400ms).
+  await expect(page.getByText("ACCELERATION BURN")).toBeVisible({
+    timeout: 4000,
+  });
+  await expect(page.getByText(/APPARENT VELOCITY/)).toBeVisible({
+    timeout: 4000,
+  });
+
+  // Deceleration burn (k > 0.53) should follow before arrival.
+  await expect(page.getByText("DECELERATION BURN")).toBeVisible({
+    timeout: 4000,
+  });
+
+  // Arrival: the eased+waypoint path lands EXACTLY on the computed target —
+  // not "close enough" like step 3's spring — because chaseOffsetAt's
+  // endpoints both equal [0,0,SHIP_VIEW_DEPTH] by construction, so cam(1)=to
+  // algebraically. Verified here, not just asserted in a comment.
+  const readWarpTo = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate(
+        (el) =>
+          (el as unknown as { warp: { to?: [number, number, number] } }).warp
+            .to,
+      );
+  const to = await readWarpTo();
+
+  const readArrivedId = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate(
+        (el) => (el as unknown as { arrivedId: string | null }).arrivedId,
+      );
+  await expect.poll(readArrivedId, { timeout: 4000 }).not.toBeNull();
+
+  const finalCam = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as unknown as { cam: [number, number, number] }).cam);
+  expect(to).not.toBeUndefined();
+  expect(finalCam[0]).toBeCloseTo(to![0], 6);
+  expect(finalCam[1]).toBeCloseTo(to![1], 6);
+  expect(finalCam[2]).toBeCloseTo(to![2], 6);
+});
+
+test("babylon: distance-scaled travel — a near body warps faster than a far one", async ({
+  page,
+}) => {
+  // B2 step 5. Not a live-engine port (it hardcodes a fixed warp duration
+  // regardless of distance) — this is new math (warpDurationForLy), so it's
+  // asserted against real catalog bodies, not just the pure-math unit tests.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (
+          el as HTMLElement & { sceneStats(): Record<string, unknown> }
+        ).sceneStats(),
+      );
+  await expect
+    .poll(async () => (await readStats()).starSource, { timeout: 20000 })
+    .toBe("catalog");
+
+  type TravelEl = HTMLElement & {
+    travelTo(id: string, quiet?: boolean): void;
+    goHome(quiet?: boolean): void;
+    warp: { warpDur?: number; mode: string };
+  };
+
+  const nearDur = await page.locator("babylon-scene").evaluate((el) => {
+    const e = el as TravelEl;
+    e.travelTo("sun"); // ly = 0.0000158 — solar system
+    return e.warp.warpDur;
+  });
+  await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as TravelEl).goHome(true)); // reset for a clean second launch
+  await expect
+    .poll(
+      () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) => (el as TravelEl).warp.mode),
+      { timeout: 4000 },
+    )
+    .toBe("idle");
+
+  const farDur = await page.locator("babylon-scene").evaluate((el) => {
+    const e = el as TravelEl;
+    e.travelTo("m42"); // Orion Nebula, ly = 1,344 — the delivery plan's own example
+    return e.warp.warpDur;
+  });
+
+  expect(nearDur).toBeDefined();
+  expect(farDur).toBeDefined();
+  expect(farDur!).toBeGreaterThan(nearDur! + 500);
+});
+
+test("babylon: reduced motion forces fixed short durations and CHASE_OFFSET_REST regardless of distance", async ({
+  page,
+}) => {
+  // B2 step 6, ported from the live engine's own `reduced` branches. Emulate
+  // BEFORE navigation — matches the established pattern in space-scene.spec.ts
+  // (the reducedMotion context/test.use option doesn't reliably apply before
+  // the first navigation here).
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (
+          el as HTMLElement & { sceneStats(): Record<string, unknown> }
+        ).sceneStats(),
+      );
+  await expect
+    .poll(async () => (await readStats()).starSource, { timeout: 20000 })
+    .toBe("catalog");
+
+  const reduced = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as unknown as { _reduced: boolean })._reduced);
+  expect(reduced).toBe(true);
+
+  type TravelEl = HTMLElement & {
+    travelTo(id: string): void;
+    arrivedId: string | null;
+    warp: { warpDur?: number; aimDur?: number };
+  };
+
+  // m42 (Orion Nebula, 1,344 ly) would take the longest non-reduced duration
+  // of anything in the catalog — reduced motion must still floor it to the
+  // fixed short value, not a fraction of the distance-scaled one.
+  const warpDur = await page.locator("babylon-scene").evaluate((el) => {
+    const e = el as TravelEl;
+    e.travelTo("m42");
+    return e.warp.warpDur;
+  });
+  expect(warpDur).toBe(350);
+
+  // And it actually arrives fast — proving the short duration is live, not
+  // just recorded in state.
+  await expect
+    .poll(
+      () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) => (el as TravelEl).arrivedId),
+      { timeout: 2000 },
+    )
+    .toBe("m42");
+});
+
 test("perf overlay is opt-in via ?perf=1", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("space-engine");

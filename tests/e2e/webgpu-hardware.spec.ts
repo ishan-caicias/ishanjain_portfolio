@@ -1,0 +1,111 @@
+/**
+ * PF-09 B2 — real-hardware WebGPU validation (correction to TR-036/TR-038; see TR-039).
+ *
+ * TR-038 claimed "the WGSL twin is still unvalidated on real WebGPU hardware... Playwright's
+ * chromium has no WebGPU adapter." Revalidated 2026-07-19: that conflated two different things.
+ *
+ *  - `navigator.gpu` DOES exist in Playwright's bundled chromium on a secure context (http(s), not
+ *    about:blank) — no flags needed.
+ *  - `requestAdapter()` on that BUNDLED binary genuinely returns null under every flag tried
+ *    (--enable-unsafe-webgpu, ANGLE SwiftShader/Vulkan variants) — that part held.
+ *  - Pointing Playwright at the REAL installed system browser instead (`channel: "chrome"`) DOES
+ *    yield a real hardware adapter, no flags required — that is what this spec exercises.
+ *
+ * This is deliberately NOT the default project (playwright.config.ts is untouched) and NOT added
+ * to the CI workflow: CI runs on GitHub's `ubuntu-latest`, which has no GPU hardware and does not
+ * install the `chrome` channel, so this would almost certainly skip there too — adding it to CI
+ * would be speculative cost with no proven payoff. Run this file locally on a machine with a real
+ * GPU and an installed Chrome to get a genuine, if non-continuous, hardware proof.
+ *
+ * Every test here fails OPEN: if the real channel can't launch or no real adapter is available,
+ * the test SKIPS with a stated reason rather than going red — this is an environment capability
+ * check, not a regression gate.
+ */
+import {
+  chromium,
+  expect,
+  test,
+  type Browser,
+  type Page,
+} from "@playwright/test";
+
+// Manually-launched browsers (chromium.launch(), not the page/browser fixture)
+// don't inherit playwright.config.ts's use.baseURL — that's applied by the
+// fixture layer. Spelled out explicitly rather than relying on relative goto().
+const BASE_URL = "http://localhost:4321";
+
+const readStats = (page: Page) =>
+  page
+    .locator("babylon-scene")
+    .evaluate((el) =>
+      (
+        el as HTMLElement & { sceneStats(): Record<string, unknown> }
+      ).sceneStats(),
+    );
+
+async function realAdapterOrSkip(): Promise<Browser> {
+  let browser: Browser;
+  try {
+    browser = await chromium.launch({ headless: true, channel: "chrome" });
+  } catch (e) {
+    test.skip(
+      true,
+      `real Chrome channel unavailable in this environment (${String(e).slice(0, 150)})`,
+    );
+    throw e; // unreachable — test.skip(true, ...) throws to abort the test
+  }
+  const probe = await browser.newPage();
+  await probe.goto(BASE_URL);
+  const hasAdapter = await probe.evaluate(async () => {
+    const gpu = (
+      navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }
+    ).gpu;
+    if (!gpu) return false;
+    try {
+      return !!(await gpu.requestAdapter());
+    } catch {
+      return false;
+    }
+  });
+  await probe.close();
+  if (!hasAdapter) {
+    await browser.close();
+    test.skip(true, "no real WebGPU adapter available in this environment");
+  }
+  return browser;
+}
+
+test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => {
+  const browser = await realAdapterOrSkip();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${BASE_URL}/?engine=babylon`);
+    await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+    // sceneStats() is the tested, definitive signal (see babylon-engine.ts) rather
+    // than re-deriving a canvas pixel proof — this test's job is confirming the
+    // WGSL twin actually ran, not re-proving drawing (engine-select.spec.ts does that).
+    // <babylon-scene> mounts before the async engine/catalog boot resolves, so poll
+    // rather than reading once (same race the catalog-source test hit — TR-038).
+    // starSource resolves AFTER backend in _boot()'s sequential awaits, so polling
+    // on it guarantees backend is already set too.
+    await expect
+      .poll(async () => (await readStats(page)).starSource, { timeout: 20000 })
+      .not.toBeNull();
+
+    const stats = await readStats(page);
+
+    // This is ADR-0003 condition 2's exact assertion, run in an automatable
+    // environment: previously discharged only via the owner reading a badge on a
+    // physical Android. Real hardware, not emulation, driving the WGSL path.
+    expect(stats.backend).toBe("webgpu");
+    expect(stats.materialReady).toBe(true);
+    expect(stats.starSource).toBe("catalog");
+    expect(stats.starCount).toBe(168959);
+    expect(Number(stats.activeIndices)).toBeGreaterThan(0);
+
+    await page.close();
+  } finally {
+    await browser.close();
+  }
+});

@@ -89,6 +89,15 @@ Two things follow, and the second matters more than the first:
    after the `gl_PointSize` finding (TR-029) are all **proven on a phone**. That was the largest
    remaining unknown in the renderer migration.
 
+**Supplementary automated check added 2026-07-19 ([TR-039](../test-reports/TR-039.md)).** This
+condition's assertion — the WGSL twin actually running the `webgpu` backend — is now also
+exercisable in an automated Playwright test (`tests/e2e/webgpu-hardware.spec.ts`), by launching
+Playwright against the real installed system Chrome (`channel: "chrome"`) rather than its bundled
+Testing-build binary, which has no real WebGPU adapter. Not wired into CI (GitHub's runners have no
+GPU); it runs, and passes, on a developer machine with real GPU hardware. Doesn't change this
+condition's discharge — the Android reading already settled it — but turns a one-off manual badge
+read into a repeatable local check.
+
 ### Condition 1 — discharged 2026-07-19
 
 Measured on a **physical Android** (`384x832 · dpr2.8125 · 8c` → 1080×2340), both engines, against
