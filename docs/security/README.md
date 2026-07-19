@@ -15,3 +15,5 @@ Security reviews, threat models, and hardening records for the portfolio.
 - **Response headers:** `public/_headers` (Netlify/Cloudflare Pages). Other hosts — see the audit's
   "Host portability note".
 - **Post-deploy:** validate live headers with securityheaders.com / Mozilla Observatory.
+
+- [2026-07-19-csp-blob-connect-src](2026-07-19-csp-blob-connect-src.md) — `connect-src 'self' blob:` for the Babylon glTF texture path (ship track); risk-assessed, no new external origin.

@@ -24,3 +24,7 @@ src/data/celestial/*.js
 # Rendered report snapshots (self-contained HTML artifacts; reformatting could
 # alter whitespace inside pre-wrap blocks)
 docs/checkpoint/*.html
+
+# Vendored meshopt decoder (copied verbatim from the meshoptimizer package so
+# Babylon can load it same-origin under the CSP — see babylon-engine.ts)
+public/assets/craft/meshopt_decoder.js

@@ -117,6 +117,8 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
     // environment: previously discharged only via the owner reading a badge on a
     // physical Android. Real hardware, not emulation, driving the WGSL path.
     expect(stats.backend).toBe("webgpu");
+    // B5: real WebGPU on a desktop-class machine resolves the FULL tier
+    expect(stats.qualityTier).toBe("full");
     expect(stats.materialReady).toBe(true);
     expect(stats.starSource).toBe("catalog");
     expect(stats.starCount).toBe(168959);
@@ -129,6 +131,42 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
     expect(stats.shootMeshReady).toBe(true);
     expect(stats.shootMaterialReady).toBe(true);
     expect(Number(stats.shootTotalVertices)).toBeGreaterThan(0);
+
+    // B3 volumetric nebulae: on real WebGPU the producer must be the COMPUTE
+    // raymarch (storage texture + dispatch), not the fragment fallback — and
+    // its WGSL plus the composite's WGSL twin are two more shader programs
+    // that only real hardware validates (same TR-045 class of risk).
+    expect(stats.nebulaMode).toBe("compute");
+    expect(stats.nebulaVolumes).toBe(4);
+    await expect
+      .poll(async () => (await readStats(page)).nebulaProducerReady, {
+        timeout: 20000,
+      })
+      .toBe(true);
+    await expect
+      .poll(async () => (await readStats(page)).nebulaCompositeReady, {
+        timeout: 20000,
+      })
+      .toBe(true);
+
+    // B4 step 1: Havok must reach the real-physics tier on real hardware and
+    // its WASM init must stay console-clean (covered by the assertion below).
+    await expect
+      .poll(async () => (await readStats(page)).physicsMode, {
+        timeout: 30000,
+      })
+      .toBe("havok");
+    expect(Number((await readStats(page)).physicsBodies)).toBeGreaterThan(0);
+
+    // B3 ship track: hull GLB + plume + shimmer on the real WGSL path. The
+    // plume material and shimmer post-process are two more WGSL programs only
+    // real hardware validates — covered by the console assertion below.
+    await expect
+      .poll(async () => (await readStats(page)).shipState, { timeout: 30000 })
+      .toBe("ready");
+    await expect
+      .poll(async () => (await readStats(page)).plumeReady, { timeout: 20000 })
+      .toBe(true);
 
     // The check that actually catches TR-045's class of bug: no WebGPU
     // validation errors, no reserved-keyword/parse errors, nothing async that

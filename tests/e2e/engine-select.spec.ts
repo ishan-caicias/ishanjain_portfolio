@@ -8,6 +8,15 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
+// Every test here boots a full Babylon scene (168k-star field + B3 nebula
+// raymarch + GLB hull decode) on SwiftShader. Under fullyParallel with 4
+// local workers these compete with the other GPU-heavy spec files and time
+// out non-deterministically (the TR-018/043-046 flake lineage — each report
+// re-confirmed the failures pass in isolation). Running THIS file's tests in
+// order inside one worker removes that contention; other files still
+// parallelize, and CI (workers: 1) is unaffected.
+test.describe.configure({ mode: "default" });
+
 type PerfSnapshot = {
   engine: string;
   tier: string;
@@ -163,9 +172,313 @@ test("babylon: shooting-star GLSL twin compiles and renders on the default (WebG
 
   const stats = await readStats();
   expect(stats.shootMaterialReady).toBe(true);
-  // 24 particles * 4 verts, 24 * 6 indices — see shooting-stars.ts's default count.
-  expect(stats.shootTotalVertices).toBe(96);
-  expect(stats.shootTotalIndices).toBe(144);
+  // B5 (declared test change): the particle count is tier-budgeted now, so
+  // assert geometry CONSISTENCY against the engine's own resolved count
+  // (4 verts / 6 indices per particle) instead of pinning the old fixed 24.
+  const count = Number(stats.shootCount);
+  expect([24, 16, 8]).toContain(count);
+  expect(stats.shootTotalVertices).toBe(count * 4);
+  expect(stats.shootTotalIndices).toBe(count * 6);
+});
+
+test("babylon: B5 quality tiers — default resolution and the ?tier= override", async ({
+  page,
+}) => {
+  // Bundled chromium: WebGL2 backend on a desktop-class machine → "balanced"
+  // per the budget-table mapping (webgl2 + high). The override must win.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type TierStats = {
+    qualityTier: string;
+    haloAmp: number;
+    asteroidCount: number;
+    physicsMode: string;
+    shimmerReady: boolean;
+    shipState: string;
+  };
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (el as HTMLElement & { sceneStats(): TierStats }).sceneStats(),
+      );
+
+  await expect
+    .poll(async () => (await readStats()).physicsMode, { timeout: 30000 })
+    .toBe("havok");
+  const def = await readStats();
+  expect(def.qualityTier).toBe("balanced");
+  expect(def.haloAmp).toBe(0.55);
+  expect(def.asteroidCount).toBe(32);
+
+  // lite override: fewer bodies, no halo, and the shimmer post-pass is
+  // skipped entirely (ship still reaches "ready" without it)
+  await page.goto("/?engine=babylon&tier=lite");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+  await expect
+    .poll(async () => (await readStats()).physicsMode, { timeout: 30000 })
+    .toBe("havok");
+  await expect
+    .poll(async () => (await readStats()).shipState, { timeout: 30000 })
+    .toBe("ready");
+  const lite = await readStats();
+  expect(lite.qualityTier).toBe("lite");
+  expect(lite.haloAmp).toBe(0);
+  expect(lite.asteroidCount).toBe(20);
+  expect(lite.shimmerReady).toBe(false); // pass deliberately not created
+});
+
+test("babylon: volumetric nebulae render via the GLSL fragment fallback on the default (WebGL2) project", async ({
+  page,
+}) => {
+  // B3 volumetric nebulae. On WebGL2 the raymarch runs as a ProceduralTexture
+  // fragment pass (no compute API — nebula-field.ts / ADR-0004); the WebGPU
+  // compute producer is exercised by webgpu-hardware.spec.ts on real GPUs.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (
+          el as HTMLElement & { sceneStats(): Record<string, unknown> }
+        ).sceneStats(),
+      );
+
+  // producer (raymarch effect) and composite (fullscreen triangle) both
+  // compile asynchronously — poll each to readiness rather than reading once
+  await expect
+    .poll(async () => (await readStats()).nebulaProducerReady, {
+      timeout: 20000,
+    })
+    .toBe(true);
+  await expect
+    .poll(async () => (await readStats()).nebulaCompositeReady, {
+      timeout: 20000,
+    })
+    .toBe(true);
+
+  const stats = await readStats();
+  expect(stats.nebulaMode).toBe("fragment"); // bundled chromium has no WebGPU adapter (TR-039)
+  expect(stats.nebulaVolumes).toBe(4); // m42, ngc7293, veil, rosette
+  // half-res producer texture is live and sized from the render target
+  expect(Number(stats.nebulaTexWidth)).toBeGreaterThan(0);
+  expect(Number(stats.nebulaTexHeight)).toBeGreaterThan(0);
+});
+
+test("babylon: ship track — GLB hull + plume load, fly during warp, dock-fade on arrival", async ({
+  page,
+}) => {
+  // B3 ship track (owner-unblocked): the tiered GLB finally exists on the
+  // Babylon path. This drives the full lifecycle on the CI-run WebGL2
+  // fallback: load → hidden at idle → visible during travel → docking fade.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type ShipStats = {
+    shipState: string;
+    shipTier: string | null;
+    shipVisible: number;
+    plumeReady: boolean;
+  };
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (el as HTMLElement & { sceneStats(): ShipStats }).sceneStats(),
+      );
+
+  // GLB fetch + parse is async and deliberately non-blocking (a failure may
+  // not delay cosmos:ready) — poll to "ready", and fail loudly on "failed"
+  await expect
+    .poll(async () => (await readStats()).shipState, { timeout: 30000 })
+    .toBe("ready");
+  const loaded = await readStats();
+  expect(["1k", "2k"]).toContain(loaded.shipTier);
+  expect(loaded.shipVisible).toBe(0); // hidden while parked at home
+
+  // launch: the hull materialises during the aim turn and stays up in warp
+  await page.locator("babylon-scene").evaluate((el) => {
+    (el as HTMLElement & { travelTo(id: string): void }).travelTo("sun");
+  });
+  await expect
+    .poll(async () => (await readStats()).shipVisible, { timeout: 10000 })
+    .toBeGreaterThan(0.5);
+  expect((await readStats()).plumeReady).toBe(true);
+
+  // arrival: docking polish — hold, then fade out as the dossier takes over
+  await expect
+    .poll(
+      async () =>
+        page
+          .locator("babylon-scene")
+          .evaluate(
+            (el) =>
+              (el as HTMLElement & { arrivedId: string | null }).arrivedId,
+          ),
+      { timeout: 30000 },
+    )
+    .toBe("sun");
+  await expect
+    .poll(async () => (await readStats()).shipVisible, { timeout: 10000 })
+    .toBeLessThan(0.05);
+});
+
+test("babylon: Havok asteroid field — WASM boots, bodies exist, and rocks actually move", async ({
+  page,
+}) => {
+  // B4 step 1. Bundled chromium supports WASM SIMD, so this exercises the
+  // REAL Havok tier (the physics itself is backend-agnostic — WebGL2 vs
+  // WebGPU only changes rendering). The visual-only fallback tier is covered
+  // by unit tests on visualDriftStep + the SIMD probe.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type PhysStats = {
+    physicsMode: string;
+    asteroidCount: number;
+    physicsBodies: number;
+    asteroidSample: number[] | null;
+  };
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (el as HTMLElement & { sceneStats(): PhysStats }).sceneStats(),
+      );
+
+  // WASM fetch + init is async and non-blocking — poll to a terminal mode
+  await expect
+    .poll(async () => (await readStats()).physicsMode, { timeout: 30000 })
+    .toBe("havok");
+
+  const s1 = await readStats();
+  expect(s1.asteroidCount).toBeGreaterThan(0);
+  expect(s1.physicsBodies).toBe(s1.asteroidCount);
+  expect(s1.asteroidSample).not.toBeNull();
+  // B4 step 3: every body carries a collision observer feeding the impact
+  // shake (the impacts themselves are statistical — the shake math is
+  // unit-pinned and a real impact is observed on the hardware probe)
+  expect((s1 as unknown as { collisionWired: boolean }).collisionWired).toBe(
+    true,
+  );
+
+  // rocks drift under Havok integration — the first body's position must
+  // change over a real interval (this is what separates "bodies created"
+  // from "physics actually stepping")
+  await page.waitForTimeout(1500);
+  const s2 = await readStats();
+  const moved = s1
+    .asteroidSample!.map((v, i) => Math.abs(v - s2.asteroidSample![i]))
+    .reduce((a, c) => a + c, 0);
+  expect(moved).toBeGreaterThan(0.5);
+});
+
+test("babylon: nebula gas is destination-gated — hidden at idle and through accel, revealed at arrival", async ({
+  page,
+}) => {
+  // Owner-reported defect (2026-07-19): the gas appeared the instant a nebula
+  // destination was selected, during the ACCELERATION burn. The fix gates each
+  // volume behind a reveal envelope: 0 until the decel burn (warp k > 0.53),
+  // ramp to decelMax at arrival, swell to 1 as the ship stops.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type NebulaStats = {
+    nebulaReveal: number[];
+    nebulaProducerReady: boolean;
+  };
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (el as HTMLElement & { sceneStats(): NebulaStats }).sceneStats(),
+      );
+
+  await expect
+    .poll(async () => (await readStats()).nebulaProducerReady, {
+      timeout: 20000,
+    })
+    .toBe(true);
+
+  // idle at home: every volume hidden
+  expect((await readStats()).nebulaReveal).toEqual([0, 0, 0, 0]);
+
+  // launch toward the Orion Nebula (volume index 0) and catch the warp early:
+  // m42's distance-scaled warpDur is multi-second, so polling for mode==="warp"
+  // lands well inside the accel phase (k < 0.53) — reveal must still be 0.
+  await page.locator("babylon-scene").evaluate((el) => {
+    (el as HTMLElement & { travelTo(id: string): void }).travelTo("m42");
+  });
+  await expect
+    .poll(
+      async () =>
+        page
+          .locator("babylon-scene")
+          .evaluate(
+            (el) => (el as HTMLElement & { warp: { mode: string } }).warp.mode,
+          ),
+      { timeout: 10000 },
+    )
+    .toBe("warp");
+  // Read warp progress and reveal in ONE evaluate so they can't drift apart
+  // under parallel-worker load. If the sample lands before the decel
+  // threshold, reveal must still be 0; if the event loop stalled long enough
+  // to push k past it, the sample proves nothing and is skipped — the
+  // envelope's k-mapping itself is pinned by nebula-field unit tests.
+  const accel = await page.locator("babylon-scene").evaluate((el) => {
+    const s = el as HTMLElement & {
+      warp: { warpStart?: number; warpDur?: number };
+      sceneStats(): { nebulaReveal: number[] };
+    };
+    const k =
+      s.warp.warpStart != null && s.warp.warpDur
+        ? Math.min(1, (performance.now() - s.warp.warpStart) / s.warp.warpDur)
+        : 1;
+    return { k, reveal: s.sceneStats().nebulaReveal[0] };
+  });
+  if (accel.k <= 0.5) expect(accel.reveal).toBe(0);
+
+  // arrival: the target volume reveals and swells toward 1; others stay dark
+  await expect
+    .poll(
+      async () =>
+        page
+          .locator("babylon-scene")
+          .evaluate(
+            (el) =>
+              (el as HTMLElement & { arrivedId: string | null }).arrivedId,
+          ),
+      { timeout: 30000 },
+    )
+    .toBe("m42");
+  await expect
+    .poll(async () => (await readStats()).nebulaReveal[0], { timeout: 10000 })
+    .toBeGreaterThan(0.95);
+  const arrived = await readStats();
+  expect(arrived.nebulaReveal[1]).toBe(0);
+  expect(arrived.nebulaReveal[2]).toBe(0);
+  expect(arrived.nebulaReveal[3]).toBe(0);
+
+  // B4 step 2: the belt ring is deliberately oriented (X–Y plane, axis Z,
+  // centre z = −13) so that THIS m42 route crosses its tube nearly
+  // dead-centre — raDecToDir puts dec on Z, so m42's dir (0.107, 0.990,
+  // −0.094) reaches z ≈ −16 at planar radius 170 (see ASTEROID_BELT's
+  // orientation note). The proximity slowdown MUST therefore engage during
+  // this journey. warpSlowMin is captured engine-side and persists past
+  // arrival — no timing sensitivity.
+  const slowStats = await page.locator("babylon-scene").evaluate((el) =>
+    (
+      el as HTMLElement & {
+        sceneStats(): { warpSlowMin: number; warpSlow: number };
+      }
+    ).sceneStats(),
+  );
+  expect(slowStats.warpSlowMin).toBeLessThan(0.9);
+  expect(slowStats.warpSlowMin).toBeGreaterThanOrEqual(0.44); // never below 1 - maxSlow
+  expect(slowStats.warpSlow).toBe(1); // parked — slowdown cleared
 });
 
 test("babylon: RNG mission control button drives real travel through the real UI", async ({
@@ -249,12 +562,24 @@ test("babylon: chase-camera choreography drives the real WarpOverlay phase/veloc
     .poll(async () => (await readStats()).starSource, { timeout: 20000 })
     .toBe("catalog");
 
-  await page.getByRole("button", { name: "RNG" }).click();
+  // DETERMINISTIC target (test modified for B4 step 2, declared): this test
+  // previously launched via the RNG button, which made its 4s phase windows
+  // depend on a RANDOM route — some catalog bodies have lyTotal 0 (no
+  // velocity line renders), and since the proximity slowdown landed, routes
+  // crossing the asteroid belt legitimately stretch their phase timing. The
+  // RNG→UI chain has its own dedicated test above; THIS test's purpose is
+  // choreography→HUD wiring, which needs a stable journey. Polaris: ly 433
+  // (velocity line always renders) and dec 89.26° — its route hugs the
+  // world-Z axis (planar ≤ ~8 units), provably clear of the belt tube at
+  // planar 170, so no slowdown affects the windows.
+  await page.locator("babylon-scene").evaluate((el) => {
+    (el as HTMLElement & { travelTo(id: string): void }).travelTo("polaris");
+  });
 
   // Aim phase (~900ms) holds position, then warp starts: the accel readout
-  // should appear well inside the ~1.1s accel window (k < 0.47 of 2400ms).
+  // should appear well inside the accel window (k < 0.47).
   await expect(page.getByText("ACCELERATION BURN")).toBeVisible({
-    timeout: 4000,
+    timeout: 6000,
   });
   await expect(page.getByText(/APPARENT VELOCITY/)).toBeVisible({
     timeout: 4000,
@@ -262,7 +587,7 @@ test("babylon: chase-camera choreography drives the real WarpOverlay phase/veloc
 
   // Deceleration burn (k > 0.53) should follow before arrival.
   await expect(page.getByText("DECELERATION BURN")).toBeVisible({
-    timeout: 4000,
+    timeout: 8000,
   });
 
   // Arrival: the eased+waypoint path lands EXACTLY on the computed target —
@@ -285,7 +610,7 @@ test("babylon: chase-camera choreography drives the real WarpOverlay phase/veloc
       .evaluate(
         (el) => (el as unknown as { arrivedId: string | null }).arrivedId,
       );
-  await expect.poll(readArrivedId, { timeout: 4000 }).not.toBeNull();
+  await expect.poll(readArrivedId, { timeout: 8000 }).not.toBeNull();
 
   const finalCam = await page
     .locator("babylon-scene")

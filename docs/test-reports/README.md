@@ -47,3 +47,9 @@
 | [TR-043](TR-043.md) | 2026-07-19 | Demo-server report: HiDPI blur fix, ambient idle drift; startup/nav/ship triaged                   | READY TO PROCEED                    |
 | [TR-044](TR-044.md) | 2026-07-19 | B3 begins: GPU-particle idle shooting stars (thrusters/shimmer/docking blocked on ship mesh)       | READY TO PROCEED                    |
 | [TR-045](TR-045.md) | 2026-07-19 | Regression: reserved WGSL identifiers blanked the entire scene (fixed; TR-044's verdict was wrong) | READY TO PROCEED                    |
+| [TR-046](TR-046.md) | 2026-07-19 | B3: volumetric nebulae — WebGPU compute raymarch + WebGL2 fragment fallback (ADR-0004)             | READY TO PROCEED                    |
+| [TR-047](TR-047.md) | 2026-07-19 | B3 complete: destination-gated nebula reveal + ship track (hull, thrusters, shimmer, docking)      | READY TO PROCEED                    |
+| [TR-048](TR-048.md) | 2026-07-19 | B4 step 1: Havok live — lazy WASM + tier-gated asteroid belt, real rigid-body collisions           | READY TO PROCEED                    |
+| [TR-049](TR-049.md) | 2026-07-19 | B4 step 2: proximity slowdown (integrated warp k) + passage deflection; README refresh             | READY TO PROCEED                    |
+| [TR-050](TR-050.md) | 2026-07-19 | B4 COMPLETE: impulse-driven impact camera shake + docking contact (steps 3-4)                      | READY TO PROCEED                    |
+| [TR-051](TR-051.md) | 2026-07-19 | B5 code-complete: unified quality-tier system (full/balanced/lite); mobile rows gated on owner     | READY TO PROCEED                    |

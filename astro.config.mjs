@@ -36,7 +36,13 @@ export default defineConfig({
         "default-src 'self'",
         "img-src 'self' data: blob:",
         "font-src 'self'",
-        "connect-src 'self'",
+        // blob: (PF-09 B3 ship track): Babylon's glTF loader unpacks the GLB's
+        // embedded textures into object URLs and FETCHES them on the WebGPU
+        // texture path (img-src alone covers only <img>-style loads). blob:
+        // URLs can only be minted by same-origin scripts, so this does not
+        // widen the origin surface. Without it the hull loads geometry-less
+        // on WebGPU (TR-047).
+        "connect-src 'self' blob:",
         "worker-src 'self' blob:",
         "manifest-src 'self'",
         "object-src 'none'",

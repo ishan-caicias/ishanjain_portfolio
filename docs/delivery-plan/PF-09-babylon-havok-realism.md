@@ -12,7 +12,18 @@ steps done** ([TR-036](../test-reports/TR-036.md), [TR-038](../test-reports/TR-0
 fps/startup re-measurement**, same as the B1 gate ([TR-043](../test-reports/TR-043.md) flags the
 first attempt's readings as not yet trustworthy). **B3 (volumetric & particle rendering) IN
 PROGRESS at owner direction** ([TR-044](../test-reports/TR-044.md)) — starting before that
-condition closes, not because it closed.
+condition closes, not because it closed. **B3 COMPLETE 2026-07-19** — shooting stars, volumetric
+compute-raymarched nebulae with destination-gated reveal, and the owner-unblocked ship track
+(GLB hull, flip-and-burn thrusters, heat-shimmer post-pass, docking polish):
+[TR-046](../test-reports/TR-046.md), [TR-047](../test-reports/TR-047.md),
+[ADR-0004](../adr/0004-volumetric-nebulae-compute-raymarch.md),
+[ADR-0005](../adr/0005-babylon-ship-mesh-track.md). **B4 (Havok physics showcase ⭐) COMPLETE
+2026-07-19** — lazy same-origin WASM, tier-gated rigid-body asteroid belt, proximity slowdown
+integrated into the velocity profile, passage deflection, impulse-driven impact camera shake,
+docking contact: [TR-048](../test-reports/TR-048.md), [TR-049](../test-reports/TR-049.md),
+[TR-050](../test-reports/TR-050.md). **B5 CODE-COMPLETE 2026-07-19**
+([TR-051](../test-reports/TR-051.md)) — unified quality tiers (full/balanced/lite) across every
+knob; mobile budget rows gated on the owner's devices. Next: owner device pass, then B6.
 **Supersedes:** [ADR-0002](../adr/0002-in-engine-glb-ship-renderer.md) (zero runtime 3D deps) —
 conditionally, per [ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md), written at the B1
 gate from measured desktop data. The current engine remains the shipping default until the
@@ -221,19 +232,42 @@ reported regardless, since WebGPU shader validation is asynchronous). Owner caug
 demo server. Fixed; the verification gap (no console-error check) is closed in
 `webgpu-hardware.spec.ts`.
 
-**Next increment (owner-selected 2026-07-19): volumetric/raymarched nebulae, not the ship-mesh
-track.** Rationale recorded so a fresh session doesn't have to re-derive it: nebulae is
-self-contained (no new blocking dependency, extends B3 directly), whereas the ship-mesh loading
-track that would unblock thrusters/heat-shimmer/docking-approach polish is unscoped, larger, and
-was deliberately left for a later decision. **Starting point for the next session:** design the
-WebGPU compute raymarching pass (fragment-shader raymarch is the fallback tier — no compute API on
-WebGL2) as a new post-process or dedicated mesh layer, tier-gated per the B3 exit criterion
-("fallback tier still coherent"). No code written yet for this item — INSPECT first: check whether
-`space-engine.js` has any nebula-adjacent visual (grep "nebula"/"gas"/"cloud") the same way TR-044
-grepped for shooting stars before concluding "not a port," then run the Strategy Gate for a
-`3feature` scorecard before IMPLEMENT. B2's own open exit condition (owner real-device fps/startup
-re-measurement, flagged not-yet-trustworthy in TR-043) remains separately open and was
-consciously deferred, not resolved, by this choice.
+✅ **Volumetric/raymarched nebulae done 2026-07-19 ([TR-046](../test-reports/TR-046.md),
+[ADR-0004](../adr/0004-volumetric-nebulae-compute-raymarch.md))** — the owner-selected increment,
+executed as planned (INSPECT confirmed the live engine's nebulae are 2D billboard sprites — new
+work, not a port; `3feature` Strategy Gate run first). Four raymarched gas volumes anchored at
+real catalog nebulae (m42, ngc7293, veil, rosette — `travelTo` flies _into_ them), tier-gated per
+the exit criterion: **WebGPU = compute-shader raymarch** into a half-res storage texture (40
+steps), **WebGL2 = the same march as a ProceduralTexture fragment pass** (18 steps), one shared
+fullscreen composite. All constants baked into generated GLSL/WGSL sources from one TS module
+(`nebula-field.ts`), reserved-WGSL-word-guarded per TR-045. Real-hardware verification with
+screenshots this time (the TR-044 gap): compute tier confirmed on real WebGPU, console clean,
+~118 fps. One real defect found by the suite, not the owner: tree-shaken Babylon needs the
+`engine.computeShader` side-effect extension explicitly imported — without it the render loop
+died at boot (fixed, recorded in TR-046/ADR-0004). Visual tuning is a first pass — knobs in
+`NEBULA_MARCH`, owner taste pass expected. 164 unit · 62 E2E.
+
+✅ **B3 COMPLETE 2026-07-19 ([TR-047](../test-reports/TR-047.md),
+[ADR-0005](../adr/0005-babylon-ship-mesh-track.md)).** Two closing moves, both owner-directed:
+**(1)** the nebula gas is now **destination-gated** (owner defect report: it appeared during the
+acceleration burn) — invisible until the decel burn, fades in from the HUD's own decel threshold,
+swells to full as the ship stops, damped fade-out on departure (ADR-0004 amendment; verified
+with staged real-hardware screenshots). **(2)** The **ship-mesh track was unblocked by the owner**
+and delivered, carrying the three blocked items: the tiered `sci-fi-fighter` GLB loads via
+`@babylonjs/loaders` under the existing craft-tier policy and flies at the virtual-ship position
+the chase camera has trailed since B2 — with a real 180° **flip-and-burn** at the HUD's flip
+window; **thrusters** reuse ship-dynamics' F3 plume system verbatim (GLSL/WGSL twins, baked
+colours); the **heat-shimmer refraction post-pass** (deferred from F3) anchors at the nozzle's
+screen position; **docking-approach polish** holds the berth pose then fades the hull as the
+dossier opens. Two CSP interactions surfaced and resolved deliberately (self-hosted meshopt
+decoder; `connect-src blob:` — see ADR-0005 + docs/security), and one real WGSL
+uniform-control-flow violation was caught by the TR-045 console gate before any owner report.
+**Exit criterion met:** thrusters/nebulae/shimmer read as real volumetric FX on the WebGPU tier
+(real-hardware journey screenshots, ~118 fps, clean console); the WebGL2 fallback runs the same
+ship/plume/shimmer plus the fragment-raymarch nebulae — coherent, CI-verified. 185 unit · 64 E2E.
+
+B2's own open exit condition (owner real-device fps/startup re-measurement, flagged
+not-yet-trustworthy in TR-043) remains separately open — unchanged by B3's completion.
 
 ### B4 — Havok physics showcase ⭐ (the portfolio centrepiece)
 
@@ -250,12 +284,60 @@ Tier-gated body counts (desktop full, mobile reduced); Havok needs WASM SIMD (iO
 that, the field renders visually without live physics.
 **Exit:** collisions, deflection, proximity slowdown, and impact shake all live and tier-scaled.
 
+**Step 1 DONE 2026-07-19 ([TR-048](../test-reports/TR-048.md)):** ✅ Havok live — `@babylonjs/havok`
+lazy WASM served same-origin (never a CDN, ADR-0005 stance), tier-gated procedural asteroid belt
+(48/20 bodies via the craft-tier device policy) with real rigid-body collisions, seeded rock
+geometry, weak spine-circle herding so the zero-g field stays coherent and keeps colliding
+(**idle random asteroid collisions: delivered**), and the mandated no-SIMD/reduced-motion visual
+tier (same field, kinematic drift, no live physics). Scene gains its first light (dim
+hemispheric). Verified on real WebGPU hardware: 48 bodies, measured motion, clean console;
+198 unit · 65 E2E. **Staged next:** step 2 proximity slowdown + passage deflection; step 3
+collision events → impact camera shake; step 4 docking-contact constraint.
+
+**Step 2 DONE 2026-07-19 ([TR-049](../test-reports/TR-049.md)):** ✅ **proximity slowdown** —
+warp progress is now INTEGRATED (`dk = dt/warpDur × slowFactor(beltDensity)`), so local field
+density genuinely feeds the B2 velocity profile; `warp.prog` became the single source of k for
+camera/hull/HUD/nebula-reveal alike. ✅ **passage deflection** — the warping ship ploughs nearby
+rocks aside with mass-scaled Havok forces. Belt deliberately reoriented (X–Y plane, axis Z) so
+the m42 showcase route crosses its tube dead-centre — E2E asserts the crossing via the
+engine-captured `warpSlowMin`. Real-hardware proof: slow 0.783 live mid-crossing, min 0.463,
+wall clock 4.74 s vs warpDur 3.59 s (the belt genuinely costs time). Two real defects caught by
+the suite in-run (clamped-dt journey stretch on slow devices; the original Y-axis belt was
+crossed by almost no route); the chase-camera E2E was pinned to Polaris (declared — random RNG
+targets made phase timing non-deterministic once journeys became route-dependent). 206 unit ·
+65 E2E. **Remaining:** step 3 impact camera shake; step 4 docking contact.
+
+✅ **B4 COMPLETE 2026-07-19 ([TR-050](../test-reports/TR-050.md)).** Steps 3–4 delivered:
+**impact camera shake** driven by the solver's own collision impulses (inverse-square distance
+falloff, capped, reduced-motion-gated, ringing down on the camera object only — the canonical
+`cam` stays exact for arrival framing), and **docking contact** — a gentle berthing bump through
+the shake system plus a sprung hull settle along the approach axis (impulse+spring flavoured, a
+deliberate proportionality call over a Havok constraint pair for a 1.65 s berth beat).
+**Exit criterion met:** collisions, deflection, proximity slowdown, and impact shake all live
+and tier-scaled (48/20 bodies by device signals; no-SIMD tier renders visually without physics;
+reduced motion: static field, no shake) — plus docking contact and idle random collisions.
+Real-hardware proof: 22 idle impacts in 12 s, dock bump 0.299 captured at arrival, console
+clean. 210 unit · 65 E2E. Owner taste knobs: `IMPACT_SHAKE`, `DOCK_CONTACT`.
+
 ### B5 — Responsiveness & quality tiers
 
 Formalize the per-device tiers from the budget table: WebGPU→WebGL2 fallback, adaptive
 particle/physics budgets, touch/pointer parity across desktop/tablet/mobile, reduced-motion and
 no-WebGL paths carried forward from the current engine as first-class policies.
 **Exit:** all five device classes meet their budget row; fallbacks verified on real devices.
+
+**CODE-COMPLETE 2026-07-19 ([TR-051](../test-reports/TR-051.md)) — exit measurement GATED on
+owner devices.** One unified tier system (`babylon-tiers.ts`): backend + perf-telemetry's
+device class + `?tier=` override resolve a single budget (`full`/`balanced`/`lite`) consumed by
+every knob — star halo (the live engine's 0/0.55/1, finally honoured), shooting-star count
+(24/16/8), nebula step scale + offscreen resolution, asteroid bodies (48/32/20), shimmer
+(skipped on lite). Badge shows the tier for on-device checks. Verified from this desk: real
+WebGPU desktop = `full` (hardware spec), WebGL2 = `balanced`/`lite` (real + CI), no-WebGL/
+reduced-motion fallbacks (pre-existing E2E). **Open:** iPad + mid-Android budget rows need the
+owner's devices (same standing condition as B2's re-measurement; instrument: tier badge +
+`?perf=1`). Reduced motion deliberately remains a per-feature contract, not a tier; craft 1k/2k
+stays the orthogonal asset axis; runtime-adaptive tier switching deliberately deferred (B6+
+candidate). 216 unit · 66 E2E.
 
 ### B6 — Harden & rollout
 
