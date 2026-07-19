@@ -76,3 +76,45 @@ test.describe("Accessibility", () => {
     ).toBeVisible();
   });
 });
+
+test.describe("Accessibility — Babylon path (PF-09 B6 re-audit)", () => {
+  // The cutover candidate must clear the same bar as the shipping engine.
+  // The scene chrome is shared React either way, but the audit must run
+  // against the page AS THE BABYLON PATH RENDERS IT — canvas swap included.
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/?engine=babylon");
+    await page.waitForSelector("babylon-scene", { timeout: 15000 });
+    await injectAxe(page);
+  });
+
+  test("no serious/critical axe violations on the Babylon path", async ({
+    page,
+  }) => {
+    const violations = await getViolations(page, undefined, {
+      rules: {
+        "color-contrast": { enabled: false },
+      },
+    });
+    const serious = violations.filter(
+      (v) => v.impact === "critical" || v.impact === "serious",
+    );
+    expect(serious).toEqual([]);
+  });
+
+  test("scene chrome stays keyboard-operable on the Babylon path", async ({
+    page,
+  }) => {
+    // The travel input and mission controls must be reachable and usable by
+    // keyboard exactly as on the default engine.
+    const whereTo = page.getByRole("combobox").or(page.getByRole("textbox"));
+    await whereTo.first().focus();
+    await expect(whereTo.first()).toBeFocused();
+    const rng = page.getByRole("button", { name: "RNG" });
+    await rng.focus();
+    await expect(rng).toBeFocused();
+    // classic-view toggle remains operable too
+    const classic = page.getByRole("button", { name: /CLASSIC VIEW/ });
+    await classic.focus();
+    await expect(classic).toBeFocused();
+  });
+});

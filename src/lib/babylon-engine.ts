@@ -1028,6 +1028,13 @@ class BabylonScene extends HTMLElement {
     this._engine = engine;
     this.backend = backend;
 
+    // B6 accessibility re-audit fix: Babylon's engine sets tabindex="1" on
+    // its canvas — a POSITIVE tabindex that hijacks the page tab order
+    // (canvas would focus before the skip link; axe flags it serious). This
+    // path has no canvas-level keyboard interaction (all input rides the
+    // shared chrome), so the canvas leaves the tab order entirely.
+    canvas.tabIndex = -1;
+
     // B5: resolve the quality tier ONCE, from the backend that actually
     // initialized + the same device classifier the perf HUD reports, with a
     // ?tier= override mirroring the ?craft= pattern. Every knob below reads
@@ -1165,6 +1172,9 @@ class BabylonScene extends HTMLElement {
       this.renderFrames++; // engine-side proof the scene is actually drawing
       if (first) {
         first = false;
+        // re-assert after Babylon's deferred input setup, which re-stamps
+        // tabindex="1" post-boot (B6 a11y fix — see the note in _boot)
+        canvas.tabIndex = -1;
         emit("cosmos:progress", { loaded: field.count, total: field.count });
         emit("cosmos:ready", {});
       }

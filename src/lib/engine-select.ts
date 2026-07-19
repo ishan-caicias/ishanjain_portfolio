@@ -5,9 +5,10 @@
  * craft-tier.ts:
  *   1. URL param  ?engine=webgl|babylon  — dev/preview, always wins
  *   2. Stored override                   — future user selector (parity hook)
- *   3. Default 'webgl'                   — the current engine stays default
- *                                          through the whole of PF-09 until the
- *                                          B1 gate says otherwise.
+ *   3. Default 'webgl'                   — stays default until ADR-0006 (the
+ *                                          B6 cutover, currently PROPOSED/
+ *                                          gated) is accepted; the flip is
+ *                                          this one default value.
  *
  * Pure policy (unit-tested); the browser reads live in SpaceScene.
  */

@@ -23,7 +23,11 @@ integrated into the velocity profile, passage deflection, impulse-driven impact 
 docking contact: [TR-048](../test-reports/TR-048.md), [TR-049](../test-reports/TR-049.md),
 [TR-050](../test-reports/TR-050.md). **B5 CODE-COMPLETE 2026-07-19**
 ([TR-051](../test-reports/TR-051.md)) — unified quality tiers (full/balanced/lite) across every
-knob; mobile budget rows gated on the owner's devices. Next: owner device pass, then B6.
+knob; mobile budget rows gated on the owner's devices. **B6 desk items DONE 2026-07-19**
+([TR-052](../test-reports/TR-052.md)) — CI bundle+perf gates, a11y re-audit (real tabindex fix),
+cutover checklist + rollback runbook + [ADR-0006](../adr/0006-babylon-default-cutover.md)
+(Proposed). **PF-09 now blocks solely on the owner device pass + the §B3 disposition; then the
+one-line cutover.**
 **Supersedes:** [ADR-0002](../adr/0002-in-engine-glb-ship-renderer.md) (zero runtime 3D deps) —
 conditionally, per [ADR-0003](../adr/0003-babylon-webgpu-renderer-adoption.md), written at the B1
 gate from measured desktop data. The current engine remains the shipping default until the
@@ -345,6 +349,19 @@ Perf budgets enforced in CI (startup + fps regression gates), accessibility re-a
 `?engine=babylon` → default cutover, archive the WebGL1 engine behind a flag for one release
 before removal. Security/deploy checklist.
 **Exit:** Babylon default on all classes; old engine archived; CI guards the budgets.
+
+**Desk items DONE 2026-07-19 ([TR-052](../test-reports/TR-052.md)) — cutover GATED.** Shipped:
+CI **bundle-budget gate** (total JS / largest-chunk barrel-canary / WASM, `npm run budget:check`
+in the CI build job), CI **perf regression canaries** (both engines; explicitly CI-class, not
+device budgets), **accessibility re-audit** extended to the Babylon path — which caught and
+fixed a real defect (Babylon stamps `tabindex="1"` on its canvas, hijacking tab order; now −1,
+re-asserted post-boot), the **[cutover checklist](../validation-checklist/2026-07-19-pf09-b6-cutover-checklist.md)**,
+the **[rollback runbook](../runbooks/2026-07-19-engine-cutover-rollback.md)**, and
+**[ADR-0006](../adr/0006-babylon-default-cutover.md) (Proposed — gated)** making the flip a
+one-line change + status change with evidence attached. Local E2E made **deterministic**
+(workers 1 = CI; 70/70 twice — the TR-018 flake lineage closed). **Open before B6 completes:**
+checklist §A (owner device pass — also discharges B2's and B5's conditions), §B3
+billboard-memory disposition, then the flip + one release of legacy archival. 216 unit · 70 E2E.
 
 ## Creative exploration (candidate stretch ideas — pick per phase, not all)
 
