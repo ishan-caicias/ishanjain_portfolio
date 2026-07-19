@@ -162,6 +162,21 @@ import { UniformBuffer } from "@babylonjs/core/Materials/uniformBuffer";
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { ProceduralTexture } from "@babylonjs/core/Materials/Textures/Procedurals/proceduralTexture";
 import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import {
+  buildPhotoBodyBillboards,
+  buildProceduralBodyBillboards,
+  partitionCelestialBodies,
+  PHOTO_BODY_FRAGMENT_GLSL,
+  PHOTO_BODY_FRAGMENT_WGSL,
+  PHOTO_BODY_VERTEX_GLSL,
+  PHOTO_BODY_VERTEX_WGSL,
+  PROCEDURAL_BODY_FRAGMENT_GLSL,
+  PROCEDURAL_BODY_FRAGMENT_WGSL,
+  PROCEDURAL_BODY_VERTEX_GLSL,
+  PROCEDURAL_BODY_VERTEX_WGSL,
+  type AtlasMap,
+} from "./celestial-bodies";
 import {
   expDamp,
   NEBULA_MARCH,
@@ -245,8 +260,22 @@ const emit = (name: string, detail: unknown) =>
  * Leaving them undefined with `vis: false` is safe: SpaceScene.tsx's station
  * effect reads `b.vis ? b.sx : b.ex`, and `undefined != null` is false, so
  * sprites simply stay hidden rather than crash or show at (0,0). */
+/** `e`'s appearance fields (t/r/c/img/sp) are optional: `placeStation` below
+ * constructs a minimal synthetic entry for nav stations, which never enter
+ * the GAP-01/GAP-02 render passes (those are built from `this.bodies`, i.e.
+ * real `window.CELESTIAL` entries via `placeBody`, not `this.stations`). */
 interface BabylonBody {
-  e: { id: string; ra: number; dec: number; ly: number | null };
+  e: {
+    id: string;
+    ra: number;
+    dec: number;
+    ly: number | null;
+    t?: string;
+    r?: string;
+    c?: string | null;
+    img?: string | null;
+    sp?: string | null;
+  };
   dir: [number, number, number];
   pos: [number, number, number];
   vis: false;
@@ -261,6 +290,11 @@ function placeBody(e: {
   ra: number;
   dec: number;
   ly: number | null;
+  t?: string;
+  r?: string;
+  c?: string | null;
+  img?: string | null;
+  sp?: string | null;
 }): BabylonBody {
   const { dir, pos } = bodyWorldPosition(e.ra, e.dec, e.ly);
   return { e, dir, pos, vis: false };
@@ -834,6 +868,21 @@ ShaderStore.ShadersStoreWGSL["ijPlumeVertexShader"] = PLUME_VERTEX_WGSL;
 ShaderStore.ShadersStoreWGSL["ijPlumeFragmentShader"] = PLUME_FRAGMENT_WGSL;
 ShaderStore.ShadersStore["ijShimmerFragmentShader"] = SHIMMER_FRAGMENT_GLSL;
 ShaderStore.ShadersStoreWGSL["ijShimmerFragmentShader"] = SHIMMER_FRAGMENT_WGSL;
+// GAP-01/GAP-02: curated celestial bodies — see celestial-bodies.ts's header.
+ShaderStore.ShadersStore["ijBodyVertexShader"] = PROCEDURAL_BODY_VERTEX_GLSL;
+ShaderStore.ShadersStore["ijBodyFragmentShader"] =
+  PROCEDURAL_BODY_FRAGMENT_GLSL;
+ShaderStore.ShadersStoreWGSL["ijBodyVertexShader"] =
+  PROCEDURAL_BODY_VERTEX_WGSL;
+ShaderStore.ShadersStoreWGSL["ijBodyFragmentShader"] =
+  PROCEDURAL_BODY_FRAGMENT_WGSL;
+ShaderStore.ShadersStore["ijPhotoBodyVertexShader"] = PHOTO_BODY_VERTEX_GLSL;
+ShaderStore.ShadersStore["ijPhotoBodyFragmentShader"] =
+  PHOTO_BODY_FRAGMENT_GLSL;
+ShaderStore.ShadersStoreWGSL["ijPhotoBodyVertexShader"] =
+  PHOTO_BODY_VERTEX_WGSL;
+ShaderStore.ShadersStoreWGSL["ijPhotoBodyFragmentShader"] =
+  PHOTO_BODY_FRAGMENT_WGSL;
 
 async function createEngine(canvas: HTMLCanvasElement): Promise<{
   engine: AbstractEngine;
@@ -899,6 +948,14 @@ class BabylonScene extends HTMLElement {
   private _scene?: Scene;
   private _stars?: Mesh;
   private _shootMesh?: Mesh;
+  // --- GAP-01/GAP-02: curated celestial bodies ---
+  private _bodyMesh?: Mesh;
+  private _bodyMat?: ShaderMaterial;
+  private _photoMesh?: Mesh;
+  private _photoMat?: ShaderMaterial;
+  private _photoTex?: Texture;
+  private _bodyCount = 0;
+  private _photoBodyCount = 0;
   // --- volumetric nebulae (B3) ---
   private _nebulaMode: "compute" | "fragment" | null = null;
   private _nebulaTex?: BaseTexture;
@@ -1082,7 +1139,17 @@ class BabylonScene extends HTMLElement {
     // files in one Promise.all and only renders <babylon-scene> after every
     // one resolves (each populates window.CELESTIAL synchronously on import).
     this.bodies = (window.CELESTIAL ?? []).map((e) =>
-      placeBody({ id: e.id, ra: e.ra, dec: e.dec, ly: e.ly }),
+      placeBody({
+        id: e.id,
+        ra: e.ra,
+        dec: e.dec,
+        ly: e.ly,
+        t: e.t,
+        r: e.r,
+        c: e.c,
+        img: e.img,
+        sp: e.sp,
+      }),
     );
 
     const { field, source } = await loadStarField();
@@ -1166,6 +1233,15 @@ class BabylonScene extends HTMLElement {
     shootMat.alphaMode = Constants.ALPHA_ADD;
     shootMesh.material = shootMat;
 
+    // GAP-01/GAP-02: curated celestial bodies. Fetches the small atlas-map
+    // JSON (same fallback philosophy as loadStarField: a fetch failure
+    // degrades every body to procedural rather than blanking the sky) before
+    // building geometry, so the split is correct on the first frame; the
+    // 3.4 MB atlas TEXTURE itself is not awaited (Babylon loads it in the
+    // background and reports readiness via isReady(), same as the craft GLB
+    // never delaying cosmos:ready).
+    await this._setupCelestialBodies(scene, engine, backend);
+
     // B3: volumetric nebulae — tier-gated producer (WebGPU compute / WebGL2
     // ProceduralTexture) + shared fullscreen composite. See nebula-field.ts.
     this._setupNebula(scene, engine, backend);
@@ -1185,6 +1261,9 @@ class BabylonScene extends HTMLElement {
       this._tickShip(camera, engine);
       this._tickAsteroids();
       shootMat.setFloat("uTime", performance.now() / 1000);
+      const bodyT = this._reduced ? 0 : performance.now() / 1000;
+      this._bodyMat?.setFloat("uTime", bodyT);
+      this._photoMat?.setFloat("uTime", bodyT);
       scene.render();
       this.renderFrames++; // engine-side proof the scene is actually drawing
       if (first) {
@@ -1200,6 +1279,9 @@ class BabylonScene extends HTMLElement {
     this._ro = new ResizeObserver(() => {
       engine.resize();
       pushViewport(); // px-sized billboards depend on the render target size
+      const vp = new Vector2(engine.getRenderWidth(), engine.getRenderHeight());
+      this._bodyMat?.setVector2("uViewport", vp);
+      this._photoMat?.setVector2("uViewport", vp);
       this._resizeNebula(engine); // half-res producer tracks the target size
     });
     this._ro.observe(this);
@@ -1208,7 +1290,8 @@ class BabylonScene extends HTMLElement {
     badge.textContent =
       `BABYLON ${backend.toUpperCase()} · ${field.count.toLocaleString()} STARS` +
       `${source === "procedural" ? " (PLACEHOLDER)" : ""}` +
-      ` · ${this._quality.name.toUpperCase()} · PF-09 B5`;
+      ` · ${this._bodyCount + this._photoBodyCount} BODIES (${this._photoBodyCount} PHOTO)` +
+      ` · ${this._quality.name.toUpperCase()} · PF-09 B6`;
     Object.assign(badge.style, {
       position: "absolute",
       left: "12px",
@@ -1249,6 +1332,20 @@ class BabylonScene extends HTMLElement {
       shootMaterialReady: shoot?.material
         ? shoot.material.isReady(shoot)
         : false,
+      // GAP-01/GAP-02: curated celestial body diagnostics.
+      bodyCount: this._bodyCount,
+      bodyMeshReady: this._bodyMesh ? this._bodyMesh.isReady(true) : false,
+      bodyMaterialReady: this._bodyMesh?.material
+        ? this._bodyMesh.material.isReady(this._bodyMesh)
+        : false,
+      photoBodyCount: this._photoBodyCount,
+      photoBodyMeshReady: this._photoMesh
+        ? this._photoMesh.isReady(true)
+        : false,
+      photoBodyMaterialReady: this._photoMesh?.material
+        ? this._photoMesh.material.isReady(this._photoMesh)
+        : false,
+      photoBodyTextureReady: this._photoTex?.isReady() ?? false,
       // B3: volumetric nebula diagnostics.
       nebulaMode: this._nebulaMode,
       nebulaVolumes: NEBULA_VOLUMES.length,
@@ -1298,6 +1395,141 @@ class BabylonScene extends HTMLElement {
       haloAmp: this._quality.haloAmp,
       shootCount: this._quality.shootingStars,
     };
+  }
+
+  // --- GAP-01/GAP-02: curated celestial bodies ---
+
+  /** Builds both billboard passes over `this.bodies` (already placed by
+   * placeBody at this point): a procedural per-type beacon mesh (GAP-01,
+   * every body) and, for the subset with a real atlas cell, a photographic
+   * mesh sampling the shipped atlas.jpg (GAP-02). See celestial-bodies.ts's
+   * header for the full design rationale and the implementation guardrail
+   * this follows. */
+  private async _setupCelestialBodies(
+    scene: Scene,
+    engine: AbstractEngine,
+    backend: "webgpu" | "webgl2",
+  ) {
+    let atlasMap: AtlasMap | null = null;
+    try {
+      const res = await fetch("/assets/atlas-map.json");
+      if (res.ok) atlasMap = (await res.json()) as AtlasMap;
+    } catch (e) {
+      // Same fallback philosophy as loadStarField: a missing/broken atlas map
+      // degrades every body to procedural rather than blanking anything.
+      console.warn(
+        "[babylon-engine] atlas-map fetch failed, all bodies render procedurally",
+        e,
+      );
+    }
+
+    const { procedural, photo } = partitionCelestialBodies(
+      this.bodies,
+      atlasMap,
+    );
+    this._bodyCount = procedural.length;
+    this._photoBodyCount = photo.length;
+
+    const bb = buildProceduralBodyBillboards(
+      procedural.map((b) => ({
+        id: b.e.id,
+        pos: b.pos,
+        t: b.e.t ?? "star",
+        r: b.e.r ?? "common",
+        c: b.e.c ?? null,
+        sp: b.e.sp ?? null,
+      })),
+    );
+    const bodyMesh = new Mesh("celestialBodies", scene);
+    this._bodyMesh = bodyMesh;
+    const bodyVd = new VertexData();
+    bodyVd.positions = bb.positions;
+    bodyVd.indices = bb.indices;
+    bodyVd.applyToMesh(bodyMesh, false);
+    bodyMesh.setVerticesBuffer(
+      new VertexBuffer(engine, bb.meta, "bodyMeta", false, false, 4),
+    );
+    bodyMesh.alwaysSelectAsActiveMesh = true;
+    const bodyMat = new ShaderMaterial(
+      "celestialBodies",
+      scene,
+      { vertex: "ijBody", fragment: "ijBody" },
+      {
+        attributes: ["position", "bodyMeta"],
+        uniforms: ["view", "projection", "uViewport", "uTime"],
+        needAlphaBlending: true,
+        shaderLanguage:
+          backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+      },
+    );
+    bodyMat.backFaceCulling = false;
+    bodyMat.alphaMode = Constants.ALPHA_ADD;
+    bodyMat.setVector2(
+      "uViewport",
+      new Vector2(engine.getRenderWidth(), engine.getRenderHeight()),
+    );
+    bodyMesh.material = bodyMat;
+    this._bodyMat = bodyMat;
+
+    if (photo.length === 0) return;
+
+    const pb = buildPhotoBodyBillboards(
+      photo.map((b) => ({
+        id: b.e.id,
+        pos: b.pos,
+        t: b.e.t ?? "nebula",
+        r: b.e.r ?? "common",
+        sp: b.e.sp ?? null,
+        cell: b.cell,
+        index: b.index,
+      })),
+    );
+    const photoMesh = new Mesh("celestialBodyPhotos", scene);
+    this._photoMesh = photoMesh;
+    const photoVd = new VertexData();
+    photoVd.positions = pb.positions;
+    photoVd.indices = pb.indices;
+    photoVd.applyToMesh(photoMesh, false);
+    photoMesh.setVerticesBuffer(
+      new VertexBuffer(engine, pb.cells, "photoCell", false, false, 4),
+    );
+    photoMesh.setVerticesBuffer(
+      new VertexBuffer(engine, pb.meta, "photoMeta", false, false, 4),
+    );
+    photoMesh.alwaysSelectAsActiveMesh = true;
+    const photoMat = new ShaderMaterial(
+      "celestialBodyPhotos",
+      scene,
+      { vertex: "ijPhotoBody", fragment: "ijPhotoBody" },
+      {
+        attributes: ["position", "photoCell", "photoMeta"],
+        uniforms: ["view", "projection", "uViewport", "uTime"],
+        samplers: ["uTex"],
+        needAlphaBlending: true,
+        shaderLanguage:
+          backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+      },
+    );
+    photoMat.backFaceCulling = false;
+    // Additive, matching space-engine.js's single global blend state
+    // (SRC_ALPHA, ONE) for every pass — the vignette/disc falloff is baked
+    // into COLOUR (not relied on via alpha) precisely so additive blending
+    // hides the quad's hard edges against the near-black background rather
+    // than drawing a visible rectangle.
+    photoMat.alphaMode = Constants.ALPHA_ADD;
+    photoMat.setVector2(
+      "uViewport",
+      new Vector2(engine.getRenderWidth(), engine.getRenderHeight()),
+    );
+    photoMesh.material = photoMat;
+    this._photoMat = photoMat;
+
+    // Not awaited: Babylon loads the texture in the background and reports
+    // readiness via isReady(); the mesh renders untextured until it lands,
+    // exactly like the ship GLB's own async-not-awaited load.
+    const tex = new Texture("/assets/atlas.jpg", scene);
+    this._photoTex = tex;
+    photoMat.setTexture("uTex", tex);
   }
 
   // --- volumetric nebulae (B3) ---

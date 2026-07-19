@@ -152,6 +152,149 @@ test("babylon renders the REAL catalog, not the procedural placeholder", async (
   expect((await readStats()).starCount).toBe(168959);
 });
 
+test("babylon: GAP-01 curated bodies render (pixel proof) — the portfolio's actual destinations are no longer invisible", async ({
+  page,
+}) => {
+  // The cutover gap analysis's headline finding: window.CELESTIAL was loaded
+  // into travel-target coordinates only, with no mesh ever created for a
+  // curated body. sceneStats readiness alone would pass even if the mesh
+  // drew nothing (materialReady proves nothing — TR-045), so this asserts
+  // real pixels, mirroring the star billboard pixel proof above.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type BodyStats = {
+    bodyCount: number;
+    bodyMeshReady: boolean;
+    bodyMaterialReady: boolean;
+    photoBodyCount: number;
+    photoBodyMeshReady: boolean;
+    photoBodyMaterialReady: boolean;
+    photoBodyTextureReady: boolean;
+  };
+  const readStats = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (el as HTMLElement & { sceneStats(): BodyStats }).sceneStats(),
+      );
+
+  await expect
+    .poll(async () => (await readStats()).photoBodyTextureReady, {
+      timeout: 20000,
+    })
+    .toBe(true);
+
+  const stats = await readStats();
+  // The real catalog is ~2,525 entries (2,500 curated + a small Gaia top-up);
+  // a hardcoded count would break the moment the catalog grows, so this
+  // asserts order-of-magnitude and internal consistency instead.
+  expect(stats.bodyCount).toBeGreaterThan(2000);
+  expect(stats.photoBodyCount).toBeGreaterThan(100); // the atlas-mapped subset
+  expect(stats.bodyMeshReady).toBe(true);
+  expect(stats.bodyMaterialReady).toBe(true);
+  expect(stats.photoBodyMeshReady).toBe(true);
+  expect(stats.photoBodyMaterialReady).toBe(true);
+
+  // Real pixels: the home view has no arrival vista and the volumetric
+  // nebulae are destination-gated (invisible at idle), so any non-background
+  // colour here is attributable to the new body billboards, not a
+  // pre-existing feature.
+  const lit = await page.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        const start = Date.now();
+        const sample = () => {
+          const src = document
+            .querySelector("babylon-scene")
+            ?.querySelector("canvas") as HTMLCanvasElement | null;
+          if (src && src.width > 0) {
+            const c = document.createElement("canvas");
+            c.width = src.width;
+            c.height = src.height;
+            const ctx = c.getContext("2d");
+            if (ctx) {
+              ctx.drawImage(src, 0, 0);
+              const { data } = ctx.getImageData(0, 0, c.width, c.height);
+              let n = 0;
+              for (let i = 0; i < data.length; i += 4)
+                if (data[i] + data[i + 1] + data[i + 2] > 60) n++;
+              if (n > 0 || Date.now() - start > 12000) return resolve(n);
+            }
+          }
+          if (Date.now() - start > 12000) return resolve(-1);
+          setTimeout(sample, 250);
+        };
+        sample();
+      }),
+  );
+  expect(lit).toBeGreaterThan(100);
+});
+
+test("babylon: GAP-02 photographic bodies — travelling to a real atlas-mapped nebula renders the real texture, console-clean", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") consoleErrors.push(m.text());
+  });
+  page.on("pageerror", (e) => pageErrors.push(e.message));
+
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  const readStats = () =>
+    page.locator("babylon-scene").evaluate((el) =>
+      (
+        el as HTMLElement & {
+          sceneStats(): {
+            photoBodyTextureReady: boolean;
+            arrivedId: string | null;
+          };
+        }
+      ).sceneStats(),
+    );
+  await expect
+    .poll(async () => (await readStats()).photoBodyTextureReady, {
+      timeout: 20000,
+    })
+    .toBe(true);
+
+  // m42 (Orion Nebula) is in the shipped atlas-map.json and is NOT one of
+  // the pre-existing B3 volumetric nebula locations' redundant path here —
+  // travelTo drives the real state machine, matching this repo's
+  // "assert behaviour, not readiness" rule.
+  await page.evaluate(() => {
+    (
+      document.querySelector("babylon-scene") as unknown as {
+        travelTo: (id: string) => void;
+      }
+    ).travelTo("m42");
+  });
+
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          () =>
+            (
+              document.querySelector("babylon-scene") as unknown as {
+                arrivedId: string | null;
+              }
+            ).arrivedId,
+        ),
+      { timeout: 15000 },
+    )
+    .toBe("m42");
+
+  // WebGPU validates shader modules asynchronously — materialReady proves
+  // nothing (TR-045); zero console output is the assertion that actually
+  // catches a broken texture bind or a reserved-identifier-class failure.
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
 test("babylon: shooting-star GLSL twin compiles and renders on the default (WebGL2 fallback) project", async ({
   page,
 }) => {

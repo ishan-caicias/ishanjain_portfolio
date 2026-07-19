@@ -97,9 +97,11 @@ project's source of truth for decisions and verification history.
 - **Cinematic flight** (default Babylon path): chase-camera journeys with accel/flip/decel
   burns, a GLB fighter with layered thruster plume + heat shimmer, volumetric nebulae that
   reveal on approach, and a rigid-body asteroid belt with idle collisions (Havok).
-- **Known post-cutover deltas**: the Babylon path does not yet render curated destination
-  bodies or the photographic DSO layer, and has no field-star hover, station sprite markers, or
-  free-look drag — all tracked in
+- **Curated destinations**: every catalog body renders as a type-shaded beacon (star, planet,
+  nebula, galaxy, cluster, deep field), with real NASA/ESA photographic imagery and lit rotating
+  globes for the 267-body atlas-mapped subset.
+- **Known post-cutover deltas**: the Babylon path still has no field-star hover, station sprite
+  markers, or free-look drag — tracked in
   [the cutover gap analysis](docs/analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md).
   `?engine=webgl` still has them.
 - **Classic View Toggle**: switch between travel mode and a traditional scrolling page.

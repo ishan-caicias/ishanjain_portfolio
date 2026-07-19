@@ -48,17 +48,64 @@ loss · S3 = degraded or cosmetic · S4 = non-functional, process, or coverage.
 
 ---
 
+## Implementation guardrail (added 2026-07-19, before GAP-01/02 work starts)
+
+Before writing code against any GAP item, check for duplication and apply clean-code
+discipline — **scoped to what this repo's own conventions actually allow**, stated explicitly
+so the scope decision is auditable rather than assumed:
+
+- **`space-engine.js` is archived-in-place and frozen** (ADR-0006, TR-044: "the live WebGL1
+  engine stays frozen as the shipping default through B6"). It is no longer the shipping
+  default and is kept only as the rollback lever. **Do not refactor it** to share code with
+  the Babylon path — that touches a file this repo has explicitly decided stops changing.
+  Cross-engine sharing of _business logic_ (type→appearance rules, photometric constants) is
+  therefore done by **porting the rule to a new, Babylon-side pure module**, not by extracting
+  a shared module both engines import — consistent with how `ship-dynamics.ts`,
+  `star-catalog.ts`, and `perf-telemetry.ts` already work (engine-agnostic pure modules that
+  happen to be consumed by one engine today).
+- **Shader code cannot be shared across engines by construction** — WebGL1 GLSL ES 1.0 and
+  Babylon's GLSL/WGSL twins are different languages against different APIs. The DRY target for
+  shaders is _within_ the Babylon path: reuse the existing Planckian colour ramp, photometric
+  flux math, and billboard-quad vertex layout (`star-field.ts`, `nebula-field.ts`) rather than
+  re-deriving them for curated bodies. **Every new shader feature still ships both GLSL and
+  WGSL twins**, line-for-line parallel, checked against the reserved-WGSL-identifier list
+  (CLAUDE.md #4/#5).
+- **Within the new GAP-01/GAP-02 work itself**, curated-body billboards (GAP-01) and
+  photographic billboards (GAP-02) are the same underlying primitive — a camera-facing quad
+  positioned at a catalog body's world coordinate, differing only in what's sampled
+  (procedural per-type shader vs. a texture). Build **one shared billboard mesh/shader
+  infrastructure with a per-instance mode flag**, not two parallel systems. This is the
+  concrete SOLID/DRY decision for this pass — the alternative (two independent billboard
+  pipelines) is the kind of premature-parallel-structure YAGNI exists to prevent.
+- **Proportionality over completeness.** Legacy's photo layer includes canvas-composed texture
+  atlases, dynamic close-up billboard fetch-on-arrival, and rotating textured planet globes
+  with Saturn's rings — a multi-TR subsystem historically (TR-014…021 era). Matching it
+  byte-for-byte in one pass is not the target; a real, verified, honestly-scoped first version
+  is, following this repo's own established convention (TR-046…050: "visual tuning is a first
+  pass, owner taste pass expected"). Anything descoped is named explicitly in the implementing
+  TR, not silently dropped.
+- **TDD where it earns its keep.** Pure appearance/derivation functions (type → size boost,
+  rarity → scale, hex → colour ramp position) get unit tests written against the ported legacy
+  behaviour _before_ the Babylon-side shader consumes them — this repo already unit-tests
+  shader source as strings (TR-044/045) and pure modules directly (`star-field.ts`,
+  `nebula-field.ts` tests), so this is applying the existing pattern, not introducing a new one.
+- **No behaviour change to the archived engine, ever, as a side effect of this work.** If a
+  Babylon-side fix seems to require touching `space-engine.js`, that is a signal the design is
+  wrong, not a reason to touch it.
+
+---
+
 ## A. Rendering gaps — legacy renders it, Babylon does not
 
-| ID         | Gap                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Sev    | Evidence                                       | Named in docs?                                                                                     |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| **GAP-01** | **Curated bodies not rendered.** Legacy draws every `window.CELESTIAL` entry as a procedurally-shaded beacon with per-type appearance: black hole with photon ring + lensed arcs, galaxy with inclined disc + nucleus, nebula with 3-lobed cloud, globular/open cluster, planet with limb darkening + terminator, star with diffraction spikes (`space-engine.js:187-312, 885-948`). Babylon renders **none** — bodies exist only as travel coordinates (`babylon-engine.ts:1084`). Arrival lands on empty sky. | **S1** | `new Mesh(` inventory: no body mesh exists     | **No — undocumented**                                                                              |
-| **GAP-02** | **Photographic DSO layer absent.** Legacy renders real NASA/ESA imagery as camera-facing billboards from a composed atlas, plus equirect-textured _rotating_ planet globes with atmospheric rim glow, Saturn's ring system with Cassini gap, and cosmological redshift with depth (`space-engine.js:391-442, 966-1179`). Babylon has no atlas, no `window.CELESTIAL_IMGMAP` consumer, no photo path.                                                                                                            | **S1** | no `atlas`/`photo` code in babylon path        | **No — undocumented**                                                                              |
-| **GAP-03** | **Milky Way band absent.** Legacy generates a 1024×512 procedural integrated-starlight equirect map — disc + bulge, fBm star clouds, named Cygnus/Carina/Scutum clouds, the Great Rift dust lanes, the Coalsack — sampled per view ray behind everything (`space-engine.js:1589-1729`). Babylon has no skybox and no galactic band; background is flat vacuum black (`babylon-engine.ts:1069`).                                                                                                                 | **S2** | no milky-way/band/skybox code                  | **No — undocumented**                                                                              |
-| **GAP-04** | **Constellation figures absent.** Legacy draws constellation line-figures at r=720, fading out with relativistic beta, toggled by the `constellations` attribute (`space-engine.js:1180-1201, 2264`). No Babylon equivalent.                                                                                                                                                                                                                                                                                    | **S2** | no constellation code                          | **No — undocumented**                                                                              |
-| **GAP-05** | **Warp star trails absent.** Legacy streaks every 3rd star from previous to current camera position above `warpSpeed > 0.4` (`space-engine.js:325-353, 2219-2238`) — the primary visual signature of travel. No Babylon equivalent.                                                                                                                                                                                                                                                                             | **S2** | no trail pass                                  | **No — undocumented**                                                                              |
-| **GAP-06** | **Relativistic aberration + Doppler not ported.** Legacy crowds stars toward the travel vector and applies blueshift/beaming ahead, redshift/dimming astern, on stars, trails, photo bodies and the Milky Way (`space-engine.js:166-175, 227-234, 455-472`).                                                                                                                                                                                                                                                    | **S2** | `babylon-engine.ts:461-463` states it verbatim | **Yes** — TR-038/041/042 ("newly possible, still not absorbed"). **Not in ADR-0006's delta list.** |
-| **GAP-07** | **Ember sparks + idle bob absent.** Legacy bursts 14 sparks on burn start / 8 on stop, and idle-bobs the hull (`space-engine.js:2540-2541, 2699-2759`). Babylon has plume + shimmer but neither.                                                                                                                                                                                                                                                                                                                | **S3** | no spark/bob code                              | No                                                                                                 |
+| ID                                              | Gap                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Sev        | Evidence                                                        | Named in docs?                                                                                     |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| ~~**GAP-01**~~ **RESOLVED 2026-07-20 (TR-056)** | ~~**Curated bodies not rendered.** Legacy draws every `window.CELESTIAL` entry as a procedurally-shaded beacon with per-type appearance: black hole with photon ring + lensed arcs, galaxy with inclined disc + nucleus, nebula with 3-lobed cloud, globular/open cluster, planet with limb darkening + terminator, star with diffraction spikes (`space-engine.js:187-312, 885-948`). Babylon renders **none** — bodies exist only as travel coordinates (`babylon-engine.ts:1084`). Arrival lands on empty sky.~~ Fixed: `src/lib/celestial-bodies.ts` ports the per-type shading into GLSL/WGSL billboard twins; ~2,525 bodies render.                                                        | ~~**S1**~~ | `new Mesh(` inventory: no body mesh exists (at time of writing) | **No — undocumented** (at time of writing)                                                         |
+| ~~**GAP-02**~~ **RESOLVED 2026-07-20 (TR-056)** | ~~**Photographic DSO layer absent.** Legacy renders real NASA/ESA imagery as camera-facing billboards from a composed atlas, plus equirect-textured _rotating_ planet globes with atmospheric rim glow, Saturn's ring system with Cassini gap, and cosmological redshift with depth (`space-engine.js:391-442, 966-1179`). Babylon has no atlas, no `window.CELESTIAL_IMGMAP` consumer, no photo path.~~ Fixed: the same module reuses the shipped `atlas.jpg`+`atlas-map.json` for 267 bodies — DSO vignette/redshift, rotating lit globes, Saturn's ring. Runtime atlas composition and the arrival-only high-res fallback are named as deliberately descoped in TR-056, not silently dropped. | ~~**S1**~~ | no `atlas`/`photo` code in babylon path (at time of writing)    | **No — undocumented** (at time of writing)                                                         |
+| **GAP-03**                                      | **Milky Way band absent.** Legacy generates a 1024×512 procedural integrated-starlight equirect map — disc + bulge, fBm star clouds, named Cygnus/Carina/Scutum clouds, the Great Rift dust lanes, the Coalsack — sampled per view ray behind everything (`space-engine.js:1589-1729`). Babylon has no skybox and no galactic band; background is flat vacuum black (`babylon-engine.ts:1069`).                                                                                                                                                                                                                                                                                                  | **S2**     | no milky-way/band/skybox code                                   | **No — undocumented**                                                                              |
+| **GAP-04**                                      | **Constellation figures absent.** Legacy draws constellation line-figures at r=720, fading out with relativistic beta, toggled by the `constellations` attribute (`space-engine.js:1180-1201, 2264`). No Babylon equivalent.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | **S2**     | no constellation code                                           | **No — undocumented**                                                                              |
+| **GAP-05**                                      | **Warp star trails absent.** Legacy streaks every 3rd star from previous to current camera position above `warpSpeed > 0.4` (`space-engine.js:325-353, 2219-2238`) — the primary visual signature of travel. No Babylon equivalent.                                                                                                                                                                                                                                                                                                                                                                                                                                                              | **S2**     | no trail pass                                                   | **No — undocumented**                                                                              |
+| **GAP-06**                                      | **Relativistic aberration + Doppler not ported.** Legacy crowds stars toward the travel vector and applies blueshift/beaming ahead, redshift/dimming astern, on stars, trails, photo bodies and the Milky Way (`space-engine.js:166-175, 227-234, 455-472`).                                                                                                                                                                                                                                                                                                                                                                                                                                     | **S2**     | `babylon-engine.ts:461-463` states it verbatim                  | **Yes** — TR-038/041/042 ("newly possible, still not absorbed"). **Not in ADR-0006's delta list.** |
+| **GAP-07**                                      | **Ember sparks + idle bob absent.** Legacy bursts 14 sparks on burn start / 8 on stop, and idle-bobs the hull (`space-engine.js:2540-2541, 2699-2759`). Babylon has plume + shimmer but neither.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | **S3**     | no spark/bob code                                               | No                                                                                                 |
 
 **Balance note — Babylon-only gains.** The flip is not a net loss. Volumetric raymarched
 nebulae, GPU shooting stars, the Havok asteroid belt with proximity slowdown/deflection/
@@ -148,6 +195,14 @@ Recorded so they don't get re-raised as bugs:
 
 ## Recommended triage
 
+> **UPDATE 2026-07-20 (TR-056):** GAP-01 and GAP-02 are resolved — see the disposed rows above.
+> The owner's actual decision was **option (b) without the temporary revert**: the default
+> stayed on Babylon and the fix landed forward in the same working session. That was a
+> reasonable call given how quickly it landed, but it means there was a window (the working
+> tree between the gap analysis and TR-056) where the shipping default genuinely had this gap
+> live — recorded honestly, not smoothed over. The paragraphs below are kept as the record of
+> what was recommended at the time.
+
 **Before treating the flip as complete**, GAP-01 and GAP-02 warrant a stop-and-decide. They
 are not "bugs to file after cutover" — together they mean the destinations the portfolio is
 built around are invisible on the shipping default. The realistic options are (a) revert the
@@ -164,12 +219,14 @@ wrong data is worse than displaying none.
 GAP-15 is the next cheapest high-value fix and would also un-pin `craft-ship.spec.ts`
 (GAP-18), recovering default-path coverage as a side effect.
 
-**Suggested ordering:** GAP-01 → GAP-14 → GAP-15 → GAP-10 → GAP-03/04/05 → GAP-08/09/11 →
-re-point the pinned specs (GAP-17…20) → GAP-21 → close §A (GAP-22).
+**Suggested ordering, updated post-TR-056:** ~~GAP-01~~ → ~~GAP-02~~ → GAP-14 → GAP-15 →
+GAP-10 → GAP-03/04/05 → GAP-08/09/11 → re-point the pinned specs (GAP-17…20) → GAP-21 →
+close §A (GAP-22).
 
-**ADR-0006 needs amending regardless of the decision.** Its three-delta list currently
-understates the cutover's scope materially, and an ADR that under-reports its own
-consequences is the kind of record this repo's history explicitly warns against.
+**ADR-0006 still needs amending** — not for GAP-01/02 anymore, but for the remaining ~23 gaps
+this document names that ADR-0006's three-delta list never mentioned. An ADR that
+under-reports its own consequences is the kind of record this repo's history explicitly warns
+against, and that critique doesn't go away because the two most severe items are now fixed.
 
 ---
 
