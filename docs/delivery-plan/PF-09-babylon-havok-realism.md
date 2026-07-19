@@ -221,6 +221,20 @@ reported regardless, since WebGPU shader validation is asynchronous). Owner caug
 demo server. Fixed; the verification gap (no console-error check) is closed in
 `webgpu-hardware.spec.ts`.
 
+**Next increment (owner-selected 2026-07-19): volumetric/raymarched nebulae, not the ship-mesh
+track.** Rationale recorded so a fresh session doesn't have to re-derive it: nebulae is
+self-contained (no new blocking dependency, extends B3 directly), whereas the ship-mesh loading
+track that would unblock thrusters/heat-shimmer/docking-approach polish is unscoped, larger, and
+was deliberately left for a later decision. **Starting point for the next session:** design the
+WebGPU compute raymarching pass (fragment-shader raymarch is the fallback tier — no compute API on
+WebGL2) as a new post-process or dedicated mesh layer, tier-gated per the B3 exit criterion
+("fallback tier still coherent"). No code written yet for this item — INSPECT first: check whether
+`space-engine.js` has any nebula-adjacent visual (grep "nebula"/"gas"/"cloud") the same way TR-044
+grepped for shooting stars before concluding "not a port," then run the Strategy Gate for a
+`3feature` scorecard before IMPLEMENT. B2's own open exit condition (owner real-device fps/startup
+re-measurement, flagged not-yet-trustworthy in TR-043) remains separately open and was
+consciously deferred, not resolved, by this choice.
+
 ### B4 — Havok physics showcase ⭐ (the portfolio centrepiece)
 
 Lazy-load Havok on the travel surface. Deliver, as the marquee interactive piece:
