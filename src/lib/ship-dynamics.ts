@@ -285,6 +285,28 @@ export function quatDamp(
   return quatSlerp(current, target, 1 - Math.exp(-lambda * dt));
 }
 
+/** Unit quaternion for a rotation of `angle` radians around a unit `axis`. */
+export function quatFromAxisAngle(
+  axis: readonly number[],
+  angle: number,
+): Quat {
+  const s = Math.sin(angle / 2);
+  return [axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(angle / 2)];
+}
+
+/** Hamilton product `a * b` — composes rotations so `b` is applied first,
+ * then `a` (standard quaternion composition order). */
+export function quatMultiply(a: Quat, b: Quat): Quat {
+  const [ax, ay, az, aw] = a;
+  const [bx, by, bz, bw] = b;
+  return [
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw,
+    aw * bw - ax * bx - ay * by - az * bz,
+  ];
+}
+
 /** Column-major mat4 from a unit quaternion (rotation only). */
 export function quatToMat4(q: Quat): number[] {
   const [x, y, z, w] = q;

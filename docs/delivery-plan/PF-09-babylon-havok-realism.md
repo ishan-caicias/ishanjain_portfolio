@@ -176,6 +176,20 @@ readings). **B2 is code-complete; all six sub-steps shipped and verified
 [TR-040](../test-reports/TR-040.md), [TR-041](../test-reports/TR-041.md),
 [TR-042](../test-reports/TR-042.md)).**
 
+**Demo-deploy report and fixes, 2026-07-19 ([TR-043](../test-reports/TR-043.md)).** First
+real-device readings from the redeployed demo surfaced a genuine defect: desktop WebGPU rendered
+**blurry** on HiDPI displays — `adaptToDeviceRatio` was never set on the WebGPU engine (the WebGL2
+fallback had it correctly since B1; WebGPUEngine's constructor takes it via `options`, not a
+positional arg, and it silently defaulted to `false`). ✅ **Fixed**, verified on real WebGPU
+hardware with a simulated HiDPI display. Also fixed: the idle-at-home view was completely frozen —
+✅ ported the live engine's ambient idle drift (converted to a frame-rate-independent rate). The
+reported "no 360 nav" and "no spaceship" are confirmed **not** regressions — both have been named,
+documented scope boundaries since B0/step-3 (TR-040), not features that broke. **The startup
+re-measurement condition above remains open**: the owner's desktop (3023 ms) and Android (267 ms)
+readings are flagged, not accepted at face value — 267 ms is implausibly fast for the catalog
+decode and needs confirmation it was a cold load, matching the rigor TR-032/033 established for the
+B1 gate.
+
 ### B3 — Volumetric & particle rendering
 
 GPU-particle **thrusters** (retire the F3 plume), GPU-particle **idle shooting stars**,

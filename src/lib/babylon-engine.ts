@@ -83,7 +83,9 @@ import {
   CHASE_OFFSET_REST,
   chaseOffsetAt,
   quatDamp,
+  quatFromAxisAngle,
   quatFromUnitVectors,
+  quatMultiply,
   QUAT_IDENTITY,
   raDecToDir,
   SHIP_MAX_DT,
@@ -162,6 +164,18 @@ function placeStation(s: {
  * agnostic (plain vector-to-vector rotation), so reusing it here is safe as
  * long as this constant, not the live engine's, is the reference forward. */
 const BABYLON_FORWARD: [number, number, number] = [0, 0, 1];
+
+/** Babylon's default up axis (left-handed, Y-up — matches FreeCamera's
+ * default `upVector`). Used only for the ambient idle drift below. */
+const UP_AXIS: [number, number, number] = [0, 1, 0];
+
+/** Ambient idle-at-home drift rate (rad/s). Matches space-engine.js's own
+ * `yaw += 0.00012` per frame at its implicit ~60fps assumption
+ * (0.00012 * 60 ≈ 0.0072 rad/s) — converted to a proper per-second rate here
+ * rather than copying the frame-rate-dependent raw increment. A very slow
+ * spin (~14.5 minutes per revolution), not a feature — just enough that the
+ * home view isn't perfectly frozen while idle. */
+const IDLE_DRIFT_RATE = 0.0072;
 
 /** idle: parked. aim: launch-turn preview before the burn (position holds).
  * warp: the eased chase-camera flight itself. Mirrors space-engine.js's
@@ -505,7 +519,17 @@ async function createEngine(canvas: HTMLCanvasElement): Promise<{
     try {
       const { WebGPUEngine } =
         await import("@babylonjs/core/Engines/webgpuEngine");
-      const engine = new WebGPUEngine(canvas, { antialias: true });
+      // adaptToDeviceRatio has NO positional constructor slot on WebGPUEngine
+      // (unlike the WebGL2 `Engine` below, which takes it as its 4th arg) —
+      // it must be set via this options field, or it silently defaults to
+      // false and the canvas renders at 1x CSS-pixel resolution on any HiDPI
+      // display, then gets stretched to fill the physical pixel grid by the
+      // browser. That's a real, visible defect (blur), not a Babylon quirk —
+      // confirmed against @babylonjs/core's AbstractEngine constructor source.
+      const engine = new WebGPUEngine(canvas, {
+        antialias: true,
+        adaptToDeviceRatio: true,
+      });
       await engine.initAsync();
       return { engine, backend: "webgpu" };
     } catch (e) {
@@ -811,7 +835,12 @@ class BabylonScene extends HTMLElement {
    * 6) overrides three things, matching the live engine's own `reduced`
    * branches exactly: fixed short durations instead of distance-scaled ones
    * (resolved once in `_beginWarp`), `CHASE_OFFSET_REST` instead of the
-   * waypoint offset, and a SNAPPED look instead of a damped one. */
+   * waypoint offset, and a SNAPPED look instead of a damped one.
+   *
+   * Idle-at-home: a slow ambient orientation drift, ported from the live
+   * engine's own `yaw += 0.00012` — without it, the home view is perfectly
+   * frozen whenever nothing is traveling, which reads as "the scene is dead"
+   * rather than "parked." */
   private _tickWarp(camera: FreeCamera) {
     const now = performance.now();
     const dt = Math.min(
@@ -821,6 +850,16 @@ class BabylonScene extends HTMLElement {
     this._lastFrameMs = now;
 
     const w = this.warp;
+    if (
+      w.mode === "idle" &&
+      !this._reduced &&
+      Math.hypot(this.cam[0], this.cam[1], this.cam[2]) < 1
+    ) {
+      this._camQuat = quatMultiply(
+        quatFromAxisAngle(UP_AXIS, IDLE_DRIFT_RATE * dt),
+        this._camQuat,
+      );
+    }
     if (w.mode === "aim") {
       if (now - (w.start ?? now) >= (w.aimDur ?? AIM_DUR_MS)) {
         w.mode = "warp";

@@ -30,9 +30,12 @@ import {
   travelFrame,
   viewToNdc,
   quatDamp,
+  quatFromAxisAngle,
   quatFromUnitVectors,
+  quatMultiply,
   quatToMat4,
   restPoseQuat,
+  QUAT_IDENTITY,
   type Quat,
   plumeAlpha,
   plumeFlareLength,
@@ -270,6 +273,62 @@ describe("PF-08 F1 quaternion flight state", () => {
     expect(engineGlowIntensity({ ...base, parked: true })).toBeGreaterThan(
       engineGlowIntensity({ ...base, coasting: true }),
     );
+  });
+});
+
+describe("PF-09 B2 — ambient idle drift (quatFromAxisAngle, quatMultiply)", () => {
+  const apply = (q: readonly number[], v: readonly number[]) => {
+    const m = quatToMat4(q as Quat);
+    return [
+      m[0] * v[0] + m[4] * v[1] + m[8] * v[2],
+      m[1] * v[0] + m[5] * v[1] + m[9] * v[2],
+      m[2] * v[0] + m[6] * v[1] + m[10] * v[2],
+    ];
+  };
+
+  it("quatFromAxisAngle is the identity at angle 0", () => {
+    expect(quatFromAxisAngle([0, 1, 0], 0)).toEqual(QUAT_IDENTITY);
+  });
+
+  it("quatFromAxisAngle rotates a perpendicular vector by the given angle around Y", () => {
+    const q = quatFromAxisAngle([0, 1, 0], Math.PI / 2);
+    const out = apply(q, [1, 0, 0]);
+    // right-hand rotation about +Y takes +X toward -Z
+    expect(out[0]).toBeCloseTo(0, 5);
+    expect(out[1]).toBeCloseTo(0, 5);
+    expect(out[2]).toBeCloseTo(-1, 5);
+  });
+
+  it("quatFromAxisAngle always returns a unit quaternion", () => {
+    for (const angle of [0.01, 1, 3, -2.5]) {
+      const [x, y, z, w] = quatFromAxisAngle([0, 1, 0], angle);
+      expect(Math.hypot(x, y, z, w)).toBeCloseTo(1, 10);
+    }
+  });
+
+  it("quatMultiply composes two axis rotations into their sum (commutative for a shared axis)", () => {
+    const a = quatFromAxisAngle([0, 1, 0], 0.3);
+    const b = quatFromAxisAngle([0, 1, 0], 0.5);
+    const composed = quatMultiply(a, b);
+    const expected = quatFromAxisAngle([0, 1, 0], 0.8);
+    for (let i = 0; i < 4; i++)
+      expect(Math.abs(composed[i])).toBeCloseTo(Math.abs(expected[i]), 5);
+  });
+
+  it("quatMultiply by identity is a no-op", () => {
+    const q = quatFromAxisAngle([0, 1, 0], 1.1);
+    const out = quatMultiply(q, QUAT_IDENTITY);
+    for (let i = 0; i < 4; i++) expect(out[i]).toBeCloseTo(q[i], 10);
+  });
+
+  it("repeated small multiplications accumulate a full rotation without drifting off unit length", () => {
+    let q: Quat = QUAT_IDENTITY;
+    const step = quatFromAxisAngle([0, 1, 0], (2 * Math.PI) / 360); // 1 deg
+    for (let i = 0; i < 360; i++) q = quatMultiply(step, q);
+    const [x, y, z, w] = q;
+    expect(Math.hypot(x, y, z, w)).toBeCloseTo(1, 6);
+    // a full 360° turn returns (approximately) to identity
+    expect(Math.abs(w)).toBeCloseTo(1, 3);
   });
 });
 

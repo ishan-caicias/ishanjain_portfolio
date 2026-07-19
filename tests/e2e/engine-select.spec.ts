@@ -379,6 +379,55 @@ test("babylon: reduced motion forces fixed short durations and CHASE_OFFSET_REST
     .toBe("m42");
 });
 
+test("babylon: idle-at-home view drifts slowly rather than staying frozen (owner-reported 'static')", async ({
+  page,
+}) => {
+  // Owner feedback on the deployed demo: "the background remains static ...
+  // no glimmer ... no 360 nav ... no spaceship". Free-look drag and the ship
+  // mesh are genuinely not built yet (see TR-040/041/042) — this test covers
+  // the one part of that report that WAS a real, cheap gap: nothing animated
+  // at all while parked at home, which reads as "the scene is dead" rather
+  // than "parked." Ported from the live engine's own ambient yaw drift.
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  const readQuat = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate(
+        (el) =>
+          (el as unknown as { _camQuat: [number, number, number, number] })
+            ._camQuat,
+      );
+
+  await expect
+    .poll(
+      async () =>
+        page.locator("babylon-scene").evaluate(
+          (el) =>
+            (
+              el as HTMLElement & {
+                sceneStats(): Record<string, unknown>;
+              }
+            ).sceneStats().starSource,
+        ),
+      { timeout: 20000 },
+    )
+    .toBe("catalog");
+
+  const before = await readQuat();
+  await page.waitForTimeout(1500);
+  const after = await readQuat();
+
+  const delta = Math.hypot(
+    after[0] - before[0],
+    after[1] - before[1],
+    after[2] - before[2],
+    after[3] - before[3],
+  );
+  expect(delta).toBeGreaterThan(0);
+});
+
 test("perf overlay is opt-in via ?perf=1", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("space-engine");

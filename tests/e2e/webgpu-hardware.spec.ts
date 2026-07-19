@@ -109,3 +109,42 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
     await browser.close();
   }
 });
+
+test("HiDPI: WebGPU canvas renders at physical-pixel resolution, not CSS-pixel resolution (owner-reported blur)", async () => {
+  // The owner reported the deployed demo reads as blurry on desktop. Root
+  // cause: WebGPUEngine's adaptToDeviceRatio has NO positional constructor
+  // slot (unlike the WebGL2 Engine, which took it as a 4th arg and was
+  // already correct) — it must be set via the options object, and was
+  // silently defaulting to false. On any HiDPI display the canvas rendered
+  // at 1x CSS-pixel resolution, then got stretched by the browser to fill the
+  // physical pixel grid. Simulated here with deviceScaleFactor: 2 (a common
+  // Windows/macOS HiDPI value) rather than trusting the fix by inspection.
+  const browser = await realAdapterOrSkip();
+  try {
+    const page = await browser.newPage({ deviceScaleFactor: 2 });
+    await page.goto(`${BASE_URL}/?engine=babylon`);
+    await page.waitForSelector("babylon-scene", { timeout: 15000 });
+    await expect
+      .poll(async () => (await readStats(page)).starSource, { timeout: 20000 })
+      .not.toBeNull();
+
+    const res = await page.locator("babylon-scene canvas").evaluate((c) => {
+      const canvas = c as HTMLCanvasElement;
+      return {
+        bufferWidth: canvas.width,
+        clientWidth: canvas.clientWidth,
+        dpr: window.devicePixelRatio,
+      };
+    });
+
+    // Buffer resolution must scale with the emulated 2x DPR, not stay at 1x
+    // CSS-pixel resolution. Allow rounding slack rather than an exact ratio.
+    const ratio = res.bufferWidth / res.clientWidth;
+    expect(res.dpr).toBe(2);
+    expect(ratio).toBeGreaterThan(1.8);
+
+    await page.close();
+  } finally {
+    await browser.close();
+  }
+});
