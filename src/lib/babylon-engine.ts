@@ -103,7 +103,6 @@ import {
   Quaternion,
   Vector2,
   Vector3,
-  Vector4,
 } from "@babylonjs/core/Maths/math.vector";
 import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
@@ -143,6 +142,16 @@ import {
   CONSTELLATION_VERTEX_WGSL,
 } from "./constellations";
 import {
+  buildGd1TrailMesh,
+  GD1_TRAIL_FRAGMENT_GLSL,
+  GD1_TRAIL_FRAGMENT_WGSL,
+  GD1_TRAIL_VERTEX_GLSL,
+  GD1_TRAIL_VERTEX_WGSL,
+  orderGd1Stream,
+  radialVelocityToColor,
+  type Vec3,
+} from "./gd1-trail";
+import {
   advanceTrailCamera,
   buildStarTrails,
   trailFade,
@@ -169,6 +178,7 @@ import {
   beltDensityAt,
   beltPullAccel,
   buildAsteroidField,
+  buildRealAsteroidField,
   displaceRockVertices,
   IMPACT_SHAKE,
   impactShakeAmplitude,
@@ -180,6 +190,9 @@ import {
   wasmSimdSupported,
   type AsteroidField,
 } from "./babylon-asteroids";
+// PF-10 C3: real Gaia DR3 asteroids for the physics tier. A generated module (not a fetch) so
+// the field can never be half-built because a request was still in flight — see its header.
+import { REAL_ASTEROIDS } from "../data/asteroids-dr3-physics";
 import type { StarField } from "./star-field";
 import {
   buildStarBillboards,
@@ -221,6 +234,7 @@ import {
   nebulaRevealTarget,
   nebulaWgslCompute,
   quatRotate,
+  topTwoReveal,
 } from "./nebula-field";
 import type { Quat } from "./ship-dynamics";
 import type { CelestialFigure } from "@/data/celestial/celestial.d.ts";
@@ -577,11 +591,19 @@ async function loadStarField(): Promise<{
  * instead (see `_loadBonusStarLayers`), a real progressive-enhancement merge into the already-
  * visible star mesh, matching the same non-blocking philosophy already used for the ship GLB and
  * the Milky Way band's chunked texture build. Order matters: CNS5 first (smallest, most likely
- * useful even under network pressure), Oort cloud second, white dwarfs last (largest).
+ * useful even under network pressure), Oort cloud second, the cluster background layer third,
+ * white dwarfs last (largest).
+ *
+ * `clusters-bg.png` (PF-10 C1, 12,065 records — see scripts/gaia-clusters-pngpack.mjs) merges
+ * the MWSC + Hunt-Reffert 2023 + OCDR2 catalogs, minus the 35 already-curated named clusters
+ * (celestial-clusters.js, deduped by real sky position + distance, not name matching). Object
+ * type byte 1 ("cluster: soft glow, no PSF core" — ijStarFragmentShader) renders every point
+ * exactly the same way the 35 curated clusters already do, just without a per-object dossier.
  */
 const BONUS_CATALOG_CHUNKS = [
   "assets/cns5.png",
   "assets/oortcloud.png",
+  "assets/clusters-bg.png",
   "assets/whitedwarfs-edr3.png",
 ] as const;
 
@@ -745,6 +767,7 @@ void main(){
   float a;
   if (ty > 0.5 && ty < 1.5)      { a = exp(-d*d*2.6)*0.80; }  // cluster: soft glow, no PSF core
   else if (ty > 2.5 && ty < 3.5) { a = exp(-d*d*4.0)*0.85; }  // galaxy smudge
+  else if (ty > 5.5 && ty < 6.5) { a = exp(-d*d*9.0)*0.70; }  // DR3 asteroid: tight, no bloom
   else if (ty > 6.5)             { a = exp(-d*d*3.2)*0.55; }  // oort dust grain
   else { a = exp(-d*d*6.0) + vHalo*exp(-d*3.0)*0.18; }        // stellar PSF + bloom
   gl_FragColor = vec4(vColor, a*vAlpha);
@@ -878,6 +901,7 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   var a : f32;
   if (ty > 0.5 && ty < 1.5) { a = exp(-d * d * 2.6) * 0.80; }
   else if (ty > 2.5 && ty < 3.5) { a = exp(-d * d * 4.0) * 0.85; }
+  else if (ty > 5.5 && ty < 6.5) { a = exp(-d * d * 9.0) * 0.70; }
   else if (ty > 6.5) { a = exp(-d * d * 3.2) * 0.55; }
   else { a = exp(-d * d * 6.0) + fragmentInputs.vHalo * exp(-d * 3.0) * 0.18; }
   fragmentOutputs.color = vec4<f32>(fragmentInputs.vColor, a * fragmentInputs.vAlpha);
@@ -1095,6 +1119,12 @@ ShaderStore.ShadersStoreWGSL["ijConstellationVertexShader"] =
   CONSTELLATION_VERTEX_WGSL;
 ShaderStore.ShadersStoreWGSL["ijConstellationFragmentShader"] =
   CONSTELLATION_FRAGMENT_WGSL;
+// PF-10 C1: GD-1 connected-trail visual — see gd1-trail.ts's header.
+ShaderStore.ShadersStore["ijGd1TrailVertexShader"] = GD1_TRAIL_VERTEX_GLSL;
+ShaderStore.ShadersStore["ijGd1TrailFragmentShader"] = GD1_TRAIL_FRAGMENT_GLSL;
+ShaderStore.ShadersStoreWGSL["ijGd1TrailVertexShader"] = GD1_TRAIL_VERTEX_WGSL;
+ShaderStore.ShadersStoreWGSL["ijGd1TrailFragmentShader"] =
+  GD1_TRAIL_FRAGMENT_WGSL;
 ShaderStore.ShadersStore["ijStarTrailVertexShader"] = STAR_TRAIL_VERTEX_GLSL;
 ShaderStore.ShadersStore["ijStarTrailFragmentShader"] =
   STAR_TRAIL_FRAGMENT_GLSL;
@@ -1194,6 +1224,9 @@ class BabylonScene extends HTMLElement {
   private _conMesh?: Mesh;
   private _conMat?: ShaderMaterial;
   private _conCount = 0;
+  // --- PF-10 C1: GD-1 connected-trail visual ---
+  private _gd1Mesh?: Mesh;
+  private _gd1SegmentCount = 0;
   // --- GAP-05: warp star trails ---
   private _trailMesh?: Mesh;
   private _trailMat?: ShaderMaterial;
@@ -1219,9 +1252,11 @@ class BabylonScene extends HTMLElement {
   ];
   /** Destination-gated reveal state, one factor per NEBULA_VOLUMES entry
    * (owner direction 2026-07-19: gas fades in during the decel burn and
-   * swells at arrival — see nebula-field.ts NEBULA_REVEAL). */
-  private _nebulaReveal = [0, 0, 0, 0];
-  private _nebulaScratch4 = new Vector4(0, 0, 0, 0);
+   * swells at arrival — see nebula-field.ts NEBULA_REVEAL). Sized to
+   * NEBULA_VOLUMES.length, not a fixed 4 — the 2026-07-20 amendment made
+   * the volume count arbitrary; only the GPU-side uniform footprint (the
+   * top-2 nonzero entries, computed per frame below) stays fixed. */
+  private _nebulaReveal: number[] = NEBULA_VOLUMES.map(() => 0);
   /** Stamp of when the ship stopped at a nebula volume (drives the swell). */
   private _nebulaArriveId: string | null = null;
   private _nebulaArriveAt = 0;
@@ -1354,6 +1389,14 @@ class BabylonScene extends HTMLElement {
   private _sdssGalaxyCount = 0;
   /** Guards `_loadSdssGalaxyLayer` to run at most once per boot. */
   private _sdssLayerRequested = false;
+  /** PF-10 C3: the full real Gaia DR3 asteroid belt — again a SEPARATE mesh from `_stars`
+   * (belt-frame world units, not the star field's light-year convention). Shares `_starMat`;
+   * object-type byte 6. The bounded Havok subset is a different thing entirely — see
+   * `_setupPhysicsInner`. */
+  private _asteroidVisualMesh?: Mesh;
+  private _asteroidVisualCount = 0;
+  /** Guards `_loadAsteroidVisualLayer` to run at most once per boot. */
+  private _asteroidLayerRequested = false;
   // --- GAP-06: relativistic aberration + Doppler ---
   /** Brachistochrone-profile beta (v/c), integrated from warp.prog exactly
    * like space-engine.js's `this._beta` — ramps with the accel/decel curve
@@ -1631,6 +1674,8 @@ class BabylonScene extends HTMLElement {
     this._setupMilkyWay(scene, backend);
     this._setupConstellations(scene, backend);
     this._setupStarTrails(scene, engine, backend, field);
+    // PF-10 C1: GD-1 connected-trail visual — see gd1-trail.ts's header.
+    this._setupGd1Trail(scene, engine, backend);
 
     // B3: volumetric nebulae — tier-gated producer (WebGPU compute / WebGL2
     // ProceduralTexture) + shared fullscreen composite. See nebula-field.ts.
@@ -1724,6 +1769,9 @@ class BabylonScene extends HTMLElement {
         void this._loadBonusStarLayers();
         // PF-10 C2: SDSS DR18 galaxy field — same non-blocking philosophy, own mesh.
         void this._loadSdssGalaxyLayer(scene, engine);
+        // PF-10 C3: the full 154,662-object real DR3 asteroid belt — likewise own mesh, likewise
+        // never in front of the startup budget.
+        void this._loadAsteroidVisualLayer(scene, engine);
       }
     });
 
@@ -1824,6 +1872,9 @@ class BabylonScene extends HTMLElement {
       trailWarpSpeed: Math.round(this._trailWarpSpeed * 1000) / 1000,
       trailVisible: this._trailMesh?.isVisible ?? false,
       trailMeshReady: this._trailMesh ? this._trailMesh.isReady(true) : false,
+      // PF-10 C1: GD-1 connected-trail diagnostics.
+      gd1TrailSegments: this._gd1SegmentCount,
+      gd1TrailMeshReady: this._gd1Mesh ? this._gd1Mesh.isReady(true) : false,
       // B3: volumetric nebula diagnostics.
       nebulaMode: this._nebulaMode,
       nebulaVolumes: NEBULA_VOLUMES.length,
@@ -1860,6 +1911,18 @@ class BabylonScene extends HTMLElement {
             Math.round(this._asteroidInstances[0].position.z * 100) / 100,
           ]
         : null,
+      // PF-10 C3: real-catalog belt diagnostics. `asteroidRealSource` is the honest signal an
+      // E2E can assert on — it distinguishes real Gaia DR3 bodies from the procedural fallback,
+      // which "asteroidCount" alone cannot (both produce the same tier-budgeted count).
+      asteroidRealSource:
+        REAL_ASTEROIDS.bodies.length > 0 ? "gaia-dr3" : "procedural",
+      asteroidRealEpoch: REAL_ASTEROIDS.epoch,
+      asteroidCatalogSize: REAL_ASTEROIDS.sourceCount,
+      asteroidVisualCount: this._asteroidVisualCount,
+      asteroidVisualReady:
+        this._asteroidVisualMesh && this._starMat
+          ? this._starMat.isReady(this._asteroidVisualMesh)
+          : false,
       // B4 step 2: proximity-slowdown diagnostics. warpSlowMin persists past
       // arrival so E2E can prove a belt crossing eased the journey.
       warpSlow: Math.round(this._warpSlow * 1000) / 1000,
@@ -2012,6 +2075,52 @@ class BabylonScene extends HTMLElement {
       emit("cosmos:sdss-galaxies", { total: field.count });
     } catch (e) {
       console.warn("[babylon-engine] SDSS galaxy layer failed", e);
+    }
+  }
+
+  /** PF-10 C3: fetches and renders the FULL real Gaia DR3 asteroid belt — 154,662 real objects,
+   * each at the position its own real Keplerian elements put it at the stated snapshot date
+   * (`scripts/gaia-asteroids-pngpack.mjs`). This is the "visual layer" half of C3's two-tier
+   * split: every one of these traces to a catalog record, but none of them is a physics body —
+   * 154,662 Havok rigid bodies is ~3,200x the tier budget and simply not possible in a 16.6 ms
+   * frame. The bounded physics subset is built separately in `_setupPhysicsInner`, from the same
+   * real catalog.
+   *
+   * A SEPARATE mesh from `_stars`, for the same reason `_loadSdssGalaxyLayer` is: this layer's
+   * positions are baked in the belt's own world-unit scale (1 AU = 63 units, ecliptic in the
+   * scene's X-Y plane), not the star field's linear-light-year convention — merging them into one
+   * `decodeStarCatalog` call would silently corrupt whichever convention lost. Reuses `_starMat`;
+   * object-type byte 6 ("DR3 asteroid") was already a real branch in both shader twins' vertex
+   * stage, and C3 adds the matching tight, bloom-free fragment branch.
+   *
+   * Fetched after `cosmos:ready` and idle-gated before the geometry build, exactly like the other
+   * two bulk layers — a 2.0 MB asset must never sit in front of the startup budget, and the
+   * one-time geometry upload must never compete with an in-flight warp. A failure here leaves the
+   * scene exactly as it was: the physics belt is already visible and independent of this layer. */
+  private async _loadAsteroidVisualLayer(scene: Scene, engine: AbstractEngine) {
+    if (this._asteroidLayerRequested) return;
+    this._asteroidLayerRequested = true;
+    try {
+      const rgb = await loadChunkRGB("assets/asteroids-dr3.png");
+      const field = decodeStarCatalog([rgb]);
+      if (field.count === 0) return;
+      await this._waitForWarpIdle();
+      const bb = buildStarBillboards(field);
+      const mesh = new Mesh("asteroidBelt", scene);
+      const vd = new VertexData();
+      vd.positions = bb.positions;
+      vd.indices = bb.indices;
+      vd.applyToMesh(mesh, false);
+      mesh.setVerticesBuffer(
+        new VertexBuffer(engine, bb.meta, "starMeta", false, false, 2),
+      );
+      mesh.alwaysSelectAsActiveMesh = true;
+      mesh.material = this._starMat ?? null;
+      this._asteroidVisualMesh = mesh;
+      this._asteroidVisualCount = field.count;
+      emit("cosmos:asteroid-belt", { total: field.count });
+    } catch (e) {
+      console.warn("[babylon-engine] DR3 asteroid visual layer failed", e);
     }
   }
 
@@ -2331,6 +2440,99 @@ class BabylonScene extends HTMLElement {
     mesh.setEnabled(this._showConstellations); // GAP-12
   }
 
+  // --- PF-10 C1: GD-1 connected-trail visual ---
+
+  /** Real radial velocity, parsed from the catalog entry's already-formatted
+   * display string (e.g. "-181.7 km/s") — celestial-gd1.js is a generated/
+   * verbatim-ported data file (CLAUDE.md non-negotiable #22, never hand-
+   * edited), so re-extracting the real number from its one existing field
+   * is the smallest coherent way to get it, rather than regenerating the
+   * whole file for a second raw-numeric field. parseFloat correctly ignores
+   * the trailing unit text; real coverage is 0 missing across all 1,365
+   * stars (checked directly against the source VOTable before designing
+   * this feature). */
+  private _parseGd1RadialVelocity(st: readonly [string, string, number][]) {
+    const row = st.find(([label]) => label === "Radial velocity");
+    if (!row) return null;
+    const n = Number.parseFloat(row[1]);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /** Builds the static connected-trail line mesh for GD-1's 1,365 real
+   * member stars — see gd1-trail.ts's header and the Astra science brief
+   * (docs/analysis/2026-07-20-gd1-connected-trail-science-brief.md) for the
+   * real astrophysics: stars are ordered by a great-circle fit to their own
+   * real (ra, dec) positions (NOT catalog row order, which is confirmed
+   * arbitrary), then coloured along the line by real radial velocity — a
+   * genuine, literature-standard GD-1 diagnostic, not decoration. Reuses
+   * each star's ALREADY-COMPUTED world position from `this.bodies` (built
+   * via the same `bodyWorldPosition` every travelable body uses), so the
+   * trail's vertices land exactly on the existing rendered points, never
+   * drifting from them. */
+  private _setupGd1Trail(
+    scene: Scene,
+    engine: AbstractEngine,
+    backend: "webgpu" | "webgl2",
+  ) {
+    const positionById = new Map<string, Vec3>();
+    for (const b of this.bodies) positionById.set(b.e.id, b.pos);
+
+    const stars: { id: string; ra: number; dec: number; rv: number }[] = [];
+    for (const e of window.CELESTIAL ?? []) {
+      if (!e.id.startsWith("gd1-member-")) continue;
+      const rv = this._parseGd1RadialVelocity(e.st);
+      if (rv == null || !positionById.has(e.id)) continue; // honest skip, not fabricated
+      stars.push({ id: e.id, ra: e.ra, dec: e.dec, rv });
+    }
+    if (stars.length < 2) return; // nothing to connect
+
+    let rvMin = Infinity;
+    let rvMax = -Infinity;
+    for (const s of stars) {
+      if (s.rv < rvMin) rvMin = s.rv;
+      if (s.rv > rvMax) rvMax = s.rv;
+    }
+
+    const order = orderGd1Stream(stars);
+    const orderedPositions = order.map((i) => positionById.get(stars[i].id)!);
+    const orderedColors = order.map((i) =>
+      radialVelocityToColor(stars[i].rv, rvMin, rvMax),
+    );
+    const trail = buildGd1TrailMesh(orderedPositions, orderedColors);
+    this._gd1SegmentCount = trail.count;
+    if (trail.count === 0) return;
+
+    const mesh = new Mesh("gd1Trail", scene);
+    this._gd1Mesh = mesh;
+    const vd = new VertexData();
+    vd.positions = trail.positions;
+    const indices = new Uint32Array(trail.count * 2);
+    for (let i = 0; i < indices.length; i++) indices[i] = i;
+    vd.indices = indices;
+    vd.applyToMesh(mesh, false);
+    mesh.setVerticesBuffer(
+      new VertexBuffer(engine, trail.colors, "gd1Color", false, false, 3),
+    );
+    mesh.isPickable = false;
+    mesh.alwaysSelectAsActiveMesh = true;
+
+    const mat = new ShaderMaterial(
+      "gd1Trail",
+      scene,
+      { vertex: "ijGd1Trail", fragment: "ijGd1Trail" },
+      {
+        attributes: ["position", "gd1Color"],
+        uniforms: ["view", "projection"],
+        needAlphaBlending: true,
+        shaderLanguage:
+          backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+      },
+    );
+    mat.fillMode = Material.LineListDrawMode;
+    mat.alphaMode = Constants.ALPHA_ADD;
+    mesh.material = mat;
+  }
+
   // --- GAP-05: warp star trails ---
 
   private _setupStarTrails(
@@ -2478,7 +2680,10 @@ class BabylonScene extends HTMLElement {
       ubo.addUniform("uTime", 1);
       ubo.addUniform("camFwd", 3);
       ubo.addUniform("pad0", 1);
-      ubo.addUniform("uReveal", 4);
+      ubo.addUniform("uVolumeA", 1);
+      ubo.addUniform("uRevealA", 1);
+      ubo.addUniform("uVolumeB", 1);
+      ubo.addUniform("uRevealB", 1);
       ubo.update(); // create the GPU buffer before the first dispatch binds it
       cs.setUniformBuffer("params", ubo);
       cs.setStorageTexture("outTex", tex);
@@ -2586,7 +2791,11 @@ class BabylonScene extends HTMLElement {
   private _tickNebula(camera: FreeCamera, engine: AbstractEngine) {
     if (!this._nebulaMode) return;
     this._updateNebulaReveal(performance.now());
-    const rv = this._nebulaReveal;
+    // 2026-07-20 amendment: at most 2 volumes ever matter at once (the
+    // current destination + the one just departed, still fading) — see
+    // topTwoReveal's doc comment. -1 as a volume index never matches any
+    // real 0-based `i` in the generated per-volume reveal comparison.
+    const { volA, revealA, volB, revealB } = topTwoReveal(this._nebulaReveal);
     const q = this._camQuat;
     const right = quatRotate(q, [1, 0, 0]);
     const up = quatRotate(q, UP_AXIS);
@@ -2606,7 +2815,10 @@ class BabylonScene extends HTMLElement {
       ubo.updateFloat("uTime", timeS);
       ubo.updateFloat3("camFwd", fwd[0], fwd[1], fwd[2]);
       ubo.updateFloat("pad0", 0);
-      ubo.updateFloat4("uReveal", rv[0], rv[1], rv[2], rv[3]);
+      ubo.updateFloat("uVolumeA", volA);
+      ubo.updateFloat("uRevealA", revealA);
+      ubo.updateFloat("uVolumeB", volB);
+      ubo.updateFloat("uRevealB", revealB);
       ubo.update();
       // dispatch() returns false until the pipeline is ready — harmless to
       // call every frame; the composite just samples last frame's texels.
@@ -2631,10 +2843,10 @@ class BabylonScene extends HTMLElement {
       proc.setFloat("uTanFov", tanFov);
       proc.setFloat("uAspect", aspect);
       proc.setFloat("uTime", timeS);
-      proc.setVector4(
-        "uReveal",
-        this._nebulaScratch4.copyFromFloats(rv[0], rv[1], rv[2], rv[3]),
-      );
+      proc.setFloat("uVolumeA", volA);
+      proc.setFloat("uRevealA", revealA);
+      proc.setFloat("uVolumeB", volB);
+      proc.setFloat("uRevealB", revealB);
     }
   }
 
@@ -3239,7 +3451,14 @@ class BabylonScene extends HTMLElement {
 
   private async _setupPhysicsInner(scene: Scene) {
     const count = this._quality.asteroids; // B5 budget (was ad-hoc craft signals)
-    const field = buildAsteroidField(count, 7);
+    // PF-10 C3: the belt's physics bodies are now REAL Gaia DR3 asteroids — real positions and
+    // real Keplerian velocities, baked at a stated snapshot date (see asteroids-dr3-physics.ts).
+    // `buildAsteroidField`'s procedural torus survives only as the fallback for an empty catalog;
+    // it is never the shipping path. Body COUNT is unchanged — the tier budget is a frame-time
+    // fact, not a data one, so the real catalog changes which rocks exist, not how many.
+    const field = REAL_ASTEROIDS.bodies.length
+      ? buildRealAsteroidField(REAL_ASTEROIDS, count, 7)
+      : buildAsteroidField(count, 7);
     this._asteroidField = field;
 
     const light = new HemisphericLight(

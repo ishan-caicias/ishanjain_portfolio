@@ -32,6 +32,19 @@
  *           tier, celestial-clusters.js, renders via the SEPARATE celestial-bodies.ts billboard
  *           path, not this one — see that file's PROCEDURAL_TYPE table for its own, independent
  *           4/5 globular/open split). Reserved for a future bulk (non-dossier) cluster layer.
+ *   CORRECTION (2026-07-20, PF-10 C3): the "2, 4, 5, 6 UNDOCUMENTED/UNUSED" entry below was
+ *           true when written but is now stale — later PF-10 work gave all four real vertex-stage
+ *           branches in both shader twins (2 = white dwarf px*0.8, 4 = GD-1 px*0.95 + cyan tint,
+ *           5 = exoplanet host warm tint, 6 = DR3 asteroid px*0.85). Kept as originally written
+ *           per this repo's corrections-are-additive convention rather than edited away.
+ *   6       DR3 asteroid — a real vertex branch (`ty < 6.5`, px *= 0.85) plus, as of PF-10 C3, a
+ *           tight bloom-free fragment branch (`ty > 5.5 && ty < 6.5`, exp(-d*d*9.0)*0.70) so
+ *           154,662 additive specks read as rock dust rather than a second star field. Used by
+ *           the real Gaia DR3 asteroid belt (scripts/gaia-asteroids-pngpack.mjs), wired live via
+ *           babylon-engine.ts's `_loadAsteroidVisualLayer`. NOTE: this layer's positions are in
+ *           the BELT's own world-unit frame (1 AU = 63 units, ecliptic mapped onto the scene's
+ *           X-Y plane), NOT this file's linear-light-year convention — which is exactly why it
+ *           gets its own mesh, the same reason SDSS type 3 does.
  *   2, 4, 5, 6   UNDOCUMENTED/UNUSED — no shader branch currently distinguishes these from type
  *           0; they fall through to the same default stellar-PSF treatment. Reserved, not
  *           assigned to anything yet. Do not assume a specific visual meaning without adding

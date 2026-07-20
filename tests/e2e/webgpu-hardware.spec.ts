@@ -141,7 +141,9 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
     // its WGSL plus the composite's WGSL twin are two more shader programs
     // that only real hardware validates (same TR-045 class of risk).
     expect(stats.nebulaMode).toBe("compute");
-    expect(stats.nebulaVolumes).toBe(4);
+    // 11 as of the 2026-07-20 ADR-0004 amendment (TR-072) — see
+    // engine-select.spec.ts's equivalent assertion for the full breakdown.
+    expect(stats.nebulaVolumes).toBe(11);
     await expect
       .poll(async () => (await readStats(page)).nebulaProducerReady, {
         timeout: 20000,
@@ -171,6 +173,12 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
     await expect
       .poll(async () => (await readStats(page)).plumeReady, { timeout: 20000 })
       .toBe(true);
+
+    // PF-10 C1: GD-1 connected-trail visual (TR-073) — another real WGSL
+    // program (gd1-trail.ts's twin), console-clean is the assertion that
+    // actually validates it on real hardware.
+    expect(Number((await readStats(page)).gd1TrailSegments)).toBe(1364);
+    expect((await readStats(page)).gd1TrailMeshReady).toBe(true);
 
     // The check that actually catches TR-045's class of bug: no WebGPU
     // validation errors, no reserved-keyword/parse errors, nothing async that

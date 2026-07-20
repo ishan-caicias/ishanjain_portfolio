@@ -19,7 +19,15 @@
  * second policy. WASM-SIMD gating (Havok's floor) is detected in the engine;
  * below it the same field renders visually with kinematic drift and no live
  * physics, exactly as the plan specifies.
+ *
+ * PF-10 C3 (2026-07-20): the procedural field is superseded on the shipping path by
+ * `buildRealAsteroidField` below, which draws real positions and real Keplerian velocities from
+ * the Gaia DR3 catalog. Everything else in this file — the belt geometry, the herding pull, the
+ * density/slowdown/deflection model, the impact shake — is unchanged and now acts on real
+ * bodies. `buildAsteroidField` is kept as the fallback and as the procedural path's test
+ * subject; it is not dead code.
  */
+import type { RealAsteroidCatalog } from "../data/asteroids-dr3-physics";
 
 /** Belt geometry (world units, same space as the star shell / bodies).
  *
@@ -133,6 +141,76 @@ export function buildAsteroidField(count: number, seed = 1): AsteroidField {
     angVel[i * 3 + 2] = (rnd() * 2 - 1) * b.spinMax;
   }
   return { positions, scales, baseIndex, linVel, angVel, masses, count };
+}
+
+/* ---------- PF-10 C3: the REAL Gaia DR3 belt ---------------------------- */
+
+/** Builds the physics field from REAL Gaia DR3 catalog records.
+ *
+ * This is C3's replacement for `buildAsteroidField` on the shipping path. The difference is not
+ * cosmetic: every position and every velocity below traces to a real asteroid's real Keplerian
+ * elements, solved at a stated snapshot date by `scripts/gaia-asteroids-pngpack.mjs` and baked
+ * into `src/data/asteroids-dr3-physics.ts`. The bodies are the real asteroids nearest the belt's
+ * spine circle, so they sit exactly where the tuned density falloff, warp slowdown and passage
+ * deflection do their work — a real geometric selection, not a convenience sample.
+ *
+ * WHAT IS STILL DECLARED, and why it stays here rather than in the generated data: the source
+ * catalog carries no diameter, no albedo, no magnitude and no rotation data (verified against
+ * the real file, see that script's HONEST LIMITS). Rock radii, base geometry and spin are
+ * therefore assigned from the SAME seeded LCG the procedural field used — deterministic, never
+ * `Math.random`, and confined to attributes the catalog genuinely does not contain. Keeping that
+ * split at the module boundary means the generated module is real data only, and this function
+ * is the single place declared visual attributes enter the belt.
+ *
+ * `buildAsteroidField` is retained, not dead: it remains the fallback if the generated module is
+ * ever empty, and it is what the belt-geometry unit tests exercise for the procedural path.
+ */
+export function buildRealAsteroidField(
+  catalog: RealAsteroidCatalog,
+  count: number,
+  seed = 7,
+): AsteroidField & { names: string[] } {
+  const b = ASTEROID_BELT;
+  const n = Math.min(count, catalog.bodies.length);
+  const rnd = makeRng(seed);
+  const positions = new Float32Array(n * 3);
+  const scales = new Float32Array(n);
+  const baseIndex = new Uint8Array(n);
+  const linVel = new Float32Array(n * 3);
+  const angVel = new Float32Array(n * 3);
+  const masses = new Float32Array(n);
+  const names: string[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const rec = catalog.bodies[i];
+    names.push(rec.n);
+    // REAL: position and velocity, straight from the catalog solution.
+    positions[i * 3] = rec.p[0];
+    positions[i * 3 + 1] = rec.p[1];
+    positions[i * 3 + 2] = rec.p[2];
+    linVel[i * 3] = rec.v[0];
+    linVel[i * 3 + 1] = rec.v[1];
+    linVel[i * 3 + 2] = rec.v[2];
+
+    // DECLARED: no size data exists for these objects anywhere in the source catalog.
+    const scale = b.scaleMin + rnd() * (b.scaleMax - b.scaleMin);
+    scales[i] = scale;
+    masses[i] = scale * scale * scale;
+    baseIndex[i] = Math.floor(rnd() * ROCK_BASE_COUNT) % ROCK_BASE_COUNT;
+    angVel[i * 3] = (rnd() * 2 - 1) * b.spinMax;
+    angVel[i * 3 + 1] = (rnd() * 2 - 1) * b.spinMax;
+    angVel[i * 3 + 2] = (rnd() * 2 - 1) * b.spinMax;
+  }
+  return {
+    positions,
+    scales,
+    baseIndex,
+    linVel,
+    angVel,
+    masses,
+    count: n,
+    names,
+  };
 }
 
 /** Same lattice hash as nebula-field.ts — reused so all procedural noise in

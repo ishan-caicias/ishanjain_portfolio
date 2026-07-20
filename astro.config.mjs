@@ -51,7 +51,23 @@ export default defineConfig({
         // frame-ancestors deliberately absent: browsers ignore it in a <meta>
         // CSP (and log a console error for it). Anti-framing is delivered by
         // the X-Frame-Options: DENY header in public/_headers instead (TR-016).
-        "upgrade-insecure-requests",
+        //
+        // upgrade-insecure-requests is gated to REAL Netlify builds only (process.env.NETLIFY,
+        // set automatically by Netlify's build system — not something invented here), not
+        // NODE_ENV, which is "production" for local `npm run build` too. Real finding (PF-10
+        // C2 LAN device-testing session): this directive forces the browser to rewrite every
+        // sub-resource (CSS/JS) request from http:// to https://, even though the top-level
+        // page itself loaded over http:// and was never rewritten. Chrome exempts `localhost`
+        // from this (treated as a secure context), which is why `npm run build && preview`
+        // tested on localhost always looked fine — but a real LAN IP (what a phone on the same
+        // WiFi actually needs, e.g. 192.168.x.x) gets every asset request upgraded to https://
+        // against a plain-http preview server, which cannot answer TLS: every CSS/JS request
+        // fails with net::ERR_SSL_PROTOCOL_ERROR, and the page renders as unstyled raw HTML
+        // with no hydrated islands (exactly what a real device on the LAN saw). The directive
+        // itself is correct and wanted for the real deployed site (genuinely served over HTTPS
+        // by Netlify) — only excluded for the local build used to test on real hardware over
+        // plain HTTP.
+        ...(process.env.NETLIFY ? ["upgrade-insecure-requests"] : []),
       ],
     },
   },

@@ -19,28 +19,42 @@ import {
   nebulaWgslCompute,
   quatRotate,
   raySphere,
+  shapeQ,
+  topTwoReveal,
   valueNoise3,
 } from "@/lib/nebula-field";
 import { bodyWorldPosition, quatFromAxisAngle } from "@/lib/ship-dynamics";
 
 /** The catalog anchors the volumes must sit on — duplicated from
- * celestial-catalog.js / celestial-extra.js (which aren't importable modules;
- * they populate window.CELESTIAL as scripts). If a catalog entry moves, this
- * test states the drift explicitly instead of the volume silently detaching
- * from where travelTo() goes. */
+ * celestial-catalog.js / celestial-extra.js / celestial-extra2.js /
+ * celestial-ngc2000.js (which aren't importable modules; they populate
+ * window.CELESTIAL as scripts). If a catalog entry moves, this test states
+ * the drift explicitly instead of the volume silently detaching from where
+ * travelTo() goes. The 7 objects added 2026-07-20 (ADR-0004 amendment) each
+ * anchor to whichever real catalog entry actually carries the id travelTo()
+ * would reach — see nebula-field.ts's own header comment on NEBULA_SOURCES
+ * for why (several of these real objects exist twice in this repo's data:
+ * once hand-curated, once via the bulk NGC2000 pipeline). */
 const CATALOG_ANCHORS: Record<string, { ra: number; dec: number; ly: number }> =
   {
     m42: { ra: 83.822, dec: -5.391, ly: 1344 },
     ngc7293: { ra: 337.411, dec: -20.837, ly: 655 },
     veil: { ra: 311.75, dec: 30.71, ly: 2400 },
     rosette: { ra: 97.98, dec: 4.94, ly: 5200 },
+    ngc6543: { ra: 269.639, dec: 66.633, ly: 3300 },
+    "ngc2000-box-nebula": { ra: 258.5254, dec: -12.9167, ly: 8515.82 },
+    ngc6302: { ra: 258.436, dec: -37.104, ly: 3400 },
+    "ngc2000-hourglass-nebula": { ra: 204.8736, dec: -67.3774, ly: 7999.99 },
+    m1: { ra: 83.63, dec: 22.01, ly: 6500 },
+    m57: { ra: 283.396, dec: 33.029, ly: 2280 },
+    ngc6514: { ra: 270.62, dec: -22.972, ly: 4100 },
   };
 
 describe("NEBULA_VOLUMES", () => {
-  it("defines 4 volumes with unique catalog ids", () => {
-    expect(NEBULA_VOLUMES).toHaveLength(4);
+  it("defines 11 volumes with unique catalog ids", () => {
+    expect(NEBULA_VOLUMES).toHaveLength(11);
     const ids = NEBULA_VOLUMES.map((v) => v.id);
-    expect(new Set(ids).size).toBe(4);
+    expect(new Set(ids).size).toBe(11);
     for (const id of ids) expect(CATALOG_ANCHORS[id]).toBeDefined();
   });
 
@@ -327,22 +341,29 @@ describe("generated shader sources", () => {
   const glsl = nebulaGlslFragment();
   const wgsl = nebulaWgslCompute();
 
-  it("GLSL fragment: fullscreen producer with one call per volume", () => {
+  it("GLSL fragment: fullscreen producer with one generated march function + call per volume", () => {
     expect(glsl).toContain("varying vec2 vUV");
     expect(glsl).toContain("gl_FragColor");
-    expect(glsl.match(/nebMarch\(uCamPos/g)).toHaveLength(
+    // one call site (`nebMarchN(uCamPos, ...)`) per volume...
+    expect(glsl.match(/nebMarch\d+\(uCamPos/g)).toHaveLength(
+      NEBULA_VOLUMES.length,
+    );
+    // ...backed by one generated `vec4 nebMarchN(...)` function per volume,
+    // each with its own march loop (no function pointers in GLSL).
+    expect(glsl.match(/vec4 nebMarch\d+\(/g)).toHaveLength(
       NEBULA_VOLUMES.length,
     );
     expect(glsl).toContain(`for (int i = 0; i < ${NEBULA_MARCH.stepsFragment}`);
   });
 
-  it("WGSL compute: storage-texture writer with one call per volume", () => {
+  it("WGSL compute: storage-texture writer with one generated march function + call per volume", () => {
     expect(wgsl).toContain("@compute @workgroup_size(8, 8, 1)");
     expect(wgsl).toContain("texture_storage_2d<rgba8unorm, write>");
     expect(wgsl).toContain("textureStore");
-    expect(wgsl.match(/nebMarch\(params\.camPos/g)).toHaveLength(
+    expect(wgsl.match(/nebMarch\d+\(params\.camPos/g)).toHaveLength(
       NEBULA_VOLUMES.length,
     );
+    expect(wgsl.match(/fn nebMarch\d+\(/g)).toHaveLength(NEBULA_VOLUMES.length);
     expect(wgsl).toContain(`i < ${NEBULA_MARCH.stepsCompute}`);
   });
 
@@ -368,13 +389,217 @@ describe("generated shader sources", () => {
     expect(glsl).toContain("vUV * 2.0 - 1.0");
   });
 
-  it("wires the per-volume reveal swizzles in NEBULA_VOLUMES order in both twins", () => {
-    const sw = ["x", "y", "z", "w"];
+  it("wires the 2-slot active/previous reveal comparison for every volume index in both twins (2026-07-20 amendment)", () => {
+    // O(1) in volume count — each call site compares its own literal index
+    // against the SAME two runtime uniforms, not a per-volume swizzle/array.
     for (let i = 0; i < NEBULA_VOLUMES.length; i++) {
-      expect(glsl).toContain(`uReveal.${sw[i]}`);
-      expect(wgsl).toContain(`params.uReveal.${sw[i]}`);
+      const lit = i.toFixed(6);
+      expect(glsl).toContain(`${lit} == uVolumeA`);
+      expect(glsl).toContain(`${lit} == uVolumeB`);
+      expect(wgsl).toContain(`${lit} == params.uVolumeA`);
+      expect(wgsl).toContain(`${lit} == params.uVolumeB`);
     }
-    expect(glsl).toContain("uniform vec4 uReveal");
-    expect(wgsl).toContain("uReveal : vec4<f32>");
+    expect(glsl).toContain("uniform float uVolumeA");
+    expect(glsl).toContain("uniform float uRevealA");
+    expect(glsl).toContain("uniform float uVolumeB");
+    expect(glsl).toContain("uniform float uRevealB");
+    expect(wgsl).toContain("uVolumeA : f32");
+    expect(wgsl).toContain("uRevealA : f32");
+    expect(wgsl).toContain("uVolumeB : f32");
+    expect(wgsl).toContain("uRevealB : f32");
+    // the old 4-cap vec4 swizzle uniform is gone entirely (uRevealA/B and
+    // uVolumeA/B legitimately CONTAIN the substring "uReveal"/"uVolume", so
+    // this checks for the OLD declaration/access forms specifically, not a
+    // blanket substring absence)
+    expect(glsl).not.toContain("uniform vec4 uReveal");
+    expect(glsl).not.toMatch(/uReveal\.[xyzw]/);
+    expect(wgsl).not.toContain("uReveal : vec4<f32>");
+    expect(wgsl).not.toMatch(/uReveal\.[xyzw]/);
+  });
+
+  it("11 volumes exceed the OLD 4-component cap without throwing — the point of the amendment", () => {
+    expect(NEBULA_VOLUMES.length).toBeGreaterThan(4);
+    expect(() => nebulaGlslFragment()).not.toThrow();
+    expect(() => nebulaWgslCompute()).not.toThrow();
+  });
+});
+
+describe("shapeQ (ADR-0004 2026-07-20 amendment)", () => {
+  it("sphere reproduces the original length(p) formula exactly — regression safety for the 4 pre-existing showcase volumes", () => {
+    const pts: [number, number, number][] = [
+      [0, 0, 0],
+      [0.5, 0, 0],
+      [0.3, 0.4, 0],
+      [1, 1, 1],
+      [-0.2, 0.6, -0.1],
+    ];
+    for (const p of pts) {
+      expect(shapeQ({ kind: "sphere" }, p)).toBeCloseTo(
+        Math.hypot(p[0], p[1], p[2]),
+        12,
+      );
+    }
+  });
+
+  it("torus is 0 on the tube centreline and 1 at the tube surface", () => {
+    const shape = {
+      kind: "torus" as const,
+      majorRadius: 0.5,
+      minorRadius: 0.2,
+    };
+    // a point on the ring's centreline (major radius out in X, y=0, z=0)
+    expect(shapeQ(shape, [0.5, 0, 0])).toBeCloseTo(0, 10);
+    // a point exactly one minor radius above the centreline -> tube surface
+    expect(shapeQ(shape, [0.5, 0.2, 0])).toBeCloseTo(1, 10);
+    // the torus's own centre (the hole) is far from the tube -> large q
+    expect(shapeQ(shape, [0, 0, 0])).toBeGreaterThan(1);
+  });
+
+  it("cappedCone is 999 (culled) past its tip/base ends and small near its lateral surface", () => {
+    const shape = {
+      kind: "cappedCone" as const,
+      dir: [0, 1, 0] as [number, number, number],
+      offset: 0,
+      height: 1,
+      rTip: 0.1,
+      rBase: 0.5,
+      edge: 0.1,
+    };
+    expect(shapeQ(shape, [0, -0.5, 0])).toBe(999); // below the tip
+    expect(shapeQ(shape, [0, 1.5, 0])).toBe(999); // past the base
+    // near the surface at y=0.5 (rAtY interpolates to 0.3)
+    expect(shapeQ(shape, [0.3, 0.5, 0])).toBeCloseTo(0, 6);
+  });
+
+  it("box is small deep inside and grows outward from the surface", () => {
+    const shape = {
+      kind: "box" as const,
+      halfExtents: [0.4, 0.4, 0.4] as [number, number, number],
+      edge: 0.2,
+    };
+    const centre = shapeQ(shape, [0, 0, 0]);
+    const nearSurface = shapeQ(shape, [0.4, 0, 0]);
+    const outside = shapeQ(shape, [0.8, 0, 0]);
+    expect(centre).toBeLessThan(nearSurface);
+    expect(nearSurface).toBeLessThan(outside);
+    expect(nearSurface).toBeCloseTo(1, 6);
+  });
+
+  it("ellipsoid degenerates to the sphere formula when all semi-axes are equal", () => {
+    const shape = {
+      kind: "ellipsoid" as const,
+      semiAxes: [1, 1, 1] as [number, number, number],
+    };
+    const p: [number, number, number] = [0.3, 0.4, 0.5];
+    expect(shapeQ(shape, p)).toBeCloseTo(Math.hypot(...p), 12);
+  });
+
+  it("shell is 0 at its mid-radius and grows toward either edge", () => {
+    const shape = { kind: "shell" as const, radius: 0.7, thickness: 0.1 };
+    expect(shapeQ(shape, [0.7, 0, 0])).toBeCloseTo(0, 10);
+    expect(shapeQ(shape, [0.6, 0, 0])).toBeCloseTo(1, 6); // inner edge
+    expect(shapeQ(shape, [0.8, 0, 0])).toBeCloseTo(1, 6); // outer edge
+  });
+
+  it("union takes the min of its members (closer/denser wins)", () => {
+    const shape = {
+      kind: "union" as const,
+      shapes: [
+        { kind: "sphere" as const },
+        { kind: "shell" as const, radius: 5, thickness: 1 }, // always far here
+      ],
+    };
+    const p: [number, number, number] = [0.3, 0, 0];
+    expect(shapeQ(shape, p)).toBeCloseTo(shapeQ({ kind: "sphere" }, p), 10);
+  });
+
+  it("subtract fully excludes points inside the cut region regardless of the base shape's own q", () => {
+    const shape = {
+      kind: "subtract" as const,
+      base: { kind: "sphere" as const }, // q=0 at centre — normally very dense
+      cut: { kind: "sphere" as const }, // same sphere -> centre is "inside the cut"
+    };
+    expect(shapeQ(shape, [0, 0, 0])).toBe(999);
+  });
+
+  it("subtract passes through the base's q untouched outside the cut region", () => {
+    const shape = {
+      kind: "subtract" as const,
+      base: { kind: "sphere" as const },
+      cut: { kind: "shell" as const, radius: 5, thickness: 0.1 }, // never triggers near origin
+    };
+    const p: [number, number, number] = [0.3, 0, 0];
+    expect(shapeQ(shape, p)).toBeCloseTo(shapeQ({ kind: "sphere" }, p), 10);
+  });
+});
+
+describe("nebulaDensity with a non-sphere shape (Ring Nebula's torus+ellipsoid union)", () => {
+  it("is nonzero at the volume centre — NOT the torus's empty hole, because the unioned inner ellipsoid is densest exactly there (the real 'football' glow feature)", () => {
+    const ring = NEBULA_VOLUMES.find((v) => v.id === "m57")!;
+    expect(nebulaDensity(ring.center, ring, 0)).toBeGreaterThan(0);
+  });
+
+  it("is exactly 0 well beyond the shape's overall bounding radius", () => {
+    const ring = NEBULA_VOLUMES.find((v) => v.id === "m57")!;
+    const p: [number, number, number] = [
+      ring.center[0] + ring.radius * 2,
+      ring.center[1],
+      ring.center[2],
+    ];
+    expect(nebulaDensity(p, ring, 0)).toBe(0);
+  });
+
+  it("is non-negative everywhere sampled and positive somewhere near the torus tube", () => {
+    const ring = NEBULA_VOLUMES.find((v) => v.id === "m57")!;
+    let maxD = 0;
+    for (let i = 0; i < 300; i++) {
+      const theta = hash3(i, 0, 0, 3) * Math.PI * 2;
+      const p: [number, number, number] = [
+        ring.center[0] + Math.cos(theta) * ring.radius * 0.55,
+        ring.center[1],
+        ring.center[2] + Math.sin(theta) * ring.radius * 0.55,
+      ];
+      const d = nebulaDensity(p, ring, 0);
+      expect(d).toBeGreaterThanOrEqual(0);
+      maxD = Math.max(maxD, d);
+    }
+    expect(maxD).toBeGreaterThan(0);
+  });
+});
+
+describe("topTwoReveal", () => {
+  it("returns -1/0 slots when every reveal is 0", () => {
+    expect(topTwoReveal([0, 0, 0])).toEqual({
+      volA: -1,
+      revealA: 0,
+      volB: -1,
+      revealB: 0,
+    });
+  });
+
+  it("fills slot A with the single nonzero entry, leaves B unused", () => {
+    expect(topTwoReveal([0, 0.8, 0])).toEqual({
+      volA: 1,
+      revealA: 0.8,
+      volB: -1,
+      revealB: 0,
+    });
+  });
+
+  it("picks the top 2 by value, A >= B, regardless of index order", () => {
+    const r = topTwoReveal([0.2, 0.9, 0, 0.5]);
+    expect(r.volA).toBe(1);
+    expect(r.revealA).toBe(0.9);
+    expect(r.volB).toBe(3);
+    expect(r.revealB).toBe(0.5);
+  });
+
+  it("gracefully drops a 3rd nonzero entry rather than crashing", () => {
+    const r = topTwoReveal([0.9, 0.5, 0.7]);
+    expect(r.volA).toBe(0);
+    expect(r.revealA).toBe(0.9);
+    expect(r.volB).toBe(2);
+    expect(r.revealB).toBe(0.7);
+    // index 1 (0.5) is real but dropped — documented graceful degradation
   });
 });

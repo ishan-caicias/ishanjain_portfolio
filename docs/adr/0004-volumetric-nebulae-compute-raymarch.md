@@ -50,6 +50,55 @@ extent as well as its brightness — the gas grows in rather than crossfading. P
 `nebula-field.ts` (`NEBULA_REVEAL`, `nebulaRevealTarget`), verified with staged real-hardware
 screenshots in [TR-047](../test-reports/TR-047.md).
 
+## Amendment 2026-07-20 — generalized shape system + scalable reveal (PF-10 C1, TR-072)
+
+**Context:** PF-10 C1 needs the remaining 8 real NGC2000 "Volume"-archetype nebulae (Helix, Cat's
+Eye, Box, Butterfly, Hourglass, Crab, Ring, Trifid) added alongside the 4 showcase volumes above.
+Two blockers, both structural:
+
+1. **`uReveal: vec4`'s 4-component swizzle hard-caps the volume count at 4** —
+   `revealComponent()` throws past index 3. The naive fix (more vec4 uniforms) doesn't scale: it
+   grows the uniform surface linearly with volume count forever.
+2. **Every volume was a sphere.** `nebulaDensity`'s shell falloff (`q = length(rel)/radius`)
+   assumes a spherical container — real planetary nebulae are rings, bipolar hourglasses, boxes,
+   and more; a sphere-only model can't represent them (a licensing constraint on the source
+   shader material also independently ruled out porting Gaia Sky's own bespoke per-object
+   shaders for these 8 objects — see the science brief below).
+
+**Decision:**
+
+1. **Reveal generalizes to a fixed 2-slot "active + previous" scheme**, not per-volume storage.
+   `uVolumeA`/`uRevealA` + `uVolumeB`/`uRevealB` (4 scalars total, replacing the 4-component
+   vec4) carry at most the two volumes that can plausibly have nonzero reveal at once — the
+   destination being warped-to/arrived-at, and the one just departed (still damping to 0 via the
+   existing `fadeOutLambda` decay). Every generated per-volume call computes its own reveal as
+   `(i == volA) ? revealA : (i == volB ? revealB : 0.0)` — one cheap integer comparison per
+   volume, baked at generation time exactly like the swizzle was, just against a runtime index
+   instead of a compile-time component. This is O(1) in uniform count for ANY number of volumes,
+   not just 12 — the stated goal ("easily expanded later").
+2. **`NebulaVolume.shape` replaces the implicit sphere.** A small closed set of SDF primitives
+   (sphere, torus, capped cone, box, thin shell) plus `union`/`subtract` combinators, each with a
+   GLSL generator, a WGSL generator, and a JS mirror (matching the existing noise-stack
+   convention exactly — `Density → both shader twins → JS mirror → unit test` stays one
+   pipeline). `nebulaDensity`'s `q = shapeDistance(shape, rel) / radius` generalizes the old
+   `length(rel)/radius` (the sphere primitive reproduces the old formula exactly — the 4
+   showcase volumes are unaffected, verified by regression test). Adding a 13th volume, or a 9th
+   primitive kind, requires touching only its own descriptor/generator case — the march loop,
+   compositing, and reveal plumbing are closed for modification (SOLID open/closed, applied to
+   shader code generation rather than runtime polymorphism, since ADR-0004's point 2 above
+   already committed this codebase to baked-per-volume generated shaders over uniform arrays).
+3. **Shapes are original, not ported from Gaia Sky's per-object shaders.** Those 8 shaders are
+   CC-BY-NC-SA (non-commercial) ports of shadertoy material — a real license mismatch for a
+   professional portfolio, and the owner declined to accept that risk. Astra produced a real
+   SCIENCE-BRIEF (`docs/analysis/2026-07-20-ngc2000-volume-nebula-shapes-science-brief.md`)
+   classifying an original SDF-primitive shape per object against real morphology (torus for
+   Ring/Helix, opposed capped-cones for Hourglass/Butterfly, a rounded box for Box Nebula — whose
+   real Hubble image genuinely IS box-shaped, concentric shells for Cat's Eye, a
+   heavily-perturbed ellipsoid + smooth inner glow for Crab reflecting its real dual emission
+   mechanism — filamentary shell + synchrotron continuum — subtracted lanes for Trifid's real
+   dust extinction). Every recommendation lands ACCURATE or SIMPLIFIED; none needed a declared
+   license.
+
 ## Consequences
 
 - `webgpuEngine`'s compute support must be loaded explicitly

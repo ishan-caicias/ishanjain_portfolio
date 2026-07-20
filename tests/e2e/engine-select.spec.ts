@@ -511,7 +511,11 @@ test("babylon: volumetric nebulae render via the GLSL fragment fallback on the d
 
   const stats = await readStats();
   expect(stats.nebulaMode).toBe("fragment"); // bundled chromium has no WebGPU adapter (TR-039)
-  expect(stats.nebulaVolumes).toBe(4); // m42, ngc7293, veil, rosette
+  // 11 as of the 2026-07-20 ADR-0004 amendment (TR-072): the original 4
+  // showcase volumes (m42, ngc7293, veil, rosette) plus the 7 remaining
+  // real NGC2000 Volume-archetype objects (ngc6543, ngc2000-box-nebula,
+  // ngc6302, ngc2000-hourglass-nebula, m1, m57, ngc6514).
+  expect(stats.nebulaVolumes).toBe(11);
   // half-res producer texture is live and sized from the render target
   expect(Number(stats.nebulaTexWidth)).toBeGreaterThan(0);
   expect(Number(stats.nebulaTexHeight)).toBeGreaterThan(0);
@@ -551,11 +555,34 @@ test("babylon: ship track — GLB hull + plume load, fly during warp, dock-fade 
   expect(["1k", "2k"]).toContain(loaded.shipTier);
   expect(loaded.shipVisible).toBe(0); // hidden while parked at home
 
-  // launch: the hull materialises during the aim turn and stays up in warp
+  // launch: the hull materialises during the aim turn and stays up in warp.
+  //
+  // PF-10 C1 (TR-071, real root cause — see TR-070's investigation): travelling to "sun"
+  // (0.0000158 ly, the CLOSEST possible target) hits its warpDurationForLy() floor,
+  // ~1.4s configured aim+warp duration total. Under CI's SwiftShader-rendered Chromium, THIS
+  // heavier scene (post PF-10's SDSS/white-dwarf/cluster additions) now renders at roughly
+  // ~1fps — confirmed by direct measurement (scripts/diag-ship-visible-swiftshader.mjs,
+  // deleted after use): renderFrames advanced by only ~13 over a 14.5s real-time window. That
+  // means the ENTIRE aim+warp+arrival sequence for "sun" completes within essentially ONE
+  // rendered frame, so shipVisible's per-frame-dt-clamped expDamp ramp (babylon-engine.ts
+  // ~line 3112, rate 8, SHIP_MAX_DT=0.05s/frame) only gets ~0.05s of accumulated simulated
+  // time before the state machine — which progresses on real wall-clock time, not frame count —
+  // has already declared arrival and started the docking FADE-OUT. No timeout, however large,
+  // fixes this: the target has already moved from 1 (visible) back to a fading value before a
+  // 2nd or 3rd frame can even render. Measured directly: 25000ms and 60000ms polls BOTH failed,
+  // the latter with shipVisible landing at exactly 0 (already fully faded), not "still ramping."
+  // CONFIRMED on real GPU hardware (channel:'chrome') that the underlying mechanism is correct —
+  // shipVisible crosses 0.5 in 534ms for "sun" there, since real hardware renders far more than
+  // one frame within the ~1.4s window. The fix is choosing a target whose LONGER configured warp
+  // duration gives even a ~1fps renderer enough real frames to complete the ramp before arrival —
+  // verified directly: switching to "m42" (Orion Nebula, 1344 ly, near warpDurationForLy's
+  // 4200ms cap) measured shipVisible reaching 0.996 at t+4789ms with warp still 67% through its
+  // progress, comfortably crossing 0.5 well before arrival. "sun" was an edge-case choice that
+  // happened to be the worst possible pairing with a slow renderer, not a meaningful part of
+  // this test's actual intent (full ship lifecycle: hidden -> visible in transit -> dock-fade).
   await page.locator("babylon-scene").evaluate((el) => {
-    (el as HTMLElement & { travelTo(id: string): void }).travelTo("sun");
+    (el as HTMLElement & { travelTo(id: string): void }).travelTo("m42");
   });
-  // PF-10 C2/TR-067: widened 10000->25000, same real reason (SDSS DR18's background load).
   await expect
     .poll(async () => (await readStats()).shipVisible, { timeout: 25000 })
     .toBeGreaterThan(0.5);
@@ -573,7 +600,7 @@ test("babylon: ship track — GLB hull + plume load, fly during warp, dock-fade 
           ),
       { timeout: 30000 },
     )
-    .toBe("sun");
+    .toBe("m42");
   await expect
     .poll(async () => (await readStats()).shipVisible, { timeout: 20000 })
     .toBeLessThan(0.05);
@@ -656,8 +683,9 @@ test("babylon: nebula gas is destination-gated — hidden at idle and through ac
     })
     .toBe(true);
 
-  // idle at home: every volume hidden
-  expect((await readStats()).nebulaReveal).toEqual([0, 0, 0, 0]);
+  // idle at home: every volume hidden (11 volumes as of the 2026-07-20
+  // ADR-0004 amendment — the 7 remaining real NGC2000 objects, TR-072)
+  expect((await readStats()).nebulaReveal).toEqual(new Array(11).fill(0));
 
   // launch toward the Orion Nebula (volume index 0) and catch the warp early:
   // m42's distance-scaled warpDur is multi-second, so polling for mode==="warp"
@@ -711,9 +739,9 @@ test("babylon: nebula gas is destination-gated — hidden at idle and through ac
     .poll(async () => (await readStats()).nebulaReveal[0], { timeout: 10000 })
     .toBeGreaterThan(0.95);
   const arrived = await readStats();
-  expect(arrived.nebulaReveal[1]).toBe(0);
-  expect(arrived.nebulaReveal[2]).toBe(0);
-  expect(arrived.nebulaReveal[3]).toBe(0);
+  for (let i = 1; i < arrived.nebulaReveal.length; i++) {
+    expect(arrived.nebulaReveal[i]).toBe(0);
+  }
 
   // B4 step 2: the belt ring is deliberately oriented (X–Y plane, axis Z,
   // centre z = −13) so that THIS m42 route crosses its tube nearly
@@ -1362,6 +1390,10 @@ test("babylon: PF-10 bonus star layers (white dwarfs, CNS5, Oort cloud) merge in
   //   stars-hip.png (1024x576) 117,964 + deep.png (1024x249) 50,995 = 168,959 (base, unchanged)
   //   cns5.png (1024x27) 5,529 + oortcloud.png (1024x49) 10,035 + whitedwarfs-edr3.png
   //   (1024x1754) 359,219 = 374,783 bonus  ->  168,959 + 374,783 = 543,742
+  // (Declared test change, PF-10 C1) 543,742 -> 555,825: clusters-bg.png (1024x59, MWSC + Hunt-
+  // Reffert 2023 + OCDR2 minus the 35 already-curated named clusters, scripts/gaia-clusters-
+  // pngpack.mjs) added to BONUS_CATALOG_CHUNKS — 12,083 real+phantom records (12,065 real, same
+  // padding-record behaviour as every other chunk above).
   await expect
     .poll(
       () =>
@@ -1370,7 +1402,7 @@ test("babylon: PF-10 bonus star layers (white dwarfs, CNS5, Oort cloud) merge in
           .evaluate((el) => (el as SceneStatsEl).sceneStats().starCount),
       { timeout: 30000 }, // white dwarfs alone is a real ~5.4 MB asset; give it real time to fetch+decode
     )
-    .toBe(543_742);
+    .toBe(555_825);
 
   // The merge rebuilds mesh geometry — confirm the mesh is still valid/ready afterward, not
   // left in a broken half-rebuilt state.
@@ -1382,7 +1414,8 @@ test("babylon: PF-10 bonus star layers (white dwarfs, CNS5, Oort cloud) merge in
 
 // Companion to the full-tier test above: TR-067 REVERSED the tier gate (owner direction — ideal
 // state on every tier first, real tiers introduced later from actual device testing), so the
-// SAME full total (543,742, white dwarfs included) now merges on balanced too, not a reduced one.
+// SAME full total (555,825 — see the full-tier test's comment for the PF-10 C1 cluster-layer
+// breakdown) now merges on balanced too, not a reduced one.
 test("babylon: PF-10 bonus star layers merge the SAME full total on the balanced tier (TR-067 tier-gate reversal)", async ({
   page,
 }) => {
@@ -1410,7 +1443,7 @@ test("babylon: PF-10 bonus star layers merge the SAME full total on the balanced
           .evaluate((el) => (el as SceneStatsEl).sceneStats().starCount),
       { timeout: 30000 },
     )
-    .toBe(543_742);
+    .toBe(555_825);
 });
 
 // PF-10 C2 — SDSS DR18 galaxy field (3,637,836 real records, TR-066/067) wired into a SEPARATE
@@ -1449,6 +1482,62 @@ test("babylon: PF-10 SDSS DR18 galaxy field loads into its own live mesh", async
     .locator("babylon-scene")
     .evaluate((el) => (el as SceneStatsEl).sceneStats());
   expect(stats.sdssMeshReady).toBe(true);
+});
+
+// PF-10 C3 — the full real Gaia DR3 asteroid belt, replacing the seeded-LCG procedural torus.
+// Two tiers, and both are asserted here because they fail independently: the VISUAL layer
+// (154,662 real objects on their own mesh, object-type byte 6) and the PHYSICS layer (a bounded
+// subset of real bodies with real Keplerian velocities, built at boot from a generated module).
+// `asteroidRealSource` is the assertion that actually matters — the body COUNT is identical
+// either way, so only the source field can distinguish real catalog bodies from the procedural
+// fallback, which is exactly the confusion a "belt renders" test would sail past.
+test("babylon: PF-10 C3 real Gaia DR3 asteroid belt renders and drives the physics tier", async ({
+  page,
+}) => {
+  // A real ~2.0 MB asset decoding into 619k+ vertices, on top of the SDSS layer already loading.
+  test.setTimeout(90000);
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type SceneStatsEl = HTMLElement & {
+    sceneStats(): {
+      asteroidVisualCount: number;
+      asteroidVisualReady: boolean;
+      asteroidRealSource: string;
+      asteroidRealEpoch: string;
+      asteroidCatalogSize: number;
+      asteroidCount: number;
+      physicsMode: string;
+    };
+  };
+
+  // Real decoded count is 154,828, not the catalog's 154,662 — the shared PNG-pack format pads
+  // to a full 1024x756 rectangle and the trailing padding decodes as 166 all-zero "phantom"
+  // records. Identical, pre-existing behaviour to every other background layer (see the SDSS
+  // test above); asserted at its real value rather than rounded off.
+  await expect
+    .poll(
+      () =>
+        page
+          .locator("babylon-scene")
+          .evaluate(
+            (el) => (el as SceneStatsEl).sceneStats().asteroidVisualCount,
+          ),
+      { timeout: 75000 },
+    )
+    .toBe(154_828);
+
+  const stats = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as SceneStatsEl).sceneStats());
+  expect(stats.asteroidVisualReady).toBe(true);
+  // The physics tier is real catalog data, not the procedural fallback.
+  expect(stats.asteroidRealSource).toBe("gaia-dr3");
+  expect(stats.asteroidCatalogSize).toBe(154_662);
+  expect(stats.asteroidRealEpoch).toBe("2026-07-20");
+  // ...and it still honours the tier budget rather than trying to instance the catalog.
+  expect(stats.asteroidCount).toBeGreaterThan(0);
+  expect(stats.asteroidCount).toBeLessThanOrEqual(48);
 });
 
 // PF-10 C1 continued — the 41 real Billboard-archetype NGC2000 nebulae (of 47; the other 8 are
@@ -1496,4 +1585,46 @@ test("babylon: PF-10 NGC2000 billboard nebulae (celestial-ngc2000.js) load and a
       { timeout: 10000 },
     )
     .toBe("ngc2000-lagoon-nebula");
+});
+
+// PF-10 C1's last remaining item: GD-1's connected-trail visual (TR-073). A static
+// Material.LineListDrawMode mesh connecting the 1,365 real member stars in their real
+// physical order along the stream (a great-circle fit to the real sample, NOT catalog row
+// order — see gd1-trail.ts and docs/analysis/2026-07-20-gd1-connected-trail-science-brief.md),
+// coloured along its length by real radial velocity.
+test("babylon: PF-10 GD-1 connected-trail visual — 1,364 segments (n-1 for 1,365 real stars), console-clean", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") consoleErrors.push(m.text());
+  });
+  const pageErrors: string[] = [];
+  page.on("pageerror", (e) => pageErrors.push(e.message));
+
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type Gd1StatsEl = HTMLElement & {
+    sceneStats(): { gd1TrailSegments: number; gd1TrailMeshReady: boolean };
+  };
+  await expect
+    .poll(
+      async () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) => (el as Gd1StatsEl).sceneStats().gd1TrailMeshReady),
+      { timeout: 20000 },
+    )
+    .toBe(true);
+
+  const stats = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as Gd1StatsEl).sceneStats());
+  // n-1 segments for n=1,365 real stars — proves every real star was
+  // included (not silently truncated) and the mesh isn't a degenerate loop.
+  expect(stats.gd1TrailSegments).toBe(1364);
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
 });

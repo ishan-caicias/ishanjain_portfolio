@@ -8,9 +8,25 @@ from the [cutover gap analysis](../analysis/2026-07-19-webgl-babylon-cutover-gap
 curated destination bodies, the photographic DSO layer, the Milky Way band, constellation
 figures, and warp star trails — are all **resolved**
 ([TR-056](../test-reports/TR-056.md), [TR-057](../test-reports/TR-057.md), 2026-07-20).
-**One item remains before B6 closes: the post-flip owner device pass** (checklist §A, accepted
-risk at flip — needs the owner's physical iPad/mid-Android hardware, not actionable from this
-desk). **GAP-06 through GAP-16 — relativistic aberration/Doppler, ember sparks + idle hull bob,
+**The post-flip owner device pass ran 2026-07-20 ([TR-068](../test-reports/TR-068.md)) — real
+Android hardware (Galaxy S24 Ultra flagship + Galaxy S20 FE mid-tier) plus this desktop, 3 of the
+5 checklist §A device classes. Result: MIXED, not a clean pass — B6 stays open.** Desktop (A1)
+fails its 60 fps target (40 fps measured); mid-Android (A3) is genuinely mixed — the S20 FE
+passes (45-49 fps) but the S24 Ultra flagship fails (28-35 fps), a real, unresolved anomaly
+(flagship underperforming older mid-tier hardware) needing one more data point (the overlay's
+ENGINE/TIER lines, not captured this pass) before it can be root-caused. iPad (A2) and the WebGL2
+fallback (A4) remain untested. **Important scope caveat**: this measurement ran against the full
+current build, which includes PF-10's SDSS DR18 galaxy field (3.6M+ records, unconditional full
+load per PF-10's TR-067 ideal-state-first pivot) on top of B6's original feature set — the
+desktop shortfall is most plausibly explained by that addition, not a B6-intrinsic regression.
+See TR-068 for the full breakdown and recommended next step. **A second, independent device pass
+ran the same day ([TR-069](../test-reports/TR-069.md))** — S24 Ultra improved but still failed A3
+(32-37 fps vs the ≥40 fps floor); S20 FE still passed (42 fps); iPad explicitly deferred by the
+owner. The flagship-underperforms-mid-tier anomaly is now reproducible across two independent
+sessions. Leading hypothesis: uncapped `adaptToDeviceRatio` fill-rate cost on the flagship's
+higher-resolution display — not yet confirmed; the confirming data (device signature + ENGINE/TIER
+line) is already computed and already shown on the `?perf=1` overlay, just not yet reported. B6
+stays open. **GAP-06 through GAP-16 — relativistic aberration/Doppler, ember sparks + idle hull bob,
 free-look drag, field-star + body hover picking, canvas keyboard access, station sprite markers,
 HTML attribute parity, a scoped scroll-cadence port, and the `cosmos:aim`/`cosmos:craft`/
 `cosmos:hover`+`cosmos:unhover` event-contract gaps — are all resolved**
@@ -408,9 +424,20 @@ re-asserted post-boot), the **[cutover checklist](../validation-checklist/2026-0
 the **[rollback runbook](../runbooks/2026-07-19-engine-cutover-rollback.md)**, and
 **[ADR-0006](../adr/0006-babylon-default-cutover.md) (Proposed — gated)** making the flip a
 one-line change + status change with evidence attached. Local E2E made **deterministic**
-(workers 1 = CI; 70/70 twice — the TR-018 flake lineage closed). **Open before B6 completes:**
-checklist §A (owner device pass — also discharges B2's and B5's conditions), §B3
-billboard-memory disposition, then the flip + one release of legacy archival. 216 unit · 70 E2E.
+(workers 1 = CI; 70/70 twice — the TR-018 flake lineage closed). §B3 billboard-memory
+disposition: dispositioned (Option A accepted). **Checklist §A (owner device pass) ran
+2026-07-20 ([TR-068](../test-reports/TR-068.md)) — MIXED result, stays open, not discharged.**
+Desktop fails its 60fps target; mid-Android is genuinely mixed (older S20 FE passes, flagship
+S24 Ultra fails — a real, unresolved anomaly); iPad and WebGL2-fallback classes remain untested.
+**B6 does NOT close on this data** — see TR-068 for the full breakdown, the scope caveat (this
+build includes PF-10's SDSS DR18 addition on top of B6's original feature set), and the
+recommended next step (an ENGINE/TIER-line re-read on the two Android devices before deciding
+whether the S24 Ultra anomaly is backend/tier-driven or a real hardware issue). **A second round
+([TR-069](../test-reports/TR-069.md), 2026-07-20) reproduced the same anomaly** — S24 Ultra
+improved (448ms/32-37fps) but still failed A3's floor; S20 FE (1409ms/42fps) still passed; iPad
+deferred by owner. Leading hypothesis: uncapped `adaptToDeviceRatio` at the flagship's native
+resolution — untested data needed to confirm is already on the `?perf=1` overlay (device
+signature + ENGINE/TIER lines), just not yet reported. **B6 remains open.** 216 unit · 70 E2E.
 
 ## Creative exploration (candidate stretch ideas — pick per phase, not all)
 
