@@ -1,10 +1,47 @@
 # PF-10 Gaia Dataset Realism — real celestial catalog expansion & physical asteroid belt
 
 **Date:** 2026-07-20
-**Status:** PLANNED — no phase started. Scope and priority order confirmed by owner 2026-07-20.
+**Status:** **C0 COMPLETE** (both tracks proven — [TR-061](../test-reports/TR-061.md) Track A,
+[TR-063](../test-reports/TR-063.md) Track B — hardened with regression tests + a real Hunt-Reffert
+bugfix, [TR-064](../test-reports/TR-064.md) — then its one remaining known limitation, the
+streaming-decode gap, closed by [TR-066](../test-reports/TR-066.md)). **C1 — 6 of 8 sub-items now
+wired live, [TR-064](../test-reports/TR-064.md)/[TR-065](../test-reports/TR-065.md)/[TR-066](../test-reports/TR-066.md):**
+star clusters (35 curated), base-pack minor planets (4, real Kepler-orbit positions), NEARGALCAT
+(856 real galaxies), GD-1 stellar stream (1,365 real member stars), white dwarfs + CNS5 + Oort
+cloud (all 3 merged into real live rendering, TR-066 — a genuine GPU buffer leak and an
+over-permissive tier gate found and fixed along the way), and NGC2000 nebulae **partially**
+(41 of 47 real objects — the Billboard-archetype ones — wired live; the other 8, each with a
+bespoke per-object shader, remain blocked, precisely re-scoped in TR-066). **C2 (SDSS DR18) is now WIRED into real rendering** ([TR-067](../test-reports/TR-067.md)): real
+binary format cracked and confirmed against the official spec, a memory-safe streaming reader
+proven against the REAL 3,637,836-row file, a real distance-scale design problem (32.6M-28.86B
+ly, ~1000x the star field's linear-ly range) resolved via log-depth compression, and the real
+3,637,862-record galaxy field now renders on its own live mesh (`_loadSdssGalaxyLayer`) — see
+TR-066/TR-067 and [ADR-0007](../adr/0007-background-bulk-layer-merge.md). **Not yet done for
+C2**: the real-device (desktop/iPad/mid-Android) GO/NO-GO gate measurement itself — real Android
+hardware is now available (owner-provided mid-tier + flagship, 2026-07-20) but not yet exercised.
+C3/C4 not started.
+
+**Strategic pivot (owner direction, 2026-07-20, TR-067):** build the full PF-10 delivery plan as
+an IDEAL STATE, desktop as the baseline — every feature at full real scale, not preemptively
+tier-reduced. Tiers/modes/settings are introduced LATER, from real extended device testing (the
+newly-available Android hardware), not guessed in advance. This reverses TR-066's white-dwarf
+full-tier-only gate (a defensive restriction from a SwiftShader/software-rendering measurement,
+not a real device) — all bonus star layers now ship on every tier. TR-067 also found and
+quantified a real, important instrument gap: CI's bundled Chromium (SwiftShader) renders this
+scene's new full scale at ~3 fps vs. ~50 fps on real Chrome/GPU hardware — a ~17x gap. Real
+device measurement is not a formality for this plan going forward; it is the only trustworthy
+signal, per CLAUDE.md's own "measure, don't assert" rule.
+
+Scope and priority order confirmed by owner 2026-07-20.
 **Basis:** [Local Gaia dataset gap analysis](../analysis/2026-07-20-gaia-dataset-gap-analysis.md),
 [dataset inventory](../datasets/README.md) (40 real Gaia Sky data packs in
 `resources/gaia_datasets/`).
+
+**Correction (2026-07-20, later same day):** the "/astra doesn't exist" note directly below was
+accurate when written but is now stale — an `astra` skill was subsequently made available in
+this environment and used for the C1 cluster-list realism review (see the linked review doc).
+Per this repo's corrections-are-additive convention, the original note is kept as written below
+rather than edited away — it was a true, honest statement of the environment at the time.
 
 **Numbering note:** PF-09 records a decision that an originally-planned "PF-10 (physics phase)"
 was folded into PF-09 as its B4 milestone (Havok asteroid belt) rather than shipped as its own
@@ -107,6 +144,15 @@ white dwarfs → PNG-pack) with a decode test proving what was encoded reads bac
    parsing + big-endian primitive/char decoding with the BINARY2 null bitmask). This is required
    infrastructure for C1's clusters/CNS5/NEARGALCAT and C2's SDSS DR18 — built once, reused by
    both.
+   **Correction (2026-07-20, later same day, [TR-065](../test-reports/TR-065.md)):** not every
+   pack listed above actually uses BINARY2 — this was an assumption from the file extension
+   (`.vot`) and one real MWSC decode, not verified per-file. Decoding CNS5 and GD-1 for real
+   found both ship plain-text VOTable **TABLEDATA** instead (`<TR><TD>value</TD>...</TR>` rows),
+   a genuinely different local serialization. NBG was checked and does use BINARY2 as stated. A
+   second reader now exists for the TABLEDATA case:
+   [`scripts/lib/votable-tabledata.mjs`](../../scripts/lib/votable-tabledata.mjs). Per this
+   repo's corrections-are-additive convention, the claim above is left as originally written and
+   corrected here rather than silently edited.
 2. **The conversion pipeline itself works end-to-end on real data**, not just in principle:
    [`scripts/gaia-dataset-pipeline.mjs`](../../scripts/gaia-dataset-pipeline.mjs) decoded the
    real 3,006-row MWSC catalog (145 ms) and converted 3 named clusters into the exact
@@ -122,30 +168,65 @@ white dwarfs → PNG-pack) with a decode test proving what was encoded reads bac
    this repo's Windows dev box) and [`scripts/run-gaia-pipeline.sh`](../../scripts/run-gaia-pipeline.sh)
    (bash/CI equivalent), both thin wrappers over `npm run gaia:pipeline`.
 
-**Not yet built:** Track B (PNG-pack background layer) — needed for C2's SDSS DR18 and C1's
-white dwarfs — is unstarted; the BINARY2 reader is a prerequisite for it (SDSS ships the same
-VOTable format) but the encoder/decoder-pair and the density/LOD sampling strategy for a
-3.6M-row layer are separate, larger work.
+**Track B proven (2026-07-20, same day) — see [TR-063](../test-reports/TR-063.md). C0 EXIT
+CRITERION NOW MET, both tracks.** Built `scripts/lib/fits-bintable.mjs` (a real FITS
+binary-table reader — the white dwarf catalog turned out to be a **third** local data format,
+neither JSON nor VOTable) and `scripts/lib/starfield-pngpack.mjs` (generic encoder reusing
+`star-catalog.ts`'s exact shipped byte layout, reverse-engineered from the real assets rather
+than assumed). Proven against real eDR3 white dwarf data two ways: an in-memory round-trip
+through the _actual_ production `decodeStarCatalog` (6 passing unit tests, real hardcoded FITS
+fixtures) and a full file-to-file CLI run against the real 40 MB FITS file (2,000/359,073 rows,
+23ms, real PNG written and read back). **Real finding surfaced, not hidden:** the shared
+magnitude byte format's floor is exactly mag 12.5 (calibrated for naked-eye stars); every real
+white dwarf sampled (G≈18–20) is fainter than that and saturates to the format's dimmest byte —
+correct behaviour of the existing format, but it means white dwarfs sharing this byte format
+would all render at one indistinguishable brightness unless C1 designs a per-population
+remapping. Colour-byte mapping (`bp_rp` → byte) and the object-type byte are flagged as
+first-pass/provisional, deferred to C1's actual rendering-integration work.
 
 ## Phase C1 — Missing objects
 
 **Scope** (everything from the gap analysis not covered by C2/C3 below):
 
-| Dataset                                                 |         Records | Track                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Note                                                                                          |
-| ------------------------------------------------------- | --------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Star clusters (Hunt-Reffert 2023 + OCDR2 + MWSC)        | 12,190 combined | **Finalized (owner + Astra, 2026-07-20).** Hybrid: 35 named clusters (22 open, 13 globular — full list, real hand-verified J2000 coordinates/distances/ages, in [`docs/datasets/star_clusters_hall_of_fame.md`](../datasets/star_clusters_hall_of_fame.md), validated in the [Astra realism review](../analysis/2026-07-20-star-cluster-hall-of-fame-realism-review.md)) get full curated status: individually authored, travelable, readable dossiers. The remaining ~12,155 render as an instanced glow/label layer at real MWSC coordinates — real data, no per-object dossier, per the data-vintage split decided in that review. Content authoring: 10/35 flavour+lore pairs written (Astra); remaining 25 explicitly deferred by owner decision until the portfolio is functionally ready — not a blocker for wiring the rendering path itself. |
-| CNS5 nearby stars                                       |           5,931 | Curated JSON                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Real neighbor stars, distinct selection principle from the existing bright-star catalogs      |
-| eDR3 white dwarfs                                       |         359,073 | Background layer (PNG-pack)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Far past curated-JSON range                                                                   |
-| GD-1 stellar stream                                     |           1,365 | Curated JSON or instanced particles                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Novel visual — a real tidal debris trail                                                      |
-| Oort cloud                                              |          10,000 | Instanced particles                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Structureless population, not named/travelable bodies                                         |
-| NGC2000 nebulae                                         |              47 | Curated JSON, wired into the **existing** volumetric raymarch pipeline (`babylon-engine.ts:1172-1211`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Pure data-wiring — the rendering path already exists, currently hardcoded to 4 showcase spots |
-| Base-pack minor planets (Vesta, Ceres, Pallas, Hygieia) |               4 | Curated JSON                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Real orbital elements, trivial add                                                            |
-| NEARGALCAT nearby galaxies                              |             875 | Curated JSON                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Real distance-based nearby galaxies, separate from the SDSS redshift catalog in C2            |
+| Dataset                                                 |         Records | Track                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Note                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------- | --------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Star clusters (Hunt-Reffert 2023 + OCDR2 + MWSC)        | 12,190 combined | **CODE-COMPLETE for the 35-cluster curated tier (2026-07-20, TR-064).** `src/data/celestial/celestial-clusters.js` ships all 35 named clusters (22 open, 13 globular — real hand-verified J2000 coordinates/distances/ages, [validated by Astra](../analysis/2026-07-20-star-cluster-hall-of-fame-realism-review.md)), wired into `SpaceScene.tsx`'s load chain, verified travelable via a real E2E `travelTo`/`arrivedId` proof — no new rendering code needed (`"cluster"` was already a fully-handled type). Content: 10/35 flavour+lore pairs written; 25 explicitly deferred by owner decision. **NOT started:** the ~12,155-cluster instanced background layer (real MWSC coordinates, no per-object dossier) — this is separate work from the curated tier above. |
+| CNS5 nearby stars                                       |           5,931 | **CODE-COMPLETE, wired live (2026-07-20, TR-066).** `public/assets/cns5.png` (5,371 real records) merged into the live star mesh via `_loadBonusStarLayers` — kept on every quality tier. **Correction:** the original "Curated JSON" track does not hold — measured standalone at 271.5 KB gzip against a bundle that had only ~52 KB of headroom left after this session's other Track A additions; Track B (PNG-pack) used instead, see the Budgets section addendum below.                                                                                                                                                                                                                                                                                           | Real neighbor stars, distinct selection principle from the existing bright-star catalogs                                                                                                                                                                                                                                     |
+| eDR3 white dwarfs                                       |         359,073 | **CODE-COMPLETE, wired live (2026-07-20, TR-066/TR-067).** `public/assets/whitedwarfs-edr3.png` (full 359,073 records) merged into the live star mesh — **ships on every quality tier** (TR-067: owner's ideal-state-first pivot reversed TR-066's `full`-tier-only gate, which was based on a SwiftShader/software-rendering measurement, not a real device; real GPU hardware confirmed ~50fps with this scale merged in). 2 Astra calibration recommendations applied and shader-verified (TR-065): colour range `[-0.6,1.2]`, type byte `0`.                                                                                                                                                                                                                         | Far past curated-JSON range                                                                                                                                                                                                                                                                                                  |
+| GD-1 stellar stream                                     |           1,365 | **CODE-COMPLETE (2026-07-20, TR-065).** `src/data/celestial/celestial-gd1.js` — all 1,365 real member stars as individual `t:"star"` entries, wired into `SpaceScene.tsx`'s load chain.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Each star is real and travelable; the "novel visual" connected-trail treatment below is **not** implemented — open design decision, not attempted                                                                                                                                                                            |
+| Oort cloud                                              |          10,000 | **CODE-COMPLETE, wired live (2026-07-20, TR-066).** `public/assets/oortcloud.png` (full 10,000 records) merged into the live star mesh — kept on every quality tier. **Correction:** not a new instanced-particle system — both shader twins already reserve object-type byte 7 ("oort dust grain") for exactly this population; discovered verifying the white-dwarf type-byte fix against the real shader.                                                                                                                                                                                                                                                                                                                                                             | Structureless population, not named/travelable bodies                                                                                                                                                                                                                                                                        |
+| NGC2000 nebulae                                         |              47 | **PARTIALLY CODE-COMPLETE (2026-07-20, TR-066): 41/47 wired live.** `src/data/celestial/celestial-ngc2000.js` — the real "Billboard"-archetype objects (data-wireable, zero new rendering code, exactly as originally assumed for all 47). **The other 8 remain BLOCKED**, precisely re-scoped: each is a "Volume"-archetype object with its OWN bespoke, hand-authored GLSL shader — needs both the reveal-mechanism redesign below AND a per-object GLSL→WGSL port, real separate design work.                                                                                                                                                                                                                                                                         | **Correction (TR-065, refined TR-066):** the original "pure data-wiring" claim was wrong for the 8 Volume objects (`nebula-field.ts`'s reveal mechanism hard-caps at 4 volumes) but TURNED OUT TRUE for the other 41 — the 47-object catalog is not uniform, discovered by reading the real local data rather than assuming. |
+| Base-pack minor planets (Vesta, Ceres, Pallas, Hygieia) |               4 | **CODE-COMPLETE (2026-07-20, TR-065).** `src/data/celestial/celestial-minorplanets.js` — real positions from real Keplerian orbital elements (`scripts/gaia-minorplanet-position.mjs`), snapshotted 2026-07-20.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | **Correction:** not a trivial add as originally estimated — these orbit the Sun, so (unlike every other C1 item) a fixed ra/dec is physically wrong; needed real orbital-mechanics computation, not just a data pull                                                                                                         |
+| NEARGALCAT nearby galaxies                              |             856 | **CODE-COMPLETE (2026-07-20, TR-065).** `src/data/celestial/celestial-nbg.js` — all real rows, wired into `SpaceScene.tsx`'s load chain. **Correction:** record count is 856, not 875 (the plan's original figure) — see the Budgets/datasets-README addendum.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Real distance-based nearby galaxies, separate from the SDSS redshift catalog in C2                                                                                                                                                                                                                                           |
 
 **Exit:** every category above renders at its real catalog position; unit tests cover each new
 decoder/converter; E2E confirms reachability where the design calls for travelable bodies;
 `npm run budget:check` stays green after each addition (checked incrementally, not only at the
 end of the phase).
+
+**Addendum, 2026-07-20 (TR-065) — real measured budget headroom, and the NGC2000 blocker in
+full:**
+
+- **Bundle headroom is now tight.** Measured incrementally per this session's own exit criterion:
+  1044.4 KB → 1082.9 KB (+ minor planets + NBG) → 1147.8 KB (+ GD-1) gzip, against the 1200 KB
+  budget — **52.2 KB headroom remains.** CNS5's Track A candidate measured 271.5 KB gzip
+  standalone, over 5× the remaining headroom, which is why it stayed Track B (proven, not wired)
+  rather than joining the three items above. Any future C1/C2/C3 Track A addition must be
+  measured against a real build before landing, not assumed safe from the original gap
+  analysis's per-dataset (not per-bundle) verdicts.
+- **NGC2000 is not "pure data-wiring."** `nebula-field.ts` (the module actually backing
+  `babylon-engine.ts:1172-1211`'s raymarch pipeline, per ADR-0004) bakes every nebula volume's
+  raymarch call directly into both shader sources with no uniform arrays (a deliberate ADR-0004
+  choice), and routes each volume's destination-gated reveal state through one component of a
+  single `vec4 uReveal` uniform via a swizzle literal (`x`/`y`/`z`/`w`) baked per volume at
+  generation time. `revealComponent()` throws `"uReveal carries at most 4 volumes"` past index 3
+  — today's 4 showcase nebulae sit exactly at that ceiling. Adding NGC2000's 47 real nebulae
+  under this mechanism unmodified would not degrade gracefully; it crashes shader generation
+  outright the moment a 5th volume is added. This needs a DESIGN step before any IMPLEMENT can
+  start: likely replacing the per-volume reveal component with a small fixed set of
+  active-volume-index + reveal-amount uniforms (since at most one destination nebula is ever
+  meaningfully visible at a time by the existing destination-gated design), rather than
+  continuing to unroll an unconditional raymarch call per volume regardless of visibility.
 
 ## Phase C2 — SDSS DR18 galaxy field ⛔ GO / NO-GO GATE
 
@@ -169,14 +250,50 @@ an ADR if it changes what any tier ships by default, following the same pattern 
 
 **Reconfirmed (owner, 2026-07-20): DR18, not DR12.** No change to the decision above — recorded
 again here because C0's real-data work landed the same day and it's worth being explicit that
-DR18 stays the target. C0 also confirmed SDSS ships the same VOTable BINARY2 format the cluster
-catalogs use (`scripts/lib/votable-binary2.mjs` reads the schema already; a 3.6M-row file needs
-a streaming pass rather than loading the whole decoded row array in memory at once, which the C0
-proof-of-concept didn't need to solve at MWSC's 3,006-row scale — flagged as real, not yet
-started, C2 work).
+DR18 stays the target.
 
-**Exit:** DR18 field renders; gate measured and recorded; tier-gating decision (if any) written
-up.
+**Correction (2026-07-20, later same day, [TR-066](../test-reports/TR-066.md)): SDSS DR18 does
+NOT ship VOTable BINARY2** as this section originally assumed — its real data file
+(`sdss/sdss_dr18.bin`) is Gaia Sky's own native `BinaryPointDataProvider` binary format, a FOURTH
+local serialization discovered this session, confirmed against the official Gaia Sky format spec
+and byte-verified against the real 3,637,836-row file (`scripts/lib/gaiasky-binary-particles.mjs`
+
+- 7 unit tests). The streaming-decode gap this section flagged as "not yet started" **is now
+  closed and proven against the real file**: 487ms, 0.6 MB heap delta, zero per-record object
+  allocation.
+
+**Real distance-scale finding, resolved (TR-066):** the real file's distances span ~32.6 million
+to ~28.86 billion light-years — a ~1000x range dwarfing the star field's existing linear-ly
+placement convention (max ~2,400 ly). Resolved by baking log-depth compression (the exact
+`bodyDepth()` formula every curated body already uses) into the packed positions instead of
+linear light-years — see [ADR-0007](../adr/0007-background-bulk-layer-merge.md). Consequence:
+SDSS needs its own separate mesh (not merged into the linear-scaled `CATALOG_CHUNKS` star field).
+
+**Full pipeline proven against the REAL file** (`scripts/gaia-sdss18-pngpack.mjs`): all 3,637,836
+real records packed in ~1 second. Photometry: the real file carries no per-object magnitude/
+colour data (confirmed against the format spec and the Gaia Sky app's own renderer-side colour-
+range config) — every record gets a uniform, honestly-declared byte pair, matching the Oort
+cloud's precedent.
+
+**WIRED INTO REAL RENDERING (2026-07-20, [TR-067](../test-reports/TR-067.md)):** the full real
+asset (`public/assets/sdss18.png`, 47.1 MB, 3,637,862 real records including the shared PNG
+format's known padding-record behaviour) now loads via `_loadSdssGalaxyLayer`
+(`babylon-engine.ts`) into its own live mesh, fetched after `cosmos:ready`, sharing the existing
+`ijStar` material (object-type byte 3 = "galaxy smudge", already a real shader branch). Real E2E
+proof: exact record count + mesh readiness.
+
+**Real finding (TR-067): CI's SwiftShader software rendering cannot represent this scene's real
+performance.** Measured directly: ~3 fps on Playwright's bundled Chromium (SwiftShader) vs. ~50
+fps on real Chrome/GPU hardware, on the identical scene. This is why the GO/NO-GO gate below
+requires REAL device measurement, not CI automation — CI's own instrument is now confirmed
+unrepresentative at this scale, not just theoretically suspect.
+
+**Remaining before this gate can run:** the real-device fps/startup measurement itself (desktop/
+iPad/mid-Android) — real Android hardware (mid-tier + flagship) is now available (owner,
+2026-07-20) but not yet exercised. No iPad/tablet access confirmed yet either.
+
+**Exit:** DR18 field renders (✅ done, TR-067); gate measured and recorded (real device data
+pending); tier-gating decision (if any) written up.
 
 ## Phase C3 — Full real-data asteroid belt (replaces the procedural belt)
 

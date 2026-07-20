@@ -535,10 +535,14 @@ async function loadChunkRGB(url: string): Promise<Uint8Array> {
  * The fallback is not decoration: it keeps the no-network / asset-404 path
  * rendering a sky rather than a black screen, matching the live engine's
  * behaviour of tolerating a missing deep layer. It reports which path was
- * taken so a silent downgrade cannot masquerade as the real catalog. */
+ * taken so a silent downgrade cannot masquerade as the real catalog. Also
+ * returns the raw decoded RGB chunks (not just the merged field) so a later
+ * bonus-layer merge (see `_loadBonusStarLayers`) can re-decode them alongside
+ * new chunks without re-fetching/re-decoding the base catalog's images. */
 async function loadStarField(): Promise<{
   field: StarField;
   source: "catalog" | "procedural";
+  baseChunks: Uint8Array[] | null;
 }> {
   try {
     const chunks = await Promise.all(
@@ -553,12 +557,33 @@ async function loadStarField(): Promise<{
     );
     const field = decodeStarCatalog(chunks);
     if (field.count === 0) throw new Error("catalog decoded to zero records");
-    return { field, source: "catalog" };
+    return { field, source: "catalog", baseChunks: chunks };
   } catch (e) {
     console.warn("[babylon-engine] star catalog failed, using placeholder", e);
-    return { field: buildStarField(LIVE_STAR_COUNT), source: "procedural" };
+    return {
+      field: buildStarField(LIVE_STAR_COUNT),
+      source: "procedural",
+      baseChunks: null,
+    };
   }
 }
+
+/* PF-10 C1: bonus background-layer chunks — white dwarfs (eDR3, TR-063/065), CNS5 nearby stars,
+ * Oort cloud dust — proven Track B (PNG-pack) mechanisms (TR-063/065) wired into real rendering
+ * here for the first time. Deliberately NOT part of CATALOG_CHUNKS: those load synchronously
+ * before the first frame and gate cosmos:ready, and white dwarfs alone is a real ~5.4 MB asset
+ * (359,073 real records) — eagerly blocking startup on that would directly threaten the
+ * PF-09/PF-10 startup budgets (≤2.5-4.0s by device class). These fetch AFTER cosmos:ready fires
+ * instead (see `_loadBonusStarLayers`), a real progressive-enhancement merge into the already-
+ * visible star mesh, matching the same non-blocking philosophy already used for the ship GLB and
+ * the Milky Way band's chunked texture build. Order matters: CNS5 first (smallest, most likely
+ * useful even under network pressure), Oort cloud second, white dwarfs last (largest).
+ */
+const BONUS_CATALOG_CHUNKS = [
+  "assets/cns5.png",
+  "assets/oortcloud.png",
+  "assets/whitedwarfs-edr3.png",
+] as const;
 
 /* Star rendering: BILLBOARD QUADS in one merged indexed mesh, not point sprites.
  *
@@ -1313,6 +1338,22 @@ class BabylonScene extends HTMLElement {
     meta: Float32Array;
     count: number;
   } | null = null;
+  /* PF-10 C1: base-catalog raw RGB chunks (stars-hip.png + deep.png, already fetched+decoded
+   * at boot), retained so a bonus-layer merge can re-decode them alongside new chunks in one
+   * decodeStarCatalog call instead of re-fetching/re-decoding the base catalog's images. Null
+   * when the base catalog itself fell back to the procedural field (nothing real to merge with,
+   * and no reason to make the placeholder pretend otherwise). */
+  private _baseCatalogRgb: Uint8Array[] | null = null;
+  /** Guards `_loadBonusStarLayers` to run at most once per boot. */
+  private _bonusLayersRequested = false;
+  /** PF-10 C2: the SDSS DR18 galaxy field — a SEPARATE mesh from `_stars` (log-depth-scaled
+   * positions, incompatible with the star field's linear-ly convention; see ADR-0007's
+   * consequences and `scripts/gaia-sdss18-pngpack.mjs`'s header). Shares `_starMat` (the
+   * `ijStar` material is already generic on the object-type byte; galaxies are type 3). */
+  private _sdssMesh?: Mesh;
+  private _sdssGalaxyCount = 0;
+  /** Guards `_loadSdssGalaxyLayer` to run at most once per boot. */
+  private _sdssLayerRequested = false;
   // --- GAP-06: relativistic aberration + Doppler ---
   /** Brachistochrone-profile beta (v/c), integrated from warp.prog exactly
    * like space-engine.js's `this._beta` — ramps with the accel/decel curve
@@ -1490,24 +1531,15 @@ class BabylonScene extends HTMLElement {
       }),
     );
 
-    const { field, source } = await loadStarField();
-    const bb = buildStarBillboards(field);
-    this.starCount = field.count;
+    const { field, source, baseChunks } = await loadStarField();
     this.starSource = source;
-    // GAP-09/GAP-16: kept for fieldInfo()/field-star hover picking.
-    this._field = field;
+    this._baseCatalogRgb = baseChunks;
 
     // one merged indexed mesh of billboard quads (see star-field.ts for why
     // neither point sprites nor thin instances are usable here)
     const mesh = new Mesh("stars", scene);
     this._stars = mesh;
-    const vd = new VertexData();
-    vd.positions = bb.positions;
-    vd.indices = bb.indices;
-    vd.applyToMesh(mesh, false);
-    mesh.setVerticesBuffer(
-      new VertexBuffer(engine, bb.meta, "starMeta", false, false, 2),
-    );
+    this._applyStarFieldGeometry(field, engine);
     // the shell surrounds the camera; never frustum/occlusion-cull it away
     mesh.alwaysSelectAsActiveMesh = true;
 
@@ -1687,6 +1719,11 @@ class BabylonScene extends HTMLElement {
         first = false;
         emit("cosmos:progress", { loaded: field.count, total: field.count });
         emit("cosmos:ready", {});
+        // PF-10 C1: kick off the bonus background-layer fetch only after the first real frame
+        // has rendered — never awaited, never gating cosmos:ready itself.
+        void this._loadBonusStarLayers();
+        // PF-10 C2: SDSS DR18 galaxy field — same non-blocking philosophy, own mesh.
+        void this._loadSdssGalaxyLayer(scene, engine);
       }
     });
 
@@ -1749,6 +1786,9 @@ class BabylonScene extends HTMLElement {
       totalVertices: m ? m.getTotalVertices() : -1,
       totalIndices: m ? m.getTotalIndices() : -1,
       materialReady: m?.material ? m.material.isReady(m) : false,
+      // PF-10 C2: SDSS DR18 galaxy field diagnostics (separate mesh, see _loadSdssGalaxyLayer).
+      sdssGalaxyCount: this._sdssGalaxyCount,
+      sdssMeshReady: this._sdssMesh ? this._sdssMesh.isReady(true) : false,
       // B3: shooting-star particle diagnostics.
       shootMeshReady: shoot ? shoot.isReady(true) : false,
       shootTotalVertices: shoot ? shoot.getTotalVertices() : -1,
@@ -1833,6 +1873,146 @@ class BabylonScene extends HTMLElement {
       haloAmp: this._quality.haloAmp,
       shootCount: this._quality.shootingStars,
     };
+  }
+
+  // --- PF-10 C1: bonus background-layer merge (white dwarfs, CNS5, Oort cloud) ---
+
+  /** (Re)builds the star mesh's geometry (positions/indices/starMeta) from a StarField,
+   * updating `this.starCount`/`this._field` to match. Shared by the initial boot setup and the
+   * post-boot bonus-layer merge below — same billboard-quad construction either way, only the
+   * source field differs. Requires `this._stars` to already exist (the mesh itself, its
+   * material, and `mesh.alwaysSelectAsActiveMesh` are set up once at boot and never rebuilt). */
+  private _applyStarFieldGeometry(field: StarField, engine: AbstractEngine) {
+    if (!this._stars) return;
+    const bb = buildStarBillboards(field);
+    const vd = new VertexData();
+    vd.positions = bb.positions;
+    vd.indices = bb.indices;
+    vd.applyToMesh(this._stars, false);
+    // On a rebuild (the bonus-layer merge calls this a second time), the mesh already owns a
+    // "starMeta" GPU buffer from the initial boot — setVerticesBuffer REPLACES the reference on
+    // the mesh but does not dispose the old WebGL/WebGPU buffer object itself, leaking it. A
+    // single leaked buffer of this size was measured this session to visibly degrade subsequent
+    // frame time (a 350ms warp taking 4+ real seconds under SwiftShader) — real GPU resource
+    // pressure, not a cosmetic leak. Explicitly disposed before the replacement is created.
+    this._stars.getVertexBuffer("starMeta")?.dispose();
+    this._stars.setVerticesBuffer(
+      new VertexBuffer(engine, bb.meta, "starMeta", false, false, 2),
+    );
+    this.starCount = field.count;
+    this._field = field;
+  }
+
+  /** Resolves once `this.warp.mode === "idle"`, polling once per animation frame, capped at
+   * `maxWaitMs` so a stuck/perpetual warp state can never block the bonus-layer merge forever
+   * (the merge still matters even if the visitor never stops moving; it just accepts the
+   * collision risk past the cap rather than silently never running). */
+  private _waitForWarpIdle(maxWaitMs = 8000): Promise<void> {
+    return new Promise((resolve) => {
+      const start = performance.now();
+      const check = () => {
+        if (
+          this.warp.mode === "idle" ||
+          performance.now() - start > maxWaitMs
+        ) {
+          resolve();
+          return;
+        }
+        requestAnimationFrame(check);
+      };
+      check();
+    });
+  }
+
+  /** Fetches the 3 proven-but-previously-unwired Track B bulk populations (TR-063/065: white
+   * dwarfs, CNS5, Oort cloud — real PNG-pack assets, real object-type bytes already understood
+   * by the shipped shader: 0=star, 3 handled separately for galaxies, 7=oort dust grain) and
+   * merges them into the already-visible star mesh. Called once, AFTER cosmos:ready — these are
+   * real bulk assets (white dwarfs alone ~5.4 MB, 359,073 records) and fetching them before the
+   * first frame would directly threaten the PF-09/PF-10 startup budgets (≤2.5-4.0s by device
+   * class), the same reasoning this file already applies to the ship GLB and Milky Way texture.
+   * A fetch/decode failure on any chunk degrades gracefully — the base catalog stays exactly as
+   * it was, never a blank sky or a crash, matching `loadStarField`'s own fallback philosophy. */
+  private async _loadBonusStarLayers() {
+    if (this._bonusLayersRequested) return;
+    this._bonusLayersRequested = true;
+    if (!this._engine || !this._stars || !this._baseCatalogRgb) return;
+    // PF-10 owner direction (2026-07-20, TR-067): build the IDEAL STATE for every device first
+    // — desktop as the baseline, tiers/modes/settings introduced LATER from real extended device
+    // testing, not preemptively. This deliberately REVERSES TR-066's tier gate, which restricted
+    // white dwarfs to "full" tier from a SwiftShader/software-rendering measurement (CI's
+    // emulated GPU, not a real device) — a reasonable worst-case proxy at the time, but real
+    // Android hardware (mid-tier + flagship, now available for this plan) is the correct
+    // instrument per CLAUDE.md's own "measure, don't assert" rule, not a software rasterizer.
+    // ALL bonus layers now merge on every tier; the tier-gate mechanism (chunkUrls) is kept,
+    // set to a no-op today, ready to be re-armed with real thresholds once real-device numbers
+    // land — never reintroduced blind.
+    const chunkUrls = BONUS_CATALOG_CHUNKS;
+    try {
+      const bonusRgb = await Promise.all(
+        chunkUrls.map((u) =>
+          loadChunkRGB(u).catch((e) => {
+            console.warn(`[babylon-engine] bonus star layer ${u} failed`, e);
+            return new Uint8Array(0);
+          }),
+        ),
+      );
+      const merged = decodeStarCatalog([...this._baseCatalogRgb, ...bonusRgb]);
+      if (merged.count <= this.starCount) return; // every bonus chunk failed; nothing to merge
+      // Real finding, not a test-timing nicety: rebuilding billboard geometry for 500k+ merged
+      // records and re-uploading new GPU vertex buffers is genuine main-thread + GPU work — on
+      // SwiftShader (CI/software rendering) large enough to visibly stall an in-flight warp if
+      // the rebuild happens to land mid-travel. Waiting for the ship to be idle first (network
+      // fetch + decode already happened above; only the expensive geometry/GPU step is gated)
+      // means the one-time enhancement never competes with an active flight for frame time.
+      await this._waitForWarpIdle();
+      this._applyStarFieldGeometry(merged, this._engine);
+      emit("cosmos:bonus-stars", { total: merged.count });
+    } catch (e) {
+      console.warn(
+        "[babylon-engine] bonus star layers failed, keeping base catalog",
+        e,
+      );
+    }
+  }
+
+  /** PF-10 C2: fetches and renders the SDSS DR18 galaxy field (real 3,637,836 records, TR-066/
+   * TR-067) — a SEPARATE mesh from `_stars` for the reason ADR-0007's consequences section
+   * states explicitly: SDSS's real comoving distances (32.6M-28.86B ly) are baked as log-depth-
+   * compressed positions (`scripts/gaia-sdss18-pngpack.mjs`'s `bodyDepth()` port), incompatible
+   * with `_stars`'s linear-light-year convention — merging the two into one `decodeStarCatalog`
+   * call would silently corrupt whichever layer's convention doesn't match. Reuses `_starMat`
+   * (the `ijStar` shader material is already generic on the object-type byte; type 3 = "galaxy
+   * smudge" is a real, existing branch). A real ~47 MB asset — fetched only after
+   * `cosmos:ready`, idle-gated before the geometry build, same non-blocking philosophy as
+   * `_loadBonusStarLayers`. PF-10 owner direction (TR-067): ship the full real dataset now
+   * (ideal-state-first, desktop baseline) — no tier gate here yet, pending real Android
+   * measurement (mid-tier + flagship) to inform one later, not a preemptive guess. */
+  private async _loadSdssGalaxyLayer(scene: Scene, engine: AbstractEngine) {
+    if (this._sdssLayerRequested) return;
+    this._sdssLayerRequested = true;
+    try {
+      const rgb = await loadChunkRGB("assets/sdss18.png");
+      const field = decodeStarCatalog([rgb]);
+      if (field.count === 0) return;
+      await this._waitForWarpIdle();
+      const bb = buildStarBillboards(field);
+      const mesh = new Mesh("sdssGalaxies", scene);
+      const vd = new VertexData();
+      vd.positions = bb.positions;
+      vd.indices = bb.indices;
+      vd.applyToMesh(mesh, false);
+      mesh.setVerticesBuffer(
+        new VertexBuffer(engine, bb.meta, "starMeta", false, false, 2),
+      );
+      mesh.alwaysSelectAsActiveMesh = true;
+      mesh.material = this._starMat ?? null;
+      this._sdssMesh = mesh;
+      this._sdssGalaxyCount = field.count;
+      emit("cosmos:sdss-galaxies", { total: field.count });
+    } catch (e) {
+      console.warn("[babylon-engine] SDSS galaxy layer failed", e);
+    }
   }
 
   // --- GAP-01/GAP-02: curated celestial bodies ---

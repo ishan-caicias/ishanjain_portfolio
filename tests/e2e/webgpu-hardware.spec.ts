@@ -121,7 +121,11 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
     expect(stats.qualityTier).toBe("full");
     expect(stats.materialReady).toBe(true);
     expect(stats.starSource).toBe("catalog");
-    expect(stats.starCount).toBe(168959);
+    // PF-10 C1 (TR-066): _loadBonusStarLayers merges 3 more real bulk populations into this
+    // same mesh right after cosmos:ready — on a fast run that can beat this test's 1s settle
+    // wait, so the base count is a floor, not an exact match (see engine-select.spec.ts's own
+    // "PF-10 bonus star layers" test for the exact merged total this can grow to).
+    expect(stats.starCount).toBeGreaterThanOrEqual(168959);
     expect(Number(stats.activeIndices)).toBeGreaterThan(0);
 
     // B3: the shooting-star WGSL twin compiles and its mesh is ready too — a

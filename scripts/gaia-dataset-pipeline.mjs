@@ -60,13 +60,68 @@ function slugId(prefix, name) {
     .replace(/(^-|-$)/g, "")}`;
 }
 
-function toCuratedEntry(row, dataset) {
+/* Some catalogs (Hunt & Reffert 2023 confirmed; possibly others) store a cross-matched cluster's
+ * `name` field as a pipe-delimited list of every catalog's designation for the same physical
+ * object — e.g. the Hyades is "Collinder_50|Hyades|MWSC_379|Melotte_25|OCL_456|
+ * Taurus_Moving_Cluster", not a clean "Hyades". A real, discovered bug: `--names "Hyades"`
+ * against this data used to fail outright, because the exact-match lookup only ever compared
+ * against the whole compound string. Both the index (buildNameIndex) and display naming
+ * (chooseDisplayName) now treat each pipe-delimited designation as independently searchable.
+ *
+ * Two more real bugs surfaced running this against the FULL 7,167-row Hunt-Reffert file (not
+ * just the small hand-picked sample used during development):
+ * 1. `row.name` can be `null` (a real BINARY2 null-bitmask hit on some rows) — splitDesignations
+ *    used to crash on `.includes()` against null.
+ * 2. Hunt-Reffert 2023 has thousands of rows sharing a cross-match designation with a genuinely
+ *    different row (duplicate/overlapping candidate detections in the source survey, not a bug
+ *    in this reader) — warning once per collision produced dozens of lines of noise for a
+ *    single real run. Collisions are now counted and summarized in one line. */
+function splitDesignations(rawName) {
+  if (rawName == null) return [];
+  return rawName.includes("|") ? rawName.split("|") : [rawName];
+}
+
+/** Maps every individual designation within a compound name to its row, so a search for any
+ * one of a cluster's cross-matched names resolves it. Rows with no usable name (null) are
+ * skipped, not crashed on. Designation collisions (real and common in Hunt-Reffert 2023 — see
+ * header note) are counted, not logged one-by-one; first claim wins. */
+function buildNameIndex(rows) {
+  const index = new Map();
+  let collisions = 0;
+  for (const row of rows) {
+    for (const designation of splitDesignations(row.name)) {
+      const existing = index.get(designation);
+      if (existing && existing !== row) {
+        collisions++;
+        continue;
+      }
+      index.set(designation, row);
+    }
+  }
+  if (collisions > 0) {
+    console.warn(
+      `gaia-dataset-pipeline: ${collisions} designation(s) claimed by more than one row (first claim kept) — expected for Hunt-Reffert-style cross-matched catalogs, not necessarily a data defect`,
+    );
+  }
+  return index;
+}
+
+/** Picks the designation to show/slug from — the one actually searched for, if the row's real
+ * `name` is compound, so a Hyades lookup doesn't display "Collinder_50|Hyades|MWSC_379|...". */
+function chooseDisplayName(row, searchedName) {
+  const designations = splitDesignations(row.name);
+  if (designations.includes(searchedName)) return searchedName;
+  return designations[0];
+}
+
+function toCuratedEntry(row, dataset, searchedName) {
   const distanceLy =
     typeof row.distance === "number" ? row.distance * PC_TO_LY : null;
   const typeLabel = CLUSTER_TYPE_LABEL[row.type ?? "null"] ?? "star cluster";
+  const displayName = chooseDisplayName(row, searchedName ?? row.name);
   return {
-    id: slugId(dataset.idPrefix, row.name),
-    n: row.name.replace(/_/g, " "),
+    id: slugId(dataset.idPrefix, displayName),
+    n: displayName.replace(/_/g, " "),
     d: `${typeLabel} · ${dataset.sourceLabel}`,
     t: "cluster",
     r: "rare",
@@ -159,14 +214,16 @@ function main() {
     process.exit(1);
   }
 
-  const byName = new Map(rows.map((r) => [r.name, r]));
+  const byName = buildNameIndex(rows);
   const missing = args.names.filter((n) => !byName.has(n));
   if (missing.length > 0) {
     console.error(`Not found in ${args.dataset}: ${missing.join(", ")}`);
     process.exit(1);
   }
 
-  const entries = args.names.map((n) => toCuratedEntry(byName.get(n), dataset));
+  const entries = args.names.map((n) =>
+    toCuratedEntry(byName.get(n), dataset, n),
+  );
   const outPath =
     args.out ?? join("scripts", "out", `${args.dataset}-curated-sample.json`);
   writeFileSync(outPath, JSON.stringify(entries, null, 2) + "\n");

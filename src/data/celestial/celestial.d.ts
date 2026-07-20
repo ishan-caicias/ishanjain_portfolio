@@ -36,6 +36,11 @@ declare global {
     CELESTIAL_EXTRA_DONE?: boolean;
     CELESTIAL_COMPLETE?: boolean;
     CELESTIAL_GAIA_COUNT?: number;
+    CELESTIAL_CLUSTERS_COUNT?: number;
+    CELESTIAL_MINORPLANETS_COUNT?: number;
+    CELESTIAL_NBG_COUNT?: number;
+    CELESTIAL_GD1_COUNT?: number;
+    CELESTIAL_NGC2000_COUNT?: number;
     CELESTIAL_IMGMAP?: Record<string, [string, string]>;
   }
 }

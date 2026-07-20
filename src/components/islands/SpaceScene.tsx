@@ -325,6 +325,11 @@ export default function SpaceScene({
       import("@/data/celestial/celestial-imgmap.js"),
       import("@/data/celestial/celestial-extra2.js"),
       import("@/data/celestial/celestial-gaia.js"),
+      import("@/data/celestial/celestial-clusters.js"),
+      import("@/data/celestial/celestial-minorplanets.js"),
+      import("@/data/celestial/celestial-nbg.js"),
+      import("@/data/celestial/celestial-gd1.js"),
+      import("@/data/celestial/celestial-ngc2000.js"),
     ]).then(() => {
       if (!cancelled) setEngineReady(true);
     });

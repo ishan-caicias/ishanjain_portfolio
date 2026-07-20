@@ -20,6 +20,33 @@
  *   [13]    u8 colour index        (shader: Planckian O->M ramp)
  *   [14]    u8 object type         (0 = star; 1..7 = deep-layer classes)
  *
+ * OBJECT-TYPE BYTE LEGEND (PF-10 C0/C1, TR-065/066 — the ONLY place this is documented; none of
+ * this was written down anywhere in the codebase before, only implicit in the shader's branch
+ * conditions in babylon-engine.ts's ijStarFragmentShader, both GLSL and WGSL twins):
+ *   0       ordinary point source — falls through to the default branch: stellar PSF + bloom.
+ *           Used by every Hipparcos/deep-layer star AND, deliberately, by white dwarfs (eDR3,
+ *           TR-065 Astra audit) and CNS5 nearby stars (PF-10 C1) — both are real point sources,
+ *           not extended objects, even though they ship via a "deep-layer"-shaped bonus PNG.
+ *   1       cluster — soft gaussian glow, no PSF core (`ty > 0.5 && ty < 1.5` branch). NOT
+ *           currently used by any shipped background-layer asset (the curated cluster dossier
+ *           tier, celestial-clusters.js, renders via the SEPARATE celestial-bodies.ts billboard
+ *           path, not this one — see that file's PROCEDURAL_TYPE table for its own, independent
+ *           4/5 globular/open split). Reserved for a future bulk (non-dossier) cluster layer.
+ *   2, 4, 5, 6   UNDOCUMENTED/UNUSED — no shader branch currently distinguishes these from type
+ *           0; they fall through to the same default stellar-PSF treatment. Reserved, not
+ *           assigned to anything yet. Do not assume a specific visual meaning without adding
+ *           and shader-verifying a real branch first (the white-dwarf type-byte mistake TR-064/
+ *           065 caught — assigning a byte value with no verified shader meaning — is exactly
+ *           the failure mode this note exists to prevent repeating).
+ *   3       galaxy — softer, wider gaussian smudge (`ty > 2.5 && ty < 3.5` branch,
+ *           exp(-d*d*4.0)*0.85). Used by the SDSS DR18 background-layer pipeline (PF-10 C2,
+ *           scripts/gaia-sdss18-pngpack.mjs) — NOT yet wired into any live render path (that
+ *           layer needs its own mesh/VertexBuffer, log-depth-scaled distances incompatible with
+ *           this file's linear-ly convention; see that script's header for the full reasoning).
+ *   7       Oort dust grain — a third distinct branch (`ty > 6.5`, exp(-d*d*3.2)*0.55). Used by
+ *           the Oort cloud background-layer pipeline (PF-10 C1, scripts/gaia-oortcloud-
+ *           pngpack.mjs) — wired live as of TR-066 via babylon-engine.ts's `_loadBonusStarLayers`.
+ *
  * Everything here is pure: the DOM-bound part (fetch -> ImageBitmap -> canvas
  * -> RGB) lives in babylon-engine.ts, so the decode itself stays unit-testable
  * off-GPU and off-DOM.

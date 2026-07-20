@@ -51,6 +51,11 @@ for (const tier of ["1k", "2k"] as const) {
 test("warp travel completes with the craft active (P2 world-space staging)", async ({
   page,
 }) => {
+  // PF-10 C2/TR-067: widened alongside engine-select.spec.ts's B5/ship-track/GAP-17 tests —
+  // same real reason (SDSS DR18's ~14.5M-vertex background galaxy field extends real frame
+  // time under CI's software rendering; this test's own real-clock polls were previously
+  // tight enough (5000ms) to be affected).
+  test.setTimeout(60000);
   await page.goto("/?craft=2k");
   await page.waitForSelector('babylon-scene[data-craft-state="ready"]');
   const pageErrors: string[] = [];
@@ -67,14 +72,16 @@ test("warp travel completes with the craft active (P2 world-space staging)", asy
     .click();
 
   // P3: while warping, the hero copy steps back so the flight dominates.
-  await expect(page.locator("body.ij-warping")).toBeAttached({ timeout: 5000 });
+  await expect(page.locator("body.ij-warping")).toBeAttached({
+    timeout: 15000,
+  });
   await expect
     .poll(
       async () =>
         page
           .locator("#ij-hero-copy")
           .evaluate((el) => Number(getComputedStyle(el).opacity)),
-      { timeout: 5000 },
+      { timeout: 15000 },
     )
     .toBeLessThan(0.5);
 

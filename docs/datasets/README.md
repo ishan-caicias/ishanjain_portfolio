@@ -18,28 +18,35 @@ Every local pack ships raw Gaia Sky JSON/VOTable/binary — **none of this is in
 
 ## Star catalogs — classical
 
-| Folder              | Name                                   | Records | Format            | Disk size | Description                                                                                                                                            |
-| ------------------- | -------------------------------------- | ------: | ----------------- | --------: | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `catalog-hipparcos` | Hipparcos (New Reduction)              | 117,955 | JSON + raw `.bin` |   11.7 MB | van Leeuwen 2007 reduction, curated star names. **Same source already decoded into the site's 168,959-star background field** (`assets/stars-hip.png`) |
-| `catalog-cns5`      | Fifth Catalogue of Nearby Stars (CNS5) |   5,931 | JSON + raw `.vot` |    3.1 MB | Volume-complete sample within ~25 pc, from Gaia EDR3 + Hipparcos + Spitzer/ground surveys                                                              |
+| Folder              | Name                                   | Records | Format                                         | Disk size | Description                                                                                                                                            |
+| ------------------- | -------------------------------------- | ------: | ---------------------------------------------- | --------: | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `catalog-hipparcos` | Hipparcos (New Reduction)              | 117,955 | JSON + raw `.bin`                              |   11.7 MB | van Leeuwen 2007 reduction, curated star names. **Same source already decoded into the site's 168,959-star background field** (`assets/stars-hip.png`) |
+| `catalog-cns5`      | Fifth Catalogue of Nearby Stars (CNS5) |   5,931 | JSON + raw `.vot` (TABLEDATA — see note below) |    3.1 MB | Volume-complete sample within ~25 pc, from Gaia EDR3 + Hipparcos + Spitzer/ground surveys                                                              |
 
 ## Star catalogs — Gaia-derived
 
-| Folder                     | Name                |   Records | Format                                 | Disk size | Description                                                                 |
-| -------------------------- | ------------------- | --------: | -------------------------------------- | --------: | --------------------------------------------------------------------------- |
-| `catalog-gaia-dr3-tiny`    | Gaia DR3 Tiny       | 2,552,302 | Octree (`particles/` + `metadata.bin`) |    207 MB | Best bright/faint-parallax-error subset of Gaia DR3 + all Hipparcos stars   |
-| `catalog-whitedwarfs-edr3` | eDR3 White Dwarfs   |   359,073 | JSON                                   |   32.7 MB | Gentile Fusillo et al. 2021 high-confidence white dwarf candidates (P>0.75) |
-| `catalog-gd1`              | GD-1 Stellar Stream |     1,365 | JSON                                   |    369 KB | One of the longest, coldest known tidal stellar streams in the Milky Way    |
+| Folder                     | Name                |   Records | Format                                  | Disk size | Description                                                                 |
+| -------------------------- | ------------------- | --------: | --------------------------------------- | --------: | --------------------------------------------------------------------------- |
+| `catalog-gaia-dr3-tiny`    | Gaia DR3 Tiny       | 2,552,302 | Octree (`particles/` + `metadata.bin`)  |    207 MB | Best bright/faint-parallax-error subset of Gaia DR3 + all Hipparcos stars   |
+| `catalog-whitedwarfs-edr3` | eDR3 White Dwarfs   |   359,073 | JSON                                    |   32.7 MB | Gentile Fusillo et al. 2021 high-confidence white dwarf candidates (P>0.75) |
+| `catalog-gd1`              | GD-1 Stellar Stream |     1,365 | raw `.vot` (TABLEDATA — see note below) |    369 KB | One of the longest, coldest known tidal stellar streams in the Milky Way    |
+
+**Note (added 2026-07-20, PF-10 TR-065):** not every local `.vot` pack uses the same VOTable
+serialization. MWSC, Hunt-Reffert 2023, and NBG ship VOTable 1.3 **BINARY2** (base64 `<STREAM>`);
+CNS5 and GD-1 ship plain-text VOTable **TABLEDATA** (`<TR><TD>value</TD>...</TR>` rows) — a real
+format difference discovered decoding the actual files, not an assumption from their file
+extension. `scripts/lib/votable-binary2.mjs` reads the former, `scripts/lib/votable-tabledata.mjs`
+the latter.
 
 ## Galaxy catalogs
 
-| Folder            | Name       |   Records | Format            | Disk size | Description                                                                         |
-| ----------------- | ---------- | --------: | ----------------- | --------: | ----------------------------------------------------------------------------------- |
-| `catalog-nbg`     | NEARGALCAT |       875 | JSON + raw `.vot` |    5.1 MB | All-sky catalog of nearby galaxies with individual distance estimates within 11 Mpc |
-| `catalog-sdss-12` | SDSS DR12  |   327,835 | JSON + `.bin`     |   14.5 MB | Sloan Digital Sky Survey DR12 high-redshift galaxies                                |
-| `catalog-sdss-14` | SDSS DR14  | 3,040,257 | JSON + `.bin`     |    112 MB | SDSS DR14 high-redshift galaxies                                                    |
-| `catalog-sdss-17` | SDSS DR17  | 2,812,409 | JSON + `.bin`     |    101 MB | SDSS DR17 high-redshift galaxies, comoving distances                                |
-| `catalog-sdss-18` | SDSS DR18  | 3,637,836 | JSON + `.bin`     |    131 MB | SDSS DR18 high-redshift galaxies, comoving distances                                |
+| Folder            | Name       |   Records | Format                      | Disk size | Description                                                                         |
+| ----------------- | ---------- | --------: | --------------------------- | --------: | ----------------------------------------------------------------------------------- |
+| `catalog-nbg`     | NEARGALCAT |       856 | JSON + raw `.vot` (BINARY2) |    5.1 MB | All-sky catalog of nearby galaxies with individual distance estimates within 11 Mpc |
+| `catalog-sdss-12` | SDSS DR12  |   327,835 | JSON + `.bin`               |   14.5 MB | Sloan Digital Sky Survey DR12 high-redshift galaxies                                |
+| `catalog-sdss-14` | SDSS DR14  | 3,040,257 | JSON + `.bin`               |    112 MB | SDSS DR14 high-redshift galaxies                                                    |
+| `catalog-sdss-17` | SDSS DR17  | 2,812,409 | JSON + `.bin`               |    101 MB | SDSS DR17 high-redshift galaxies, comoving distances                                |
+| `catalog-sdss-18` | SDSS DR18  | 3,637,836 | JSON + `.bin`               |    131 MB | SDSS DR18 high-redshift galaxies, comoving distances                                |
 
 **Note:** the four SDSS packs are successive data releases of the same survey — largely overlapping sky coverage, not four independent catalogs. Treat as "pick one," not "sum four."
 
@@ -106,12 +113,12 @@ Every local pack ships raw Gaia Sky JSON/VOTable/binary — **none of this is in
 
 ## Known discrepancies (source webpage vs. local files)
 
-| Dataset                              | Source webpage says                                                      | Local `dataset.json` / data file says                                  | Verdict                                                                              |
-| ------------------------------------ | ------------------------------------------------------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `catalog-asteroids-dr3-nea`          | "Some 390 near Earth asteroids… 154.79k objects"                         | `nobjects: 394`; 393 records counted in `asteroids-dr3-nea.json`       | Webpage copy-pasted the parent DR3 pack's blurb. Use **393**.                        |
-| `catalog-asteroids-dr3-trojan`       | "Some 390 near Earth asteroids… 154.79k objects" (identical text to NEA) | `nobjects: 1545`; 1,545 records counted in `asteroids-dr3-trojan.json` | Same copy-paste bug. Use **1,545**.                                                  |
-| `catalog-clusters-hunt-reffert-2023` | "It contains 2700 open clusters"                                         | `nobjects: 7167`, particle file agrees                                 | Webpage prose is stale (2,700 was likely an earlier catalog version). Use **7,167**. |
-| `catalog-nbg`                        | "869 nearby galaxies"                                                    | `nobjects: 875`                                                        | Minor drift, use **875**.                                                            |
+| Dataset                              | Source webpage says                                                      | Local `dataset.json` / data file says                                  | Verdict                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `catalog-asteroids-dr3-nea`          | "Some 390 near Earth asteroids… 154.79k objects"                         | `nobjects: 394`; 393 records counted in `asteroids-dr3-nea.json`       | Webpage copy-pasted the parent DR3 pack's blurb. Use **393**.                                                                                                                                                                                                                                                   |
+| `catalog-asteroids-dr3-trojan`       | "Some 390 near Earth asteroids… 154.79k objects" (identical text to NEA) | `nobjects: 1545`; 1,545 records counted in `asteroids-dr3-trojan.json` | Same copy-paste bug. Use **1,545**.                                                                                                                                                                                                                                                                             |
+| `catalog-clusters-hunt-reffert-2023` | "It contains 2700 open clusters"                                         | `nobjects: 7167`, particle file agrees                                 | Webpage prose is stale (2,700 was likely an earlier catalog version). Use **7,167**.                                                                                                                                                                                                                            |
+| `catalog-nbg`                        | "869 nearby galaxies"                                                    | `nobjects: 875`                                                        | **SUPERSEDED 2026-07-20 (PF-10 TR-065):** neither number matches. The real `.vot` file's `<TABLE nrows>` — and the actual row count a real decode of the file produces (`scripts/gaia-bulk-catalog-convert.mjs`) — is **856**. Use **856**, sourced from decoding the actual file rather than any stated count. |
 
 ## Not present locally (explicitly skipped per owner's >0.5 GB cutoff)
 
