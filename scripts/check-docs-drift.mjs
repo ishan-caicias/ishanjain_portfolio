@@ -15,6 +15,10 @@
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
+import {
+  extractLinkTargets,
+  repoRelativeTarget,
+} from "./lib/markdown-links.mjs";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const problems = [];
@@ -134,9 +138,12 @@ const isCurrentState = (f) =>
 
 for (const f of ["README.md", ...walk("docs")].filter(isCurrentState)) {
   const body = read(f);
-  for (const m of body.matchAll(/\[[^\]]*\]\(([^)#\s]+)(?:#[^)\s]*)?\)/g)) {
-    const target = m[1];
-    if (/^(https?:|mailto:|#)/.test(target)) continue;
+  // Link parsing lives in scripts/lib/markdown-links.mjs so it can be unit-tested — the
+  // pattern that used to be inline here reported a real, correct Wikimedia link as broken
+  // because it could not parse CommonMark's angle-bracket destination form. See that module.
+  for (const raw of extractLinkTargets(body)) {
+    const target = repoRelativeTarget(raw);
+    if (target === null) continue;
     const abs = resolve(ROOT, dirname(f), decodeURIComponent(target));
     if (!existsSync(abs)) fail(f, `broken relative link → ${target}`);
   }

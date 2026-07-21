@@ -175,6 +175,7 @@ import havokWasmUrl from "@babylonjs/havok/lib/esm/HavokPhysics.wasm?url";
 import {
   advanceWarpProgress,
   ASTEROID_BELT,
+  BELT_ORBIT,
   beltDensityAt,
   beltPullAccel,
   buildAsteroidField,
@@ -193,6 +194,22 @@ import {
 // PF-10 C3: real Gaia DR3 asteroids for the physics tier. A generated module (not a fetch) so
 // the field can never be half-built because a request was still in flight — see its header.
 import { REAL_ASTEROIDS } from "../data/asteroids-dr3-physics";
+// PF-10 C4: real planetary spheres. See planet-sphere.ts for why there is exactly one sphere.
+import {
+  PLANET_ALBEDO,
+  PLANET_ELEV_SCALE,
+  rotationAngle,
+  PLANET_FRAGMENT_GLSL,
+  PLANET_FRAGMENT_WGSL,
+  PLANET_PHYSICAL,
+  PLANET_SPHERE_RADIUS,
+  PLANET_VERTEX_GLSL,
+  PLANET_VERTEX_WGSL,
+  SPHERE_SEGMENTS,
+  sphereIdFor,
+  sunDirectionFrom,
+  type PlanetManifest,
+} from "./planet-sphere";
 import type { StarField } from "./star-field";
 import {
   buildStarBillboards,
@@ -652,7 +669,10 @@ const BONUS_CATALOG_CHUNKS = [
  * the live engine also disables it for field stars). */
 const STAR_SHADER_CONSTANTS = `
 const float MIN_QUAD_PX = 1.5;
-const float CI_UNPACK_SCALE = ${(256 / 255).toFixed(8)};`;
+const float CI_UNPACK_SCALE = ${(256 / 255).toFixed(8)};
+const float ORBIT_OMEGA_K = ${BELT_ORBIT.omegaK.toFixed(4)};
+const float ORBIT_MIN_R = ${BELT_ORBIT.minRadius.toFixed(1)};
+const float ORBIT_SUN_Z = ${ASTEROID_BELT.center[2].toFixed(1)};`;
 
 ShaderStore.ShadersStore["ijStarVertexShader"] = `
 precision highp float;
@@ -665,6 +685,7 @@ uniform float uSize;         // device pixel ratio (live engine parity)
 uniform float uHaloAmp;
 uniform float uBeta, uGamma; // GAP-06: relativistic aberration + Doppler
 uniform vec3 uWarpDir;       // world-space unit travel direction
+uniform float uTime;         // PF-10 C3: belt orbital clock (0 = frozen)
 varying vec2 vCorner;
 varying vec3 vColor;
 varying float vAlpha;
@@ -705,7 +726,28 @@ void main(){
   // post-index-fetch vertex index, so this is correct for indexed draws.
   int c = gl_VertexID % 4;
   vec2 corner = vec2((c == 1 || c == 2) ? 1.0 : -1.0, (c >= 2) ? 1.0 : -1.0);
-  vec4 centre = view * vec4(position, 1.0);
+  // PF-10 C3: real Keplerian orbital motion for the DR3 asteroid belt (type 6 only — every
+  // other layer this shader serves is at rest relative to the scene). Rate comes from Kepler's
+  // third law applied to the speck's own distance from the Sun, so it costs no per-vertex data;
+  // see babylon-asteroids.ts's BELT_ORBIT for the derivation and what is declared about it.
+  // ty is hoisted here and reused by the orbital block AND the size/colour branches further
+  // down, which used to recompute it. That matters more than it looks: this material is shared
+  // with the SDSS layer's 14.5M vertices, so a redundant floor() is 14.5M redundant floor()s
+  // per frame. Measured — see TR-075 Part 4.
+  float ty = floor(starMeta.y);
+  vec3 orbited = position;
+  if (uTime > 0.0 && ty > 5.5 && ty < 6.5) {
+    // TRUE heliocentric distance — the Sun sits at the belt-plane centre, not the world origin.
+    // Using the planar radius instead overstates the rate by up to +189% for the real objects
+    // inclined past 40 degrees (Astra, orbital-motion brief). One extra term fixes all of them.
+    float rOrb = length(vec3(position.xy, position.z - ORBIT_SUN_Z));
+    if (rOrb > ORBIT_MIN_R) {
+      float ang = ORBIT_OMEGA_K * inversesqrt(rOrb*rOrb*rOrb) * uTime;
+      float cs = cos(ang), sn = sin(ang);
+      orbited = vec3(position.x*cs - position.y*sn, position.x*sn + position.y*cs, position.z);
+    }
+  }
+  vec4 centre = view * vec4(orbited, 1.0);
   vec3 warpDirView = mat3(view) * uWarpDir;
   centre.xyz = aberrate(centre.xyz, warpDirView);
   float dist = length(centre.xyz);          // camera sits at the view origin
@@ -718,8 +760,7 @@ void main(){
   vHalo = smoothstep(0.60, 1.0, fl) * uHaloAmp;
   px *= 1.0 + vHalo*1.5;
 
-  float ty = floor(starMeta.y);
-  vType = ty;
+  vType = ty; // hoisted above, before the orbital block — one floor() per vertex, not two
   vColor = ramp(fract(starMeta.y) * CI_UNPACK_SCALE);
   vAlpha = 0.10 + 0.90*sqrt(clamp(flux, 0.0, 1.4));
   if (ty > 0.5) {
@@ -789,6 +830,7 @@ uniform uHaloAmp : f32;
 uniform uBeta : f32;
 uniform uGamma : f32;
 uniform uWarpDir : vec3<f32>;
+uniform uTime : f32;
 varying vCorner : vec2<f32>;
 varying vColor : vec3<f32>;
 varying vAlpha : f32;
@@ -797,6 +839,9 @@ varying vHalo : f32;
 
 const MIN_QUAD_PX : f32 = 1.5;
 const CI_UNPACK_SCALE : f32 = ${(256 / 255).toFixed(8)};
+const ORBIT_OMEGA_K : f32 = ${BELT_ORBIT.omegaK.toFixed(4)};
+const ORBIT_MIN_R : f32 = ${BELT_ORBIT.minRadius.toFixed(1)};
+const ORBIT_SUN_Z : f32 = ${ASTEROID_BELT.center[2].toFixed(1)};
 
 // GAP-06: line-for-line twin of the GLSL aberrate() above.
 fn aberrate(p : vec3<f32>, warpDirView : vec3<f32>) -> vec3<f32> {
@@ -834,7 +879,23 @@ fn main(input : VertexInputs) -> FragmentInputs {
   let corner : vec2<f32> = vec2<f32>(
     select(-1.0, 1.0, c == 1u || c == 2u),
     select(-1.0, 1.0, c >= 2u));
-  var centre : vec4<f32> = uniforms.view * vec4<f32>(vertexInputs.position, 1.0);
+  // PF-10 C3: line-for-line twin of the GLSL orbital-motion block above.
+  // ty hoisted, exactly as in the GLSL twin — see that comment for why it is load-bearing.
+  let ty : f32 = floor(vertexInputs.starMeta.y);
+  var orbited : vec3<f32> = vertexInputs.position;
+  if (uniforms.uTime > 0.0 && ty > 5.5 && ty < 6.5) {
+    let rOrb : f32 = length(vec3<f32>(vertexInputs.position.xy, vertexInputs.position.z - ORBIT_SUN_Z));
+    if (rOrb > ORBIT_MIN_R) {
+      let ang : f32 = ORBIT_OMEGA_K * inverseSqrt(rOrb*rOrb*rOrb) * uniforms.uTime;
+      let cs : f32 = cos(ang);
+      let sn : f32 = sin(ang);
+      orbited = vec3<f32>(
+        vertexInputs.position.x*cs - vertexInputs.position.y*sn,
+        vertexInputs.position.x*sn + vertexInputs.position.y*cs,
+        vertexInputs.position.z);
+    }
+  }
+  var centre : vec4<f32> = uniforms.view * vec4<f32>(orbited, 1.0);
   let warpDirView : vec3<f32> = mat3x3<f32>(
     uniforms.view[0].xyz, uniforms.view[1].xyz, uniforms.view[2].xyz) * uniforms.uWarpDir;
   centre = vec4<f32>(aberrate(centre.xyz, warpDirView), centre.w);
@@ -848,7 +909,7 @@ fn main(input : VertexInputs) -> FragmentInputs {
   var halo : f32 = smoothstep(0.60, 1.0, fl) * uniforms.uHaloAmp;
   px = px * (1.0 + halo * 1.5);
 
-  let ty : f32 = floor(vertexInputs.starMeta.y);
+  // ty is the one hoisted above (WGSL would reject a redeclaration in the same scope anyway).
   var col : vec3<f32> = ramp(fract(vertexInputs.starMeta.y) * CI_UNPACK_SCALE);
   var alpha : f32 = 0.10 + 0.90 * sqrt(clamp(flux, 0.0, 1.4));
   if (ty > 0.5) {
@@ -906,6 +967,14 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   else { a = exp(-d * d * 6.0) + fragmentInputs.vHalo * exp(-d * 3.0) * 0.18; }
   fragmentOutputs.color = vec4<f32>(fragmentInputs.vColor, a * fragmentInputs.vAlpha);
 }`;
+
+// PF-10 C4: planetary sphere twins. Kept in planet-sphere.ts rather than inline here because,
+// unlike the star/shoot shaders, these are consumed by pure helpers with JS mirrors the unit
+// tests drive directly.
+ShaderStore.ShadersStore["ijPlanetVertexShader"] = PLANET_VERTEX_GLSL;
+ShaderStore.ShadersStore["ijPlanetFragmentShader"] = PLANET_FRAGMENT_GLSL;
+ShaderStore.ShadersStoreWGSL["ijPlanetVertexShader"] = PLANET_VERTEX_WGSL;
+ShaderStore.ShadersStoreWGSL["ijPlanetFragmentShader"] = PLANET_FRAGMENT_WGSL;
 
 /* Shooting stars (B3): tapered quad per particle, entirely GPU-driven — the
  * vertex shader computes each particle's current head/tail position and fade
@@ -1397,6 +1466,26 @@ class BabylonScene extends HTMLElement {
   private _asteroidVisualCount = 0;
   /** Guards `_loadAsteroidVisualLayer` to run at most once per boot. */
   private _asteroidLayerRequested = false;
+  // --- PF-10 C4: the single destination-gated planet sphere ---
+  private _planetMesh?: Mesh;
+  private _planetMat?: ShaderMaterial;
+  private _planetManifest: PlanetManifest | null = null;
+  /** Which body the sphere is currently dressed as; null when hidden. */
+  private _planetBodyId: string | null = null;
+  private _planetSurfaceTex?: Texture;
+  private _planetHeightTex?: Texture;
+  /** TR-059: a real 1x1 texture bound to BOTH samplers before the mesh can draw. */
+  private _planetPlaceholderTex?: RawTexture;
+  /** Reused so the per-frame camera push allocates nothing (frame-budget rule). */
+  private _camScratch = new Vector3();
+  /** Which surface tier is bound -- "high" until the ultra upgrade lands. */
+  private _planetSurfaceTier: "high" | "ultra" = "high";
+  /** Current rotation angle, exposed for E2E. */
+  private _planetSpin = 0;
+  /** Last value pushed to the belt's orbital `uTime`. Exposed in sceneStats so the
+   * reduced-motion contract is assertable as BEHAVIOUR (the clock stays 0) rather than only as
+   * shader source text — the positions themselves are computed on the GPU and invisible to JS. */
+  private _beltOrbitClock = 0;
   // --- GAP-06: relativistic aberration + Doppler ---
   /** Brachistochrone-profile beta (v/c), integrated from warp.prog exactly
    * like space-engine.js's `this._beta` — ramps with the accel/decel curve
@@ -1601,6 +1690,7 @@ class BabylonScene extends HTMLElement {
           "uBeta",
           "uGamma",
           "uWarpDir",
+          "uTime",
         ],
         needAlphaBlending: true,
         shaderLanguage:
@@ -1613,6 +1703,10 @@ class BabylonScene extends HTMLElement {
     // Halo/bloom tier-gated exactly like the live engine (0 / 0.55 / 1) —
     // the B5 quality budget finally honours it on this path.
     mat.setFloat("uHaloAmp", this._quality.haloAmp);
+    // PF-10 C3: the belt's orbital clock. Must be initialised even under reduced motion —
+    // an unbound sampler-or-uniform is the TR-059 class of failure, and 0 is also exactly the
+    // reduced-motion contract (a frozen but correctly-placed belt, not a missing one).
+    mat.setFloat("uTime", 0);
     const pushViewport = () =>
       mat.setVector2(
         "uViewport",
@@ -1674,6 +1768,8 @@ class BabylonScene extends HTMLElement {
     this._setupMilkyWay(scene, backend);
     this._setupConstellations(scene, backend);
     this._setupStarTrails(scene, engine, backend, field);
+    // PF-10 C4: the planet sphere. Built hidden; revealed by _tickPlanetSphere on arrival.
+    this._setupPlanetSphere(scene, backend);
     // PF-10 C1: GD-1 connected-trail visual — see gd1-trail.ts's header.
     this._setupGd1Trail(scene, engine, backend);
 
@@ -1734,11 +1830,20 @@ class BabylonScene extends HTMLElement {
       this._tickNebula(camera, engine);
       this._tickShip(camera, engine);
       this._tickAsteroids();
+      this._tickPlanetSphere(); // PF-10 C4
       this._tickStations(camera, engine); // GAP-11
       shootMat.setFloat("uTime", performance.now() / 1000);
       const bodyT = this._reduced ? 0 : performance.now() / 1000;
       this._bodyMat?.setFloat("uTime", bodyT);
       this._photoMat?.setFloat("uTime", bodyT);
+      // PF-10 C3: the DR3 belt's orbital clock. Shares `bodyT`'s reduced-motion contract
+      // exactly — pinned to 0, which the shader reads as "do not rotate", so the belt holds
+      // still at its real snapshot positions rather than vanishing (non-negotiable #24: every
+      // visual feature defines its reduced-motion behaviour, and "frozen" is this one's).
+      // Only type-6 vertices consult it; the stars, galaxies, Oort and white-dwarf layers
+      // sharing this material are unaffected.
+      this._starMat?.setFloat("uTime", bodyT);
+      this._beltOrbitClock = bodyT;
       // GAP-14: aim readout, throttled to every 8th frame — matches
       // space-engine.js's `this._frame % 8 === 0` exactly. Reads the
       // camera's ACTUAL current forward direction (idle drift, free-look,
@@ -1919,6 +2024,21 @@ class BabylonScene extends HTMLElement {
       asteroidRealEpoch: REAL_ASTEROIDS.epoch,
       asteroidCatalogSize: REAL_ASTEROIDS.sourceCount,
       asteroidVisualCount: this._asteroidVisualCount,
+      // PF-10 C3 follow-up: the belt's orbital clock. > 0 means the 154,662 specks are orbiting;
+      // exactly 0 is the reduced-motion contract (frozen at real snapshot positions).
+      // PF-10 C4: planet-sphere diagnostics.
+      planetSphereBody: this._planetBodyId,
+      planetSphereVisible: this._planetMesh?.isVisible ?? false,
+      planetSphereReady:
+        this._planetMesh && this._planetMat
+          ? this._planetMat.isReady(this._planetMesh)
+          : false,
+      planetSurfaceTier: this._planetSurfaceTier,
+      planetSpin: Math.round(this._planetSpin * 1000) / 1000,
+      planetBodiesAvailable: this._planetManifest
+        ? Object.keys(this._planetManifest.bodies).length
+        : 0,
+      asteroidOrbitClock: Math.round(this._beltOrbitClock * 100) / 100,
       asteroidVisualReady:
         this._asteroidVisualMesh && this._starMat
           ? this._starMat.isReady(this._asteroidVisualMesh)
@@ -2272,6 +2392,205 @@ class BabylonScene extends HTMLElement {
     const tex = new Texture("/assets/atlas.jpg", scene);
     this._photoTex = tex;
     photoMat.setTexture("uTex", tex);
+  }
+
+  // --- PF-10 C4: real planetary spheres with real topography ---
+
+  /** Builds the single destination-gated planet sphere. See planet-sphere.ts's header for why
+   * there is exactly one and not one per body.
+   *
+   * Both samplers get a REAL texture object here, before the mesh can ever draw — the height
+   * sampler's placeholder is not a nicety but CLAUDE.md non-negotiable #9 (TR-059): on WebGPU an
+   * empty binding throws while building the bind group and kills `scene.render()` for the entire
+   * frame. Most bodies ship no elevation at all, so this path is the common case, not the edge. */
+  private _setupPlanetSphere(scene: Scene, backend: "webgpu" | "webgl2") {
+    const mesh = new Mesh("planetSphere", scene);
+    const vd = CreateSphereVertexData({
+      diameter: 2,
+      segments: SPHERE_SEGMENTS,
+    });
+    vd.applyToMesh(mesh, false);
+    mesh.isPickable = false;
+    mesh.isVisible = false; // revealed only on arrival at a body with real imagery
+    this._planetMesh = mesh;
+
+    const mat = new ShaderMaterial(
+      "planetSphere",
+      scene,
+      { vertex: "ijPlanet", fragment: "ijPlanet" },
+      {
+        attributes: ["position", "normal", "uv"],
+        uniforms: [
+          "world",
+          "view",
+          "projection",
+          "uSunDir",
+          "uHasHeight",
+          "uElevScale",
+          "uAlbedo",
+          "uLunarL",
+          "uCamPos",
+        ],
+        samplers: ["surfaceTex", "heightTex"],
+        shaderLanguage:
+          backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+      },
+    );
+
+    // 1x1 placeholders for BOTH samplers — see the method comment. Mid-grey for height means
+    // "flat" once uHasHeight gates it to zero anyway, so a body with no elevation reads as a
+    // smooth sphere rather than as noise.
+    const flat = RawTexture.CreateRGBATexture(
+      new Uint8Array([128, 128, 128, 255]),
+      1,
+      1,
+      scene,
+      false,
+      false,
+      Texture.NEAREST_SAMPLINGMODE,
+    );
+    mat.setTexture("surfaceTex", flat);
+    mat.setTexture("heightTex", flat);
+    mat.setFloat("uHasHeight", 0);
+    mat.setFloat("uElevScale", 0);
+    mat.setFloat("uAlbedo", 0.3);
+    mat.setFloat("uLunarL", 0.55);
+    mat.setVector3("uSunDir", new Vector3(0, 0, 1));
+    mat.setVector3("uCamPos", new Vector3(0, 0, 0));
+    this._planetPlaceholderTex = flat;
+    mesh.material = mat;
+    this._planetMat = mat;
+
+    // The manifest is small and drives which bodies are sphere-capable at all; a failure here
+    // simply means no body ever goes spherical, and every one keeps its existing billboard.
+    void fetch("/assets/planets/manifest.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m: PlanetManifest | null) => {
+        this._planetManifest = m;
+      })
+      .catch(() => {
+        this._planetManifest = null;
+      });
+  }
+
+  /** Destination gating for the planet sphere, called per frame.
+   *
+   * Mirrors `_tickNebula`'s arrival-keyed structure rather than inventing a second "what am I at"
+   * mechanism: when `arrivedId` changes to a body the manifest has real imagery for, the sphere
+   * moves to that body's already-computed world position, its real textures are fetched, and it
+   * becomes visible. Any other destination hides it and the billboard path carries on untouched.
+   *
+   * Texture loads are fire-and-forget for the same reason the ship GLB and Milky Way texture are:
+   * a 1-2 MB surface map must never sit in front of a frame. Until it lands the sphere draws with
+   * the placeholder — a plain grey ball, visibly "loading" rather than broken. */
+  private _tickPlanetSphere() {
+    const mesh = this._planetMesh;
+    const mat = this._planetMat;
+    if (!mesh || !mat) return;
+
+    const manifest = this._planetManifest;
+    const arrived = this.arrivedId;
+    if (!manifest || !arrived) {
+      mesh.isVisible = false;
+      this._planetBodyId = null;
+      return;
+    }
+
+    const body = this.bodies.find((b) => b.e.id === arrived);
+    const key = body ? sphereIdFor(body.e, manifest.bodies) : null;
+    if (!key || !body) {
+      mesh.isVisible = false;
+      this._planetBodyId = null;
+      return;
+    }
+
+    if (this._planetBodyId !== key) {
+      this._planetBodyId = key;
+      this._planetSurfaceTier = "high";
+      const entry = manifest.bodies[key];
+      const phys = PLANET_PHYSICAL[key];
+
+      // Real sun direction for this body's real catalog position — see planet-sphere.ts.
+      const [sx, sy, sz] = sunDirectionFrom(body.pos);
+      mat.setVector3("uSunDir", new Vector3(sx, sy, sz));
+      // Astra's real geometric albedos: PLANET_PHYSICAL for the three bodies with elevation,
+      // PLANET_ALBEDO for the surface-only ones, neutral default otherwise.
+      mat.setFloat("uAlbedo", phys?.albedo ?? PLANET_ALBEDO[key] ?? 0.3);
+      // Airless bodies backscatter (Lommel-Seeliger); atmospheres tend toward Lambert. Bodies
+      // without a measured coefficient get Mars's 0.55 rather than a hard 0 or 1.
+      mat.setFloat("uLunarL", phys?.lunarLambertL ?? 0.55);
+      // Elevation only applies where the body genuinely ships a height map.
+      mat.setFloat("uHasHeight", entry.height ? 1 : 0);
+      mat.setFloat("uElevScale", entry.height ? PLANET_ELEV_SCALE : 0);
+
+      mesh.position.set(body.pos[0], body.pos[1], body.pos[2]);
+      mesh.scaling.setAll(PLANET_SPHERE_RADIUS);
+
+      const surface = new Texture(
+        `/assets/planets/${entry.surface.high}`,
+        this._scene,
+      );
+      // WRAP is load-bearing, not a default: the shader adds UV_LONGITUDE_OFFSET to u without
+      // fract(), so sampling relies on the sampler wrapping past 1.0 (see planet-sphere.ts).
+      surface.wrapU = Texture.WRAP_ADDRESSMODE;
+      mat.setTexture("surfaceTex", surface);
+      this._planetSurfaceTex?.dispose();
+      this._planetSurfaceTex = surface;
+
+      // PROGRESSIVE UPGRADE (PF-10 C4.2). The `high` tier lands fast and gets the body on
+      // screen; `ultra` is 4-6 MB — worth waiting for, but not worth staring at a grey ball for.
+      // The measured reason it exists at all: at the FIXED arrival distance the visible surface
+      // patch is 23.5 degrees across, so a 4096 map supplies only ~268 texels for a 1080-px
+      // viewport — a 4x magnification. 8192 halves that. The swap is guarded on the body not
+      // having changed mid-fetch, or arriving elsewhere would paint the wrong planet.
+      const ultraFile = entry.surface.ultra;
+      if (ultraFile) {
+        const pending = key;
+        const ultra = new Texture(`/assets/planets/${ultraFile}`, this._scene);
+        ultra.wrapU = Texture.WRAP_ADDRESSMODE;
+        ultra.onLoadObservable.addOnce(() => {
+          if (this._planetBodyId !== pending || !this._planetMat) {
+            ultra.dispose();
+            return;
+          }
+          this._planetMat.setTexture("surfaceTex", ultra);
+          this._planetSurfaceTex?.dispose();
+          this._planetSurfaceTex = ultra;
+          this._planetSurfaceTier = "ultra";
+        });
+      }
+
+      if (entry.height) {
+        const height = new Texture(
+          `/assets/planets/${entry.height.high}`,
+          this._scene,
+        );
+        height.wrapU = Texture.WRAP_ADDRESSMODE;
+        mat.setTexture("heightTex", height);
+        this._planetHeightTex?.dispose();
+        this._planetHeightTex = height;
+      } else if (this._planetPlaceholderTex) {
+        // Back to the placeholder — never left bound to the PREVIOUS body's elevation, which
+        // would silently paint Mars's canyons onto a body that has none.
+        mat.setTexture("heightTex", this._planetPlaceholderTex);
+      }
+    }
+    // The Lommel-Seeliger term needs the real emission angle, so the camera moves this uniform
+    // every frame rather than only on arrival.
+    mat.setVector3(
+      "uCamPos",
+      this._camScratch.set(this.cam[0], this.cam[1], this.cam[2]),
+    );
+    // Real sidereal rotation on its OWN clock -- 1e3, not the belt's 4e5, which would spin Mars
+    // past Nyquist and alias it backwards (see ROTATION_TIME_ACCEL). Reduced motion passes 0,
+    // which the helper reads as "hold still": the body keeps its real orientation, it just stops
+    // turning.
+    mesh.rotation.y = rotationAngle(
+      key,
+      this._reduced ? 0 : performance.now() / 1000,
+    );
+    this._planetSpin = mesh.rotation.y;
+    mesh.isVisible = true;
   }
 
   // --- GAP-03: Milky Way band ---

@@ -42,7 +42,16 @@ import {
   isPhysicsCandidate,
   semiMajorHistogram,
 } from "../../scripts/gaia-asteroids-pngpack.mjs";
-import { ASTEROID_BELT, buildRealAsteroidField } from "@/lib/babylon-asteroids";
+import {
+  ASTEROID_BELT,
+  BELT_ORBIT,
+  KEPLER_K,
+  beltAngularRate,
+  beltOrbitPosition,
+  heliocentricRadius,
+  buildRealAsteroidField,
+} from "@/lib/babylon-asteroids";
+import { WGSL_RESERVED_IDENTIFIERS } from "@/lib/nebula-field";
 import { REAL_ASTEROIDS } from "@/data/asteroids-dr3-physics";
 
 /* Real records, verbatim from the local catalog
@@ -312,6 +321,203 @@ describe("shader twins — object-type byte 6 (CLAUDE.md non-negotiable #4)", ()
   it("still carries the pre-existing type-6 vertex branch both twins already had", () => {
     expect(engineSrc).toContain("else if (ty < 6.5) { px *= 0.85; }");
     expect(engineSrc).toContain("else if (ty < 6.5) { px = px * 0.85; }");
+  });
+
+  it("ships the orbital-motion block in BOTH vertex twins", () => {
+    // GLSL
+    expect(engineSrc).toContain(
+      "float ang = ORBIT_OMEGA_K * inversesqrt(rOrb*rOrb*rOrb) * uTime;",
+    );
+    // WGSL — note inverseSqrt (capital S); the twins use the same identifiers for the same
+    // quantities but each language's own spelling of the builtin.
+    expect(engineSrc).toContain(
+      "let ang : f32 = ORBIT_OMEGA_K * inverseSqrt(rOrb*rOrb*rOrb) * uniforms.uTime;",
+    );
+  });
+
+  it("bakes the SAME orbit constants into both twins, from the one TS source", () => {
+    // The shader sources are template literals, so the FILE holds the interpolation, not the
+    // number. Asserting the interpolation is the stronger claim: it pins that both twins are
+    // generated from the one TS constant and cannot drift apart by a hand-edit to either.
+    expect(engineSrc).toContain(
+      "const float ORBIT_OMEGA_K = ${BELT_ORBIT.omegaK.toFixed(4)};",
+    );
+    expect(engineSrc).toContain(
+      "const ORBIT_OMEGA_K : f32 = ${BELT_ORBIT.omegaK.toFixed(4)};",
+    );
+    // And the value that interpolation produces is the derived one.
+    expect(BELT_ORBIT.omegaK.toFixed(4)).toBe("39.8234");
+  });
+
+  it("gates the rotation on type 6 in both twins, so no other layer moves", () => {
+    // Four layers share this material (stars, SDSS galaxies, Oort cloud, white dwarfs). An
+    // ungated rotation would set the entire sky spinning — the failure this guard exists for.
+    expect(engineSrc).toContain("if (uTime > 0.0 && ty > 5.5 && ty < 6.5)");
+    expect(engineSrc).toContain(
+      "if (uniforms.uTime > 0.0 && ty > 5.5 && ty < 6.5)",
+    );
+  });
+
+  it("computes ty exactly ONCE per vertex in each twin", () => {
+    // Measured, not stylistic (TR-075 Part 4): this material is shared with the SDSS layer's
+    // 14.5M vertices, so every redundant floor() is 14.5M redundant floor()s per frame. The
+    // first draft called floor(starMeta.y) three times per vertex.
+    const glslFloors =
+      engineSrc.match(/float ty = floor\(starMeta\.y\);/g) ?? [];
+    const wgslFloors =
+      engineSrc.match(/let ty : f32 = floor\(vertexInputs\.starMeta\.y\);/g) ??
+      [];
+    expect(glslFloors).toHaveLength(1);
+    expect(wgslFloors).toHaveLength(1);
+    // ...and the surviving one must be hoisted ABOVE the orbital block that consumes it.
+    expect(engineSrc.indexOf("float ty = floor(starMeta.y);")).toBeLessThan(
+      engineSrc.indexOf("if (uTime > 0.0 && ty > 5.5 && ty < 6.5)"),
+    );
+  });
+
+  it("declares uTime as a uniform in both twins and in the material's uniform list", () => {
+    // A uniform used but not declared to Babylon is silently never pushed — the belt would
+    // simply never move, with nothing in the console to say why.
+    expect(engineSrc).toContain("uniform float uTime;");
+    expect(engineSrc).toContain("uniform uTime : f32;");
+    expect(engineSrc).toContain('"uWarpDir",\n          "uTime",');
+  });
+
+  it("pins uTime to 0 under reduced motion (non-negotiable #24)", () => {
+    // bodyT is already the reduced-motion-gated clock; the belt must share it, not read
+    // performance.now() directly.
+    expect(engineSrc).toContain('this._starMat?.setFloat("uTime", bodyT);');
+    expect(engineSrc).toContain(
+      "const bodyT = this._reduced ? 0 : performance.now() / 1000;",
+    );
+  });
+
+  it("TR-045 guard: the orbital block introduces no reserved WGSL identifiers", () => {
+    // `ang`, `cs`, `sn`, `rOrb`, `orbited` — none reserved, but the check is cheap and this is
+    // exactly the class of mistake that blanks the entire scene.
+    for (const word of WGSL_RESERVED_IDENTIFIERS) {
+      const re = new RegExp(`\\b${word}\\b`);
+      expect(
+        re.test(
+          "var orbited : vec3<f32>; let rOrb : f32; let ang : f32; let cs : f32; let sn : f32;",
+        ),
+      ).toBe(false);
+    }
+  });
+});
+
+describe("belt orbital motion (PF-10 C3 follow-up — the visual layer now orbits)", () => {
+  /** First-principles omega(r): vis-viva circular speed at a = r/63 AU, converted to world
+   * units and time-accelerated. Deliberately recomputed here from the physical constants rather
+   * than imported, so this is an independent derivation and not a restatement. */
+  function omegaExact(r: number) {
+    const aAu = r / 63;
+    const vKmS = Math.sqrt(1.32712440018e11 / (aAu * 149597870.7));
+    return (vKmS * (63 / 149597870.7) * 4e5) / r;
+  }
+
+  it("derives omegaK from physics, and it is radius-independent as Kepler's third law demands", () => {
+    // If omega ∝ r^(-3/2) is exact, omega * r^(3/2) is the same number at every radius. A tuned
+    // fudge factor would not have this property, which is what makes it worth asserting.
+    for (const r of [100, 170, 250, 328]) {
+      expect(omegaExact(r) * r ** 1.5).toBeCloseTo(BELT_ORBIT.omegaK, 3);
+    }
+  });
+
+  it("matches the exact derivation, not the rounded figure the first draft used", () => {
+    // Regression: 39.807 was back-solved from the science brief's rounded 3.053 wu/s.
+    expect(BELT_ORBIT.omegaK).toBeCloseTo(39.8234, 4);
+    expect(BELT_ORBIT.omegaK).not.toBeCloseTo(39.807, 3);
+  });
+
+  it("reproduces the belt spine's real orbital speed", () => {
+    const r = ASTEROID_BELT.radius;
+    expect(beltAngularRate(r) * r).toBeCloseTo(3.053, 2);
+  });
+
+  it("agrees with the REAL catalog velocities of the shipped physics bodies", () => {
+    // The strongest available check, and the one that matters visually: the moving dust and the
+    // moving rocks must agree, or the belt reads as two populations sliding past each other.
+    // Compares the shader's derived tangential speed against each body's real Keplerian
+    // velocity vector, straight from the Gaia DR3 elements.
+    let worst = 0;
+    let sum = 0;
+    for (const b of REAL_ASTEROIDS.bodies) {
+      const r = heliocentricRadius(b.p[0], b.p[1], b.p[2]);
+      const derived = beltAngularRate(r) * r;
+      const real = Math.hypot(b.v[0], b.v[1], b.v[2]);
+      const err = Math.abs(derived - real) / real;
+      sum += err;
+      worst = Math.max(worst, err);
+    }
+    const mean = sum / REAL_ASTEROIDS.bodies.length;
+    // Measured 0.77% mean / 2.28% worst over the 64 real bodies. The residual is the declared
+    // r-for-a substitution, bounded here by the e < 0.10 cut those bodies already satisfy.
+    expect(mean).toBeLessThan(0.015);
+    expect(worst).toBeLessThan(0.04);
+  });
+
+  it("measures distance from the SUN, not from the world origin", () => {
+    // Astra's refinement: the Sun sits at the belt plane's centre (0, 0, -13). Feeding the rate
+    // law the planar radius overstates it by up to +189% for the real objects inclined past 40°.
+    expect(heliocentricRadius(170, 0, ASTEROID_BELT.center[2])).toBeCloseTo(
+      170,
+      9,
+    );
+    // A speck 100 units above the belt plane is genuinely farther from the Sun than its planar
+    // radius suggests, and must therefore orbit SLOWER.
+    const inPlane = heliocentricRadius(170, 0, ASTEROID_BELT.center[2]);
+    const aloft = heliocentricRadius(170, 0, ASTEROID_BELT.center[2] + 100);
+    expect(aloft).toBeGreaterThan(inPlane);
+    expect(beltAngularRate(aloft)).toBeLessThan(beltAngularRate(inPlane));
+  });
+
+  it("mirrors the pipeline's own scale constants, which live in a file it cannot import", () => {
+    // babylon-asteroids.ts duplicates AU_TO_WORLD/TIME_ACCEL from asteroid-kepler.mjs because a
+    // build script cannot be imported into shipped runtime code. This is the guard that keeps the
+    // two copies honest — without it, a scale change would leave the belt orbiting at the old rate.
+    const expected =
+      TIME_ACCEL * Math.sqrt(1.32712440018e11 / (KM_PER_AU / AU_TO_WORLD) ** 3);
+    expect(KEPLER_K).toBeCloseTo(expected, 6);
+  });
+
+  it("produces real differential shear — inner asteroids outrun outer ones by the 3/2 power", () => {
+    const inner = beltAngularRate(140);
+    const outer = beltAngularRate(280);
+    expect(inner).toBeGreaterThan(outer);
+    // Doubling the radius must slow the orbit by exactly 2^1.5, not by some smooth-looking curve.
+    expect(inner / outer).toBeCloseTo(2 ** 1.5, 6);
+  });
+
+  it("is a rigid rotation: radius and height are conserved exactly", () => {
+    const [x, y, z] = [150, -70, -11];
+    const r0 = Math.hypot(x, y);
+    for (const t of [1, 60, 3600]) {
+      const [nx, ny, nz] = beltOrbitPosition(x, y, z, t);
+      expect(Math.hypot(nx, ny)).toBeCloseTo(r0, 4);
+      expect(nz).toBe(z); // orbital plane is preserved; no vertical drift
+    }
+  });
+
+  it("orbits prograde, matching every real asteroid in the catalog", () => {
+    // Real DR3 asteroids all orbit counter-clockwise seen from ecliptic north (max inclination
+    // 72.16° — no retrograde objects), so the rotation must carry +X toward +Y.
+    const [nx, ny] = beltOrbitPosition(170, 0, -13, 1);
+    expect(ny).toBeGreaterThan(0);
+    expect(nx).toBeLessThan(170);
+    // Cross-check the sign against a REAL catalog record's own angular momentum.
+    const b = REAL_ASTEROIDS.bodies[0];
+    expect(b.p[0] * b.v[1] - b.p[1] * b.v[0]).toBeGreaterThan(0);
+  });
+
+  it("holds still at t = 0 — the reduced-motion contract is representable", () => {
+    expect(beltOrbitPosition(150, -70, -11, 0)).toEqual([150, -70, -11]);
+  });
+
+  it("leaves near-origin specks unrotated instead of spinning them to a blur", () => {
+    // r^(-3/2) diverges at the origin; nothing this close to the Sun is a belt object.
+    expect(beltAngularRate(0)).toBe(0);
+    expect(beltOrbitPosition(0, 0, -13, 999)).toEqual([0, 0, -13]);
   });
 });
 

@@ -40,8 +40,17 @@ The real Kirkwood resonance gaps emerge from the data unprompted, which is the p
 real rather than procedural. An Astra science brief caught a genuinely wrong colour byte (the
 first draft rendered asteroids as ~4000 K K-stars) and an epoch-dependent physics-subset
 selection, both fixed — and flagged one real defect, the belt's 23.44° frame offset, which is
-recorded below as an OPEN OWNER DECISION rather than silently defaulted. **C3's frame-budget half
-is NOT measured** — it inherits C2's instrument problem exactly. C4 not started. **TR-070's
+recorded below as an OPEN OWNER DECISION rather than silently defaulted. **C3's three known
+limitations are now all closed ([TR-075](../test-reports/TR-075.md)):** the full 154,662-object
+belt now ORBITS with real Keplerian differential rotation — the rate derived in-shader from
+Kepler's third law, so it costs zero per-vertex data in a shader four other layers share — while
+the Kirkwood gaps stay exactly invariant and reduced motion freezes the belt at its real snapshot
+positions; the Trojan/NEA "merge" was disproved rather than done (both packs are 100% exact
+subsets with bit-identical elements, so merging adds nothing); and the docs-drift checker's
+broken-link warning turned out to be a defect in the checker's own CommonMark parsing, now fixed
+and regression-tested. **C3's frame-budget half is STILL NOT measured** — it inherits C2's
+instrument problem exactly, and TR-075 added per-vertex trigonometric work to 154,662 billboards,
+which makes that measurement more necessary rather than less. **C4 RE-SCOPED and C4.1 COMPLETE** ([TR-076](../test-reports/TR-076.md)): the plan's premise for this phase — applying topography "to the existing Mars mesh" — turned out to rest on a mesh that never existed; every body in this scene is a 128px billboard cell. Owner chose real spheres + full virtual texturing. C4.1 (sphere renderer, real equirect surface maps, real elevation, real Sun lighting with Astra's Lunar-Lambert correction) is live for 12 bodies, 3 of them with real topography; C4.2 is PARTIAL ([TR-077](../test-reports/TR-077.md)): measuring the FIXED arrival camera (38 units from a radius-26 sphere, no zoom anywhere) made the magnification computable and produced three findings — the shipped 4096 map was 4x magnified so C4.1 was visibly soft, VT level 5 is unreachable by this camera and is never built (~75% asset saving), and level 3/4 sit ~1% under 1080p/4K parity. Shipped: an ultra (8192) surface tier, progressive high->ultra loading, an enforced NEVER_SPHERE rule for Phobos/Deimos, real sidereal rotation on its own 1e3 clock (the belt's 4e5 would alias Mars backwards past Nyquist), and the complete VT bake pipeline (1,364 offline-baked normal tiles). The runtime tile streamer is deliberately NOT wired — see TR-077 Part 6. C4.3 not started, and an asset-weight decision (221 MB of public assets) is open for the owner. **TR-070's
 flagged `ship track` E2E failure is now root-caused and fixed
 ([TR-071](../test-reports/TR-071.md))**: a real wall-clock-progress-vs-frame-count-bounded-ramp
 race, triggered only by travelling to the closest possible catalog target under CI's now-very-slow
@@ -374,10 +383,26 @@ Rotating only the data tilts the real belt out of the frame those act in. Doing 
 re-expressing the belt model in an inclined basis: real, bounded work, and a goal-1-vs-tuned-
 interaction call for the owner, not a silent default. Recorded, not resolved.
 
-**Known limitation (not a defect, stated):** the visual layer is a static real snapshot while the
-physics subset moves. Animating 154,662 billboards would need a time uniform and per-vertex
-orbital elements in the shared `ijStar` shader — a real change to a shader four other layers
-depend on, deliberately not smuggled into this phase.
+**Closed 2026-07-20 ([TR-075](../test-reports/TR-075.md)) — the belt now orbits.** TR-074 left
+this as a known limitation because per-vertex orbital elements would cost ~2.5 MB of GPU memory in
+a shader four other layers share. Resolved by DERIVING the rate instead of storing it: Kepler's
+third law fixes mean motion from orbital radius alone, and the shader already knows each speck's
+distance from the Sun, so the motion costs **zero new attributes and one uniform**. The result is
+real Keplerian differential rotation — the inner edge gains 46.5° of longitude on the outer edge
+every minute, full relative wrap in 7.7 minutes — while the Kirkwood gaps stay exactly invariant
+(rotation about Z preserves every radius). Reduced motion pins the clock to 0, returning precisely
+the already-validated static scene. Second Astra brief
+([orbital motion](../analysis/2026-07-20-dr3-asteroid-belt-orbital-motion-brief.md)) supplied the
+derived constant (39.823416, replacing a 0.041%-off hand-solved value) and caught that the rate
+must measure from the SUN rather than the world origin — worth up to +189% error for the 94 real
+objects inclined past 40°.
+
+**Also closed (TR-075): the Trojan/NEA packs need no merge — the limitation was wrong.** Verified
+by streaming all three real files: **1,544/1,544 Trojans and 392/392 NEAs are already in the main
+catalog with bit-identical orbital elements.** Both packs are exact pre-filtered subsets; merging
+would add zero objects and create 1,936 exact duplicates. The shipped belt was already complete.
+Their one genuine offer is a curated classification label (~25 KB) if Trojans/NEAs should ever be
+tagged distinctly — a new feature, not this merge.
 
 **Scope:** replace `babylon-asteroids.ts`'s seeded-LCG procedural generation with the Gaia DR3
 asteroid catalog (154,787 objects with real orbital elements).
@@ -418,6 +443,73 @@ maintained (CLAUDE.md non-negotiable #4); frame budget holds on every device cla
 
 Lowest-risk phase: enhances existing meshes, adds no new interactive objects, no new catalog
 categories.
+
+**⛔ CORRECTION (2026-07-21, [TR-076](../test-reports/TR-076.md)) — the two paragraphs above are
+WRONG, and the error is structural rather than a detail.** Per this repo's corrections-are-additive
+convention they are left standing; everything below supersedes them.
+
+**There is no Mars mesh. There is no planet mesh at all.** Every curated body — all 267 with
+photographic imagery — renders as a BILLBOARD QUAD sampling a 128×128 cell of the shared
+4096×4096 `atlas.jpg` (`celestial-bodies.ts`, GAP-02). A flat camera-facing sprite cannot carry
+topography, cannot have a terminator, and cannot show a phase. So C4 is not "the lowest-risk
+phase"; it is the phase that **introduces planetary surface rendering to this engine**, which
+makes it the largest rendering feature in PF-10 rather than the smallest.
+
+The two topography packs compound this: they are **virtual textures** (Mars = 6 levels,
+1024×1024 tiles, 2,048 tiles at level 5 for a 64K equirect pyramid; Moon = 5 levels), which
+presuppose a sphere, UV mapping and a tile streamer with LOD selection — none of which existed.
+
+**Owner decision (2026-07-21):** re-scoped to **real spheres + full virtual texturing**, chosen
+over two cheaper alternatives (high-res close-up billboards; spheres with single-image height
+maps only). Spheres are the mandatory first step of that path either way, so the work is
+sequenced:
+
+| Sub-phase | Scope                                                                                                         | Status                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **C4.1**  | Sphere renderer, real equirect surface textures, real elevation via height-derived normals, real Sun lighting | ✅ **COMPLETE (TR-076)**                                                                      |
+| **C4.2**  | MOLA/NASA virtual-texture streaming with camera-distance LOD; body-selection rules (below)                    | PARTIAL (TR-077) — pipeline, tile math and 1,364 baked tiles done; runtime streamer NOT wired |
+| **C4.3**  | Rotation, self-shadowing, tier/budget gating from real-device data                                            | not started                                                                                   |
+
+**C4.1 owner-confirmed 2026-07-21:** Mars, Mercury and the Moon all read correctly on the live
+page. The visual questions TR-076 left open — terminator, true-scale topography shading, and the
+sphere sizing — are accepted as shipped. Astra's exaggeration correction (12 → 1.0) is vindicated
+in practice as well as in physics: the worry that true-scale relief would look flat did not
+materialise.
+
+**Two C4.2 body-selection decisions, taken by the owner 2026-07-21:**
+
+1. **Phobos and Deimos are never sphered.** Astra's advice accepted as a standing RULE rather than
+   a deferral: they are the most irregular bodies in the pack, and a sphere there would be broken
+   physics. They stay billboards permanently. Neither is in the pipeline's body list today, so
+   nothing ships wrong — but C4.2 should make the exclusion explicit and tested rather than
+   incidental, since the pipeline is data-driven and a later texture addition would otherwise
+   sphere them silently.
+2. **Venus gets a cloud-descent arrival.** `venus-ultra.jpg` is a Magellan _radar_ map, so a plain
+   sphered Venus would show surface detail no human eye could see through the cloud deck. Rather
+   than dropping Venus or quietly pretending, the owner's call is to make the contradiction the
+   feature: an arrival that descends through the real cloud layer and emerges over the
+   radar-mapped surface beneath. That is honest about the data's provenance — radar through cloud
+   is exactly how humanity has actually seen Venus's surface — and turns the phase's most awkward
+   asset into its most memorable arrival. **Needs its own Astra brief first** (real cloud-deck
+   altitude and thickness, the real ~4-day super-rotation, what a descent would genuinely look
+   like) before any design work.
+
+**C4.1 as shipped:** ONE destination-gated sphere (not one per body — see `planet-sphere.ts`),
+revealed on arrival, textured from the real 8192×4096 equirect maps downsampled to a 4096×2048
+shipped tier by `scripts/build-planet-textures.mjs`. 12 bodies, 16.6 MB, **3 with real elevation**
+(Mars, Moon, Mercury — the only bodies in the pack that ship a height map besides Earth).
+
+**Astra's brief** ([planetary spheres](../analysis/2026-07-21-planetary-sphere-topography-science-brief.md))
+changed three things and caught one **broken-physics** error: plain Lambertian shading is wrong
+for airless regolith (the real full Moon is a flat, evenly-lit disc; the half Moon is ~9% as
+bright as full, not 50%) — now Lunar-Lambert. It also cut the elevation exaggeration from a
+drafted 12× to **1.0**, since relief is invisible on the silhouette anyway but exaggeration
+corrupts shading across the whole disc, and replaced two Bond albedos with the geometric ones a
+renderer actually wants.
+
+**What this unlocks that a billboard never could:** real phases and a real terminator. A billboard
+is permanently "full" — the single most visually significant fact about a body in space was
+simply absent before this phase.
 
 **Exit:** textures pass through the asset pipeline (or a documented equivalent following its
 conventions); `budget:check` stays green; before/after visual diff is owner-confirmed.

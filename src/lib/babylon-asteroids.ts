@@ -145,6 +145,109 @@ export function buildAsteroidField(count: number, seed = 1): AsteroidField {
 
 /* ---------- PF-10 C3: the REAL Gaia DR3 belt ---------------------------- */
 
+/** Orbital motion for the 154,662-object VISUAL layer (PF-10 C3 follow-up).
+ *
+ * THE PROBLEM. TR-074 shipped the visual belt as a static snapshot while only the 20-48 Havok
+ * bodies moved, and named that a known limitation. Animating the rest means the shared `ijStar`
+ * vertex shader needs to know each speck's angular rate — but that shader carries only
+ * `position: vec3` and `starMeta: vec2` per vertex, and four other layers share it. A per-vertex
+ * rate float would cost ~2.5 MB of GPU memory for this layer alone, against a billboard-memory
+ * budget ADR-0003 already flags as the open Babylon adoption condition.
+ *
+ * THE RESOLUTION — derive the rate instead of storing it, from real physics. Kepler's third law
+ * fixes mean motion from orbital radius alone: n = sqrt(GM / a^3), i.e. n ∝ a^(-3/2). The shader
+ * already knows each speck's distance from the Sun (it is the position it is drawing), so the
+ * rate costs zero bytes:
+ *
+ *     omega(r) = ORBIT_OMEGA_K * r^(-3/2)
+ *
+ * This is not a stand-in for the real thing — it IS Kepler's third law, the same law the offline
+ * pipeline's full state solution obeys. What is DECLARED is the substitution of the instantaneous
+ * planar radius r for the semi-major axis a, which are equal for a circular orbit and differ by
+ * up to (1 ± e) otherwise.
+ *
+ * WHAT THIS BUYS, in real astronomy: differential (Keplerian) shear. Inner asteroids genuinely
+ * outrun outer ones, by the real 3/2-power ratio — the single most recognisable behaviour of a
+ * real belt, and something the static snapshot could not show at all. The Kirkwood gaps are
+ * RADIAL structure and this motion is purely azimuthal, so they survive rotation untouched: the
+ * belt turns without the gaps smearing.
+ *
+ * Rotation is about world Z, the declared ecliptic pole (see asteroid-kepler.mjs's DECLARED #1),
+ * and prograde — which matches every real asteroid in this catalog, whose maximum inclination is
+ * 72.16° and so contains no retrograde orbits.
+ */
+/* The three physical/declared constants the rate derives from. Mirrored from
+ * `scripts/lib/asteroid-kepler.mjs`, which owns them for the offline pipeline — a build script
+ * cannot be imported into shipped runtime code, so the duplication is structural. A unit test
+ * asserts the two copies agree; without it, a scale change in the pipeline would silently leave
+ * the visual layer orbiting at the old rate. */
+const GM_SUN_KM3_S2 = 1.32712440018e11;
+const KM_PER_AU = 149597870.7;
+const AU_TO_WORLD = 63;
+const TIME_ACCEL = 4e5;
+
+/** Kepler constant in scene units: omega = KEPLER_K * r^(-3/2), r in world units, omega in
+ * rad/s of wall clock (the declared TIME_ACCEL is folded in).
+ *
+ * DERIVED, NOT TUNED — and derived here rather than pasted as a literal, on Astra's explicit
+ * recommendation (orbital-motion brief, 2026-07-20): three separate places already encode the
+ * AU→world scale and the time acceleration, and a hard-coded 39.8234 would silently desynchronise
+ * from them the moment any one changed. Substituting GM into n = sqrt(GM/a^3), with a in world
+ * units, gives **39.823416** — identical at every radius, exactly as Kepler's third law requires
+ * (checked at r = 100, 170, 250, 328). A first draft used 39.807, back-solved from the science
+ * brief's *rounded* 3.053 world-units/s figure; Astra measured that as 0.041% off. */
+export const KEPLER_K =
+  TIME_ACCEL * Math.sqrt(GM_SUN_KM3_S2 / (KM_PER_AU / AU_TO_WORLD) ** 3);
+
+export const BELT_ORBIT = {
+  /** See KEPLER_K. Exposed on this object too so the shader constants and the tuning knobs read
+   * from one place. */
+  omegaK: KEPLER_K,
+  /** Below this radius the r^(-3/2) rate diverges; specks this close to the Sun are not belt
+   * objects and are left unrotated rather than spun into a blur. */
+  minRadius: 1,
+} as const;
+
+/** True heliocentric distance of a world-space point — the Sun sits at the belt plane's centre,
+ * (0, 0, BELT_CENTER_Z), not at the world origin.
+ *
+ * ASTRA REFINEMENT (orbital-motion brief, 2026-07-20): the first draft fed the rate law the
+ * PLANAR radius `hypot(x, y)`, which is the right answer only for an asteroid sitting exactly in
+ * the ecliptic. Measured against the real catalog, that overstates the rate by a median 0.47% —
+ * but **11,074 objects exceed 5%, 471 exceed 20%, and the worst is +189%** (the 94 real objects
+ * inclined past 40°, which spend most of their orbit far above or below the plane). One extra
+ * addition in the shader fixes all of them. */
+export function heliocentricRadius(x: number, y: number, z: number): number {
+  return Math.hypot(x, y, z - ASTEROID_BELT.center[2]);
+}
+
+/** Angular rate (rad/s) at true heliocentric distance `r`, from Kepler's third law. JS mirror of
+ * the shader expression — the twins have no compiler to check them, so the arithmetic is pinned
+ * here. */
+export function beltAngularRate(r: number): number {
+  if (r < BELT_ORBIT.minRadius) return 0;
+  return BELT_ORBIT.omegaK * r ** -1.5;
+}
+
+/** One speck's position after `tS` seconds of orbital motion: a prograde rotation about world Z
+ * (the declared ecliptic pole) at the rate its true heliocentric distance implies. The rotation
+ * itself preserves planar radius and height exactly, so the belt's radial structure — the
+ * Kirkwood gaps, the Hilda island, the 4.05–5.00 AU void — is invariant frame to frame. JS mirror
+ * of the shader's rotation, same identifiers. */
+export function beltOrbitPosition(
+  x: number,
+  y: number,
+  z: number,
+  tS: number,
+): [number, number, number] {
+  const r = heliocentricRadius(x, y, z);
+  const ang = beltAngularRate(r) * tS;
+  if (ang === 0) return [x, y, z];
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  return [x * c - y * s, x * s + y * c, z];
+}
+
 /** Builds the physics field from REAL Gaia DR3 catalog records.
  *
  * This is C3's replacement for `buildAsteroidField` on the shipping path. The difference is not

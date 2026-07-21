@@ -1540,6 +1540,134 @@ test("babylon: PF-10 C3 real Gaia DR3 asteroid belt renders and drives the physi
   expect(stats.asteroidCount).toBeLessThanOrEqual(48);
 });
 
+// PF-10 C4 — real planetary spheres. Before this phase every body in the scene, Mars included,
+// was a flat billboard sampling a 128x128 cell of the shared atlas; there were no meshes at all.
+// The assertion that matters is BEHAVIOURAL (non-negotiable #18): travel to Mars via the real
+// state machine and prove a sphere is actually visible, dressed as the right body, with its real
+// elevation map bound — not merely that a mesh object exists.
+test("babylon: PF-10 C4 arriving at Mars reveals a real textured sphere with real elevation", async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  const consoleErrors: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") consoleErrors.push(m.text());
+  });
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type SceneEl = HTMLElement & {
+    travelTo: (id: string) => void;
+    arrivedId: string | null;
+    sceneStats(): {
+      planetSphereBody: string | null;
+      planetSphereVisible: boolean;
+      planetSphereReady: boolean;
+      planetBodiesAvailable: number;
+    };
+  };
+
+  // The manifest drives which bodies are sphere-capable; 0 here means the fetch failed and every
+  // later assertion would be vacuous.
+  await expect
+    .poll(
+      () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) => (el as SceneEl).sceneStats().planetBodiesAvailable),
+      { timeout: 20000 },
+    )
+    .toBeGreaterThan(0);
+
+  // No destination yet — the sphere must be hidden, not floating at the origin.
+  const idle = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as SceneEl).sceneStats());
+  expect(idle.planetSphereVisible).toBe(false);
+  expect(idle.planetSphereBody).toBeNull();
+
+  await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as SceneEl).travelTo("mars"));
+  await expect
+    .poll(
+      () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) => (el as SceneEl).arrivedId),
+      { timeout: 30000 },
+    )
+    .toBe("mars");
+
+  await expect
+    .poll(
+      () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) => (el as SceneEl).sceneStats().planetSphereVisible),
+      { timeout: 15000 },
+    )
+    .toBe(true);
+
+  const stats = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as SceneEl).sceneStats());
+  expect(stats.planetSphereBody).toBe("mars");
+  expect(stats.planetSphereReady).toBe(true);
+  // Binding two samplers is the TR-059 failure class; on WebGPU a bad bind kills the whole
+  // frame and surfaces only as console output.
+  expect(consoleErrors).toEqual([]);
+});
+
+// PF-10 C3 follow-up — the visual layer now ORBITS (real Keplerian differential rotation, rate
+// derived in-shader from Kepler's third law so it costs no per-vertex data). The rotated
+// positions live on the GPU and JS cannot read them, so the assertable behaviour is the clock
+// that drives them — and specifically its reduced-motion contract, which is a real
+// non-negotiable (#24) and not merely a source-text fact.
+test("babylon: PF-10 C3 belt orbital clock runs normally and freezes under reduced motion", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type SceneStatsEl = HTMLElement & {
+    sceneStats(): { asteroidOrbitClock: number };
+  };
+  const clock = () =>
+    page
+      .locator("babylon-scene")
+      .evaluate((el) => (el as SceneStatsEl).sceneStats().asteroidOrbitClock);
+
+  await expect.poll(clock, { timeout: 20000 }).toBeGreaterThan(0);
+  const first = await clock();
+  await page.waitForTimeout(600);
+  // The belt is genuinely animating, not merely non-zero once.
+  expect(await clock()).toBeGreaterThan(first);
+});
+
+test("babylon: PF-10 C3 belt holds still under prefers-reduced-motion", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type SceneStatsEl = HTMLElement & {
+    sceneStats(): { asteroidOrbitClock: number; asteroidRealSource: string };
+  };
+  // Let the scene run long enough that a non-frozen clock would certainly have advanced.
+  await page.waitForTimeout(1500);
+  const stats = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as SceneStatsEl).sceneStats());
+  // Frozen, NOT missing: the belt still exists at its real snapshot positions — the reduced
+  // motion contract is "no motion", not "no belt".
+  expect(stats.asteroidOrbitClock).toBe(0);
+  expect(stats.asteroidRealSource).toBe("gaia-dr3");
+});
+
 // PF-10 C1 continued — the 41 real Billboard-archetype NGC2000 nebulae (of 47; the other 8 are
 // custom-shader Volume objects, still blocked on the reveal-mechanism redesign, see TR-065/066)
 // wired live via celestial-ngc2000.js, same window.CELESTIAL merge pattern as clusters/GD-1/
