@@ -7,10 +7,15 @@ this session proved unreliable.
 **Primary record:** [TR-079](../test-reports/TR-079.md) · [ADR-0009](../adr/0009-asset-weight-budget.md) ·
 [Astra's Earth brief](../analysis/2026-07-21-earth-sphere-science-brief.md)
 
-> **⚠️ NOTHING IS COMMITTED.** The entire working tree is uncommitted, and it contains **two**
-> sessions' work: TR-078's (VT streamer, Venus descent, ADR-0008 — files `planet-vt-stream.ts`,
-> `venus-descent.ts`, `planet-vt.ts`, `venus-cloud.jpg` and their tests) and this one's. Anyone
-> running `git checkout` or `git stash` loses both. **Commit before doing anything else.**
+> **✅ COMMITTED.** Both sessions' work is in **`d8aba0f` "Update - fixes from PF-10"** on
+> `feature/PF-07/background-spaceship-v2` — TR-078's (VT streamer, Venus descent, ADR-0008) and
+> this one's. Verified by `git cat-file` against HEAD for a spread of files including
+> `budgets.config.mjs`, `celestial-saturn-moons.js`, `cubemap-equirect.mjs`, `TR-079.md`,
+> `earth.jpg` and `venus-cloud.jpg`. Only this handoff document itself remains uncommitted.
+>
+> _An earlier revision of this file carried a "NOTHING IS COMMITTED" warning. That was true when
+> written and became stale when the owner committed mid-session; corrected here rather than edited
+> away, per this repo's corrections-are-additive convention._
 
 ---
 
@@ -154,7 +159,9 @@ rather than changed mid-session.
 
 ## C. NOT DONE AT ALL
 
-**C1. Nothing is committed.** Two sessions of work in the working tree. Highest-priority action.
+**C1. ~~Nothing is committed.~~ Resolved** — both sessions landed in `d8aba0f`. Left in place
+struck through rather than deleted, because the next reader should know the state was checked
+rather than assumed.
 
 **C2. The ADR-0008 real-device pass.** Desktop, the owner's mid-tier and flagship Android, a tablet
 if available. The largest outstanding item for all of PF-10 and the thing ADR-0008 explicitly
@@ -172,9 +179,14 @@ data.
 **C6. Earth's night lights, clouds and glint have never been looked at.** The code is in and
 console-clean; how it looks is unknown. Blocked behind B1 (Earth unreachable) and B4 (no pixels).
 
-**C7. The `GAP-03/04/05` E2E failure is unfixed** — but it is **not this session's**: A/B tested by
-reverting both engine files to HEAD and rebuilding, where it fails identically. Pre-existing,
-recorded, root cause still unknown (`bandReady` never becomes true within 20 s).
+**C7. The E2E cumulative-load problem is unfixed, and it has grown.** The full suite is **80/87**;
+the count has drifted 5 → 6 → 7 across sessions while the membership rotates. Every one of the 7 is
+individually accounted for above (2 A/B-proven pre-existing, 5 pass in isolation), so nothing is a
+regression — but **the root cause has never been investigated**, only triaged, and it now costs a
+full-suite run its meaning. Two concrete leads: `GAP-03/04/05` fails on `bandReady` never becoming
+true within 20 s (A/B-proven at HEAD), and `perf-budgets` fails on `settled.frames > boot.frames`
+(also A/B-proven at HEAD) — both are _frame-production liveness_ assertions, which is probably the
+same underlying thing.
 
 **C8. Atlas cells for the new bodies.** Tethys/Dione/Rhea have no `atlas.jpg` cell, so at distance
 they render as the documented per-type shaded quad rather than a photographic billboard. The sphere
@@ -189,15 +201,42 @@ session's scope.
 
 ## Verification baseline for the next session
 
-| Gate                    | Value                                                       |
-| ----------------------- | ----------------------------------------------------------- |
-| `npm run test`          | **552 / 552 unit**                                          |
-| `npm run lint`          | clean                                                       |
-| `npx astro check`       | 0 errors, 0 warnings, 0 hints                               |
-| `npm run assets:verify` | 16 bodies · 88 files · 1,364 VT tiles · reckoning 64/64     |
-| `npm run budget:check`  | JS 1170.4/1200 KB gz · assets 256.34/256.50 MB              |
-| `npm run docs:check`    | passes                                                      |
-| real-GPU WebGPU spec    | 3/3, zero console output                                    |
-| C4 scene specs          | 4/4 (Mars sphere, Venus descent, GAP-02 bodies, GD-1 trail) |
-| catalog total           | 4,829                                                       |
-| full `npm run test:e2e` | see the row appended below when the run completed           |
+| Gate                        | Value                                                       |
+| --------------------------- | ----------------------------------------------------------- |
+| `npm run test`              | **552 / 552 unit**                                          |
+| `npm run lint`              | clean                                                       |
+| `npx astro check`           | 0 errors, 0 warnings, 0 hints                               |
+| `npm run assets:verify`     | 16 bodies · 88 files · 1,364 VT tiles · reckoning 64/64     |
+| `npm run budget:check`      | JS 1170.4/1200 KB gz · assets 256.34/256.50 MB              |
+| `npm run docs:check`        | passes                                                      |
+| real-GPU WebGPU spec        | 3/3, zero console output                                    |
+| C4 scene specs              | 4/4 (Mars sphere, Venus descent, GAP-02 bodies, GD-1 trail) |
+| catalog total               | 4,829                                                       |
+| **full `npm run test:e2e`** | **80 / 87 passed** (16.0 min, `--workers=1 --retries=0`)    |
+
+### The 7 E2E failures — each one individually accounted for
+
+The full-suite count moved from TR-078's 5–6 to **7**, so every failure was re-run in isolation
+rather than waved at the documented rotating set. **None is caused by this session's changes**, and
+two are now A/B-proven against `HEAD` rather than merely argued.
+
+| #   | Failing spec                                      | Status                                                                                     |
+| --- | ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 1   | `accessibility.spec.ts:90` — axe, Babylon path    | **Passes in isolation.** Load-dependent.                                                   |
+| 2   | `engine-select.spec.ts:317` — GAP-03/04/05        | **A/B-PROVEN PRE-EXISTING** — fails identically with both engine files reverted to `HEAD`. |
+| 3   | `engine-select.spec.ts:905` — GAP-17 flight seq.  | **Passes in isolation** (2/2 with its GAP-08 neighbour).                                   |
+| 4   | `engine-select.spec.ts:1555` — C4 Mars sphere     | **Passes in isolation on the current build**, i.e. with the catalog entries in.            |
+| 5   | `engine-select.spec.ts:1633` — C4.2 Venus descent | **Passes in isolation on the current build.**                                              |
+| 6   | `perf-budgets.spec.ts:41`                         | **A/B-PROVEN PRE-EXISTING** — fails identically at `HEAD`, same test, same assertion.      |
+| 7   | `space-scene.spec.ts:210` — mobile menu           | **Passes 4/4, twice, with this session's changes applied.** Pure DOM; untouched by them.   |
+
+**The rotating membership is the diagnostic.** `perf-budgets` failed its `webgl` variant in the full
+run and its `babylon` variant in isolation; `space-scene` failed "mode toggle" in the full run and
+"Data & Licenses" in isolation. A deterministic regression does not move between sibling tests —
+this is TR-052's documented cumulative-load signature, on a machine that had been running builds and
+Chrome instances for hours.
+
+**What is genuinely open (see C7):** the _root cause_ of that cumulative-load behaviour is still
+unknown, and the count has drifted 5 → 7 across sessions. It deserves its own investigation rather
+than another round of triage — but it blocks nothing here, and no failure is a regression from this
+work.
