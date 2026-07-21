@@ -50,7 +50,7 @@ subsets with bit-identical elements, so merging adds nothing); and the docs-drif
 broken-link warning turned out to be a defect in the checker's own CommonMark parsing, now fixed
 and regression-tested. **C3's frame-budget half is STILL NOT measured** — it inherits C2's
 instrument problem exactly, and TR-075 added per-vertex trigonometric work to 154,662 billboards,
-which makes that measurement more necessary rather than less. **C4 RE-SCOPED and C4.1 COMPLETE** ([TR-076](../test-reports/TR-076.md)): the plan's premise for this phase — applying topography "to the existing Mars mesh" — turned out to rest on a mesh that never existed; every body in this scene is a 128px billboard cell. Owner chose real spheres + full virtual texturing. C4.1 (sphere renderer, real equirect surface maps, real elevation, real Sun lighting with Astra's Lunar-Lambert correction) is live for 12 bodies, 3 of them with real topography; C4.2 is PARTIAL ([TR-077](../test-reports/TR-077.md)): measuring the FIXED arrival camera (38 units from a radius-26 sphere, no zoom anywhere) made the magnification computable and produced three findings — the shipped 4096 map was 4x magnified so C4.1 was visibly soft, VT level 5 is unreachable by this camera and is never built (~75% asset saving), and level 3/4 sit ~1% under 1080p/4K parity. Shipped: an ultra (8192) surface tier, progressive high->ultra loading, an enforced NEVER_SPHERE rule for Phobos/Deimos, real sidereal rotation on its own 1e3 clock (the belt's 4e5 would alias Mars backwards past Nyquist), and the complete VT bake pipeline (1,364 offline-baked normal tiles). The runtime tile streamer is deliberately NOT wired — see TR-077 Part 6. C4.3 not started, and an asset-weight decision (221 MB of public assets) is open for the owner. **TR-070's
+which makes that measurement more necessary rather than less. **C4 RE-SCOPED and C4.1 COMPLETE** ([TR-076](../test-reports/TR-076.md)): the plan's premise for this phase — applying topography "to the existing Mars mesh" — turned out to rest on a mesh that never existed; every body in this scene is a 128px billboard cell. Owner chose real spheres + full virtual texturing. C4.1 (sphere renderer, real equirect surface maps, real elevation, real Sun lighting with Astra's Lunar-Lambert correction) is live for 12 bodies, 3 of them with real topography; C4.2 is PARTIAL ([TR-077](../test-reports/TR-077.md)): measuring the FIXED arrival camera (38 units from a radius-26 sphere, no zoom anywhere) made the magnification computable and produced three findings — the shipped 4096 map was 4x magnified so C4.1 was visibly soft, VT level 5 is unreachable by this camera and is never built (~75% asset saving), and level 3/4 sit ~1% under 1080p/4K parity. Shipped: an ultra (8192) surface tier, progressive high->ultra loading, an enforced NEVER_SPHERE rule for Phobos/Deimos, real sidereal rotation on its own 1e3 clock (the belt's 4e5 would alias Mars backwards past Nyquist), and the complete VT bake pipeline (1,364 offline-baked normal tiles). The runtime tile streamer is deliberately NOT wired — see TR-077 Part 6. C4.2 is now COMPLETE ([TR-078](../test-reports/TR-078.md)) — the runtime VT streamer and the Venus cloud descent both landed. **PF-10 IS FEATURE-COMPLETE**: per [ADR-0008](../adr/0008-ship-first-measure-after.md) (owner direction, 2026-07-21) C2 and C3 ship at FULL SCOPE with their measurement gates retired as preconditions and replaced by a post-ship real-device obligation, and PF-09's B6 frame-budget gate is not applied to PF-10 items. What remains is measurement, not features: the real-device pass, the asset-weight decision (221 MB), the belt's 23.44° frame decision, and C4.3 (self-shadowing + tier gating), all of which now want real hardware data first. **TR-070's
 flagged `ship track` E2E failure is now root-caused and fixed
 ([TR-071](../test-reports/TR-071.md))**: a real wall-clock-progress-vs-frame-count-bounded-ramp
 race, triggered only by travelling to the closest possible catalog target under CI's now-very-slow
@@ -268,7 +268,7 @@ full:**
   rather than 1, to preserve the existing fade-out crossfade behaviour when leaving a volume).
   All 47 NGC2000 objects (41 Billboard + 8 Volume) are now live.
 
-## Phase C2 — SDSS DR18 galaxy field ⛔ GO / NO-GO GATE
+## Phase C2 — SDSS DR18 galaxy field ✅ SHIPPED AT FULL SCOPE ([ADR-0008](../adr/0008-ship-first-measure-after.md))
 
 **Scope:** 3,637,836 galaxies, background-layer track (PNG-pack) — bundling this as JSON is not
 an option at any point on the size-policy table. Real comoving-distance-based placement.
@@ -332,7 +332,16 @@ unrepresentative at this scale, not just theoretically suspect.
 iPad/mid-Android) — real Android hardware (mid-tier + flagship) is now available (owner,
 2026-07-20) but not yet exercised. No iPad/tablet access confirmed yet either.
 
-**Exit:** DR18 field renders (✅ done, TR-067); gate measured and recorded (real device data
+**Exit (REVISED 2026-07-21, ADR-0008):** DR18 field renders at full scope — all 3,637,862 real
+records, no tier gate, no decimated subsample. **The GO/NO-GO gate below is RETIRED as a
+precondition** and replaced by a post-ship real-device measurement obligation: the owner
+directed shipping first and adjusting rendering from real data afterwards, because the only
+automated instrument available (CI SwiftShader, ~3 fps vs ~50 on real hardware) is confirmed
+unrepresentative, and gating on it repeats TR-066's reversed white-dwarf mistake. The
+measurement is still owed and still gets a TR — ADR-0008 changes WHEN, not WHETHER. The original
+gate text is left standing below per the corrections-are-additive convention.
+
+**Superseded exit:** DR18 field renders (✅ done, TR-067); gate measured and recorded (real device data
 pending); tier-gating decision (if any) written up.
 
 ## Phase C3 — Full real-data asteroid belt (replaces the procedural belt) ✅ CODE-COMPLETE (TR-074)
@@ -430,6 +439,12 @@ body traces to a catalog record; Havok body count stays within PF-09's existing 
 visual density measured against the current procedural belt; both GLSL/WGSL shader twins
 maintained (CLAUDE.md non-negotiable #4); frame budget holds on every device class.
 
+**Exit REVISED 2026-07-21 ([ADR-0008](../adr/0008-ship-first-measure-after.md)):** every criterion
+above is met except the last, and the frame-budget precondition is **retired as a blocker** on the
+same reasoning as C2 — measured post-ship on real hardware rather than gated on a software
+rasterizer. C3 ships at full scope: all 154,662 real asteroids, orbital motion active, Havok subset
+at the unchanged 20/32/48 tier counts.
+
 ## Phase C4 — Texture & surface-data upgrade
 
 **Scope:**
@@ -464,11 +479,11 @@ over two cheaper alternatives (high-res close-up billboards; spheres with single
 maps only). Spheres are the mandatory first step of that path either way, so the work is
 sequenced:
 
-| Sub-phase | Scope                                                                                                         | Status                                                                                        |
-| --------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| **C4.1**  | Sphere renderer, real equirect surface textures, real elevation via height-derived normals, real Sun lighting | ✅ **COMPLETE (TR-076)**                                                                      |
-| **C4.2**  | MOLA/NASA virtual-texture streaming with camera-distance LOD; body-selection rules (below)                    | PARTIAL (TR-077) — pipeline, tile math and 1,364 baked tiles done; runtime streamer NOT wired |
-| **C4.3**  | Rotation, self-shadowing, tier/budget gating from real-device data                                            | not started                                                                                   |
+| Sub-phase | Scope                                                                                                           | Status                                                                                                                                                                                  |
+| --------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **C4.1**  | Sphere renderer, real equirect surface textures, real elevation via height-derived normals, real Sun lighting   | ✅ **COMPLETE (TR-076)**                                                                                                                                                                |
+| **C4.2**  | MOLA/NASA virtual-texture streaming with camera-distance LOD; body-selection rules (below); Venus cloud descent | ✅ **COMPLETE (TR-078)** — runtime streamer wired (the visible tile set is a contiguous rectangle, so no indirection table was needed), Venus descent live with Astra's flat-light fork |
+| **C4.3**  | Rotation, self-shadowing, tier/budget gating from real-device data                                              | not started                                                                                                                                                                             |
 
 **C4.1 owner-confirmed 2026-07-21:** Mars, Mercury and the Moon all read correctly on the live
 page. The visual questions TR-076 left open — terminator, true-scale topography shading, and the
@@ -513,6 +528,134 @@ simply absent before this phase.
 
 **Exit:** textures pass through the asset pipeline (or a documented equivalent following its
 conventions); `budget:check` stays green; before/after visual diff is owner-confirmed.
+
+### C4 DEVIATION CLOSEOUT (2026-07-21, [TR-079](../test-reports/TR-079.md))
+
+Three deviations between what C4 promised and what C4 shipped were raised by the owner and are now
+closed. All three were real; two of them concealed genuine missing work.
+
+**1. "76 textures" -> 12 bodies was never justified. It is now a RECKONING, and it was also WRONG.**
+
+The skips (Callisto/Uranus/Neptune absent from the pack, Phobos/Deimos ruled out by the
+NEVER_SPHERE rule) were individually defensible but unrecorded, so the shortfall read as an
+omission. Writing the reckoning down is what revealed that two of its premises were false:
+
+| Claim on record                                                              | What the pack actually holds                                                                                                                                                                                          |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Earth has height-but-no-surface"                                            | **False.** `earth-day-ultra` is a real 6x**8192²** cubemap, plus night lights, a cloud deck and an ocean specular mask. The pipeline only ever globbed `tex/base/`; Earth's surface lives in `tex/cubemap/`.          |
+| "3 with real elevation — the only bodies in the pack that ship a height map" | **Incomplete.** Ten bodies ship pre-baked **normal** maps — real relief in exactly the form the shader consumes. Reading "ships a height map" as the test for "has real elevation" left nine bodies rendering smooth. |
+| 12 bodies is the whole pack                                                  | **False.** dione (4096), rhea (**8192**) and tethys (4096) have real surface _and_ normal maps and were simply not in the list.                                                                                       |
+
+**Shipped this session:** 3 new bodies (dione, rhea, tethys), 9 pre-baked normal maps consumed via
+a new `normalTex` path in both shader twins, and Earth re-projected from its cubemap into this
+pipeline's equirect convention. **16 bodies, 86 files.** The reckoning itself now lives in the
+pipeline as `PACK_RECKONING` and is **asserted** — `--verify` fails if any pack file is neither
+consumed nor carries a recorded reason, so a future pack update cannot silently reintroduce this
+class of gap. Two items are recorded as deliberate deferrals rather than allowed to vanish: the
+real Planck CMB all-sky plates and the photographic Milky Way skybox, both genuine data, both out
+of C4's scope.
+
+The cubemap re-projection's orientation is **measured, not assumed**: a cubemap has 24 plausible
+per-face orientations and every wrong one still looks like Earth at a glance.
+`scripts/validate-cubemap-orientation.mjs` correlates the re-projected day map against
+`earth-specular-high.jpg` — an equirect ocean mask from the same pack, in the same convention — and
+the shipped orientation wins at **r = -0.5995** against -0.2781 for the nearest wrong variant.
+
+**2. C4 built a parallel pipeline instead of registering one. Now registered, and hooked.**
+
+`build-planet-textures.mjs` and `build-planet-vt.mjs` followed the `assets:craft` conventions but
+were never in `package.json`, so regenerating C4's assets required reading a TR to find the
+command — a real regeneration hazard.
+
+The fix had to account for a constraint that reframes the problem: **`resources/` is gitignored, so
+CI can never regenerate any asset.** The committed bytes under `public/assets` _are_ the
+deliverable. "Auto-run in CI" is therefore impossible by construction; what CI can and now does
+assert is that the committed bytes still match what the pipelines declare they produce.
+
+Both scripts gained the three-mode shape `build-craft-assets.mjs --verify` established:
+
+| Mode         | Behaviour                                                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| (no flag)    | full rebuild; requires the source pack                                                                                              |
+| `--if-stale` | rebuilds only what is missing or older than its source; **no-ops with a clear message** when the pack is absent — the CI-safe path  |
+| `--verify`   | **source-free**: every declared body/tier/map present and non-empty, manifests consistent, no orphans, no NEVER_SPHERE body sphered |
+
+Wired as `assets:planets`, `assets:planets:vt`, `assets:sync`, `assets:verify`; `predev` and
+`prepreview` run `assets:sync`, `prebuild` runs `assets:verify`, and CI's lint job runs
+`assets:verify` + `budget:check:assets` as steps in the existing job (TR-034's status-check rule).
+Both branches are proven by execution, not by reading: the source-absent path exits 0 after
+verifying, and removing one asset fails the gate with an attributable message.
+
+**⚠️ The pipeline deletes nothing, by owner direction (2026-07-21).** An orphan-pruner added during
+this work destroyed 19 real shipped assets before a real-browser E2E caught it (TR-079 Part 6). It
+was first narrowed to files it could prove it generated, then **removed entirely** (TR-079 Part 8c)
+because the approved design said _"no orphans — fails loud on drift"_, and **"fails loud" is a
+report, not an `rm`**. `--verify` still fails on a true orphan; a human does the deleting. A unit
+test asserts the absence of any delete call in the script, which is a stronger claim than
+asserting deletion is careful.
+
+**3. `budget:check` never looked at `public/assets`. Now it does — see [ADR-0009](../adr/0009-asset-weight-budget.md).**
+
+Raw bytes, gated at three granularities (total / largest single file / per directory), with every
+ceiling moved out of the measurement script into `budgets.config.mjs` as data. Asset ceilings
+ratchet at the **high-water mark with no headroom**, deliberately unlike the bundle budgets'
+~15% slack, because no defensible slack figure exists before the ADR-0008 real-device pass.
+
+The gate caught its own first growth immediately — this session's additions took `public/assets`
+from 208.92 MB to **255.26 MB** and CI refused it until the ceiling was raised deliberately, with
+the cause recorded. It also surfaced **6.58 MB of `-base` (2048) tier maps that are shipped but
+never fetched** (the engine reads only `.high` and `.ultra`); kept rather than trimmed because
+C4.3's tier gating is what will consume them, but now a known quantity rather than a discovery.
+
+**⚠️ OPEN OWNER DECISION — asset weight, now quantified.** `public/assets` is 256.01 MB, of which
+`planets` is 168.98: base 6.6 / high 28.6 / ultra 69.1 / VT tiles 62.9 / catalog dossier images 1.8.
+The two large levers (`ultra` and the VT pyramid) both want the ADR-0008 real-device pass before
+anyone trims them.
+
+**4. Earth landed as a full feature, and Astra's brief corrected the phase this whole plan
+describes.** The brief's headline is about the CAMERA, not the planet: the arrival phase angle is
+**exactly 0.000° for every body, every time** — `travelTo` parks on the Sun–body line and free-look
+changes orientation only, so V = L identically. The terminator is never in frame and the night
+hemisphere is 100% occluded. That **additively corrects the C4.1 brief's** claim that C4's honest
+headline was "real phases and a real terminator": true of a sphere's physics, false of this scene's
+arrival geometry. It is also why Earth's real NASA city-lights map is **deliberately not shipped**
+(broken physics #1 — the map is real, the view would be invented), and why the ocean glint is
+mandatory rather than decorative (the mirror condition sits exactly at frame centre — the
+DSCOVR/EPIC geometry). Earth ships with clear-sky albedo 0.213, pure-Lambert reflectance, a
+Cox-Munk glint, a real Rayleigh term (omitting it is broken physics — 74–87% of ocean colour from
+space is scattered air), and a cloud deck locked to the surface rotation.
+
+**5. Four sphered bodies could not be reached; three now can, and Earth must not be
+(2026-07-22, [TR-079](../test-reports/TR-079.md) Part 8d).** Live validation found that `earth`,
+`tethys`, `dione` and `rhea` had sphere textures but **no catalog entry** — 28.35 MB of imagery that
+could never render. `sphereIdFor` is driven by the texture manifest; the **catalog** decides where a
+visitor can go, and nothing connected the two. Now gated by test.
+
+Tethys, Dione and Rhea are real destinations
+(`src/data/celestial/celestial-saturn-moons.js`, verified live, console-clean). Their positions are
+a **declared licence with a measured size**: real elongation from Saturn is 47.6″/61.0″/85.1″ — the
+whole inner system fits in 0.11°, and Tethys's true separation is 0.040 world units against a
+radius-26 sphere. The shipped 0.758°/0.820°/0.882° preserve the real _ordering_ and are bracketed by
+the existing Enceladus and Titan. TR-065's real-Kepler argument does **not** transfer: a
+heliocentric minor planet's true position is computable _and visually meaningful_; a close
+satellite's is computable _and visually meaningless_.
+
+**Earth is BROKEN PHYSICS as a catalog entry** and stays out. The frame is **geocentric** (verified
+from the data: the Sun is itself a body at ra 250/dec −20.5), so Earth's direction is 0/0 and its
+distance is 0 — non-existent, not merely awkward. Every RA/Dec here is measured _from_ Earth;
+entering it makes the ruler one of the measured things. **The alternative is better:** revealed by
+`goHome` at the origin, the α = 0 arrival lock does not apply, and parking at ra 160/dec 0 gives a
+verified **90.0000° phase angle** — terminator dead centre, city lights, twilight band and cloud
+shadows, for Earth alone, with no change to `travelTo`. Not implemented; it is a new feature, and it
+would resurrect the night-light assets deleted above.
+
+**⚠️ OPEN OWNER DECISION — planetary exposure, newly quantified by Astra.** The shipped
+`surface × albedo × (refl × dayside × 3.6 + 0.06)` clips on **six of sixteen bodies** (Dione 2.17,
+Europa 2.04, Tethys 1.80, Rhea 1.30, Venus 1.25, Io 1.21): 3.6 was tuned against Mars and the Moon,
+and C4.1's intended bake-normalisation was never implemented. The fix moves the opposition surge out
+of `uAlbedo` into `refl` and then needs a choice between bake-normalisation (exact real brightness
+ratios, but the Moon renders 2.6× darker) and a Reinhard response curve (never clips, compresses the
+real 9.0:1 Tethys:Moon ratio to 2.9:1). Both are honest; they are not equivalent. Not taken here.
 
 ---
 

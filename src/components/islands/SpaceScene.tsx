@@ -330,6 +330,7 @@ export default function SpaceScene({
       import("@/data/celestial/celestial-nbg.js"),
       import("@/data/celestial/celestial-gd1.js"),
       import("@/data/celestial/celestial-ngc2000.js"),
+      import("@/data/celestial/celestial-saturn-moons.js"),
     ]).then(() => {
       if (!cancelled) setEngineReady(true);
     });

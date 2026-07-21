@@ -26,9 +26,27 @@
  * against 9.9 (7.7x). Because this script bakes slopes rather than passing heights through, it
  * can and does correct them — the ranges below are real, from the literature, not from the pack.
  *
- * Run: node scripts/build-planet-vt.mjs [--body mars,moon] [--max-level 4]
+ * THREE MODES, matching `build-planet-textures.mjs` and `build-craft-assets.mjs --verify`:
+ *
+ *   (no flag)     full bake. Requires the source topography packs.
+ *   --if-stale    bake only what is missing; NO-OP with a clear message when the source packs are
+ *                 absent. This is what `predev`/`prepreview` run, and the no-op branch is why it
+ *                 is safe in CI, where `resources/` is gitignored and can never exist.
+ *   --verify      SOURCE-FREE. Checks the committed tiles against the emitted manifest: every
+ *                 level's declared tile count present on disk, no empty tiles, no orphan levels.
+ *                 This is the CI gate, and it is the thing that makes 1,364 generated files
+ *                 reproducible-in-principle rather than reproducible-if-you-read-the-TR.
+ *
+ * Run: node scripts/build-planet-vt.mjs [--verify|--if-stale] [--body mars,moon] [--max-level 4]
  */
-import { mkdirSync, existsSync, writeFileSync, statSync } from "node:fs";
+import {
+  mkdirSync,
+  existsSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
 
@@ -105,16 +123,110 @@ export async function bakeNormalTile(
 }
 
 function parseArgs(argv) {
-  const args = { bodies: ["mars", "moon"], maxLevel: DEFAULT_MAX_LEVEL };
+  const args = {
+    bodies: ["mars", "moon"],
+    maxLevel: DEFAULT_MAX_LEVEL,
+    verify: false,
+    ifStale: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--body") args.bodies = argv[++i].split(",");
     else if (argv[i] === "--max-level") args.maxLevel = Number(argv[++i]);
+    else if (argv[i] === "--verify") args.verify = true;
+    else if (argv[i] === "--if-stale") args.ifStale = true;
   }
   return args;
 }
 
+/** SOURCE-FREE verification of the committed tile pyramid against its own manifest.
+ *
+ * `resources/` is gitignored, so CI can never rebake these tiles — the committed bytes ARE the
+ * deliverable. The only thing CI can usefully assert is that the manifest and the tiles on disk
+ * still agree, which is precisely the drift a hand-run, unregistered script invites. */
+export function verify() {
+  let errors = 0;
+  const err = (m) => {
+    errors++;
+    console.error(`planet-vt: ${m}`);
+  };
+
+  const manifestPath = join(OUT_ROOT, "manifest.json");
+  if (!existsSync(manifestPath)) {
+    err(`${manifestPath} missing — run \`npm run assets:planets:vt\``);
+    return errors;
+  }
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  let tiles = 0;
+
+  for (const [body, spec] of Object.entries(manifest.bodies ?? {})) {
+    for (const lv of spec.levels ?? []) {
+      const dir = join(OUT_ROOT, body, `level${lv.level}`);
+      if (!existsSync(dir)) {
+        err(
+          `${body} level${lv.level}: directory missing (manifest declares ${lv.tiles} tiles)`,
+        );
+        continue;
+      }
+      const onDisk = readdirSync(dir).filter((f) => f.endsWith(".jpg"));
+      if (onDisk.length !== lv.tiles)
+        err(
+          `${body} level${lv.level}: manifest declares ${lv.tiles} tiles, ` +
+            `${onDisk.length} on disk`,
+        );
+      for (const f of onDisk)
+        if (statSync(join(dir, f)).size === 0)
+          err(`${body} level${lv.level}/${f} is zero bytes`);
+      tiles += onDisk.length;
+    }
+    // A level baked beyond what the manifest records is the same class of drift as a missing
+    // one — and level 5 in particular is deliberately never built (see the header).
+    const bodyDir = join(OUT_ROOT, body);
+    if (existsSync(bodyDir))
+      for (const entry of readdirSync(bodyDir)) {
+        const n = Number(entry.replace("level", ""));
+        if (!(spec.levels ?? []).some((l) => l.level === n))
+          err(`${body}/${entry} exists on disk but is not in the manifest`);
+      }
+  }
+
+  if (errors === 0)
+    console.log(
+      `planet-vt: verified ${Object.keys(manifest.bodies ?? {}).length} bodies, ` +
+        `${tiles} normal tiles, manifest consistent.`,
+    );
+  return errors;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+
+  if (args.verify) {
+    if (verify()) process.exitCode = 1;
+    return;
+  }
+
+  if (!existsSync(SRC_ROOT)) {
+    if (args.ifStale) {
+      // Expected in CI and on any clone: the topography packs are gitignored, the baked tiles are
+      // committed. A no-op branch, not a failure.
+      console.log(
+        `planet-vt: source packs absent (${SRC_ROOT}) — tiles are committed, ` +
+          `nothing to rebake. Verifying what is on disk instead.`,
+      );
+      if (verify()) process.exitCode = 1;
+      return;
+    }
+    console.error(
+      `planet-vt: ${SRC_ROOT} not found (it is gitignored — see .gitignore "resources/")`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  if (args.ifStale && verify() === 0) {
+    console.log("planet-vt: tile pyramid up to date.");
+    return;
+  }
   const manifest = { generated: "PF-10 C4.2", tilePx: TILE_PX, bodies: {} };
   let totalBytes = 0;
   let totalTiles = 0;
@@ -194,6 +306,7 @@ async function main() {
   console.log(
     `level 5 deliberately NOT built — the fixed arrival camera cannot resolve it (see planet-vt.ts)`,
   );
+  if (verify()) process.exitCode = 1;
 }
 
 if (process.argv[1] && process.argv[1].endsWith("build-planet-vt.mjs")) {

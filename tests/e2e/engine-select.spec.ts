@@ -1283,6 +1283,7 @@ test("babylon: PF-10 star clusters (celestial-clusters.js) load and are real tra
       CELESTIAL_NBG_COUNT?: number;
       CELESTIAL_GD1_COUNT?: number;
       CELESTIAL_NGC2000_COUNT?: number;
+      CELESTIAL_SATURNMOONS_COUNT?: number;
     };
     return {
       celestial: w.CELESTIAL?.length,
@@ -1291,6 +1292,7 @@ test("babylon: PF-10 star clusters (celestial-clusters.js) load and are real tra
       nbg: w.CELESTIAL_NBG_COUNT,
       gd1: w.CELESTIAL_GD1_COUNT,
       ngc2000: w.CELESTIAL_NGC2000_COUNT,
+      saturnmoons: w.CELESTIAL_SATURNMOONS_COUNT,
     };
   });
   expect(counts.clusters).toBe(35);
@@ -1302,8 +1304,13 @@ test("babylon: PF-10 star clusters (celestial-clusters.js) load and are real tra
   expect(counts.nbg).toBe(856); // real .vot nrows — see celestial-nbg.js header for the 875-vs-856 discrepancy note
   expect(counts.gd1).toBe(1365);
   expect(counts.ngc2000).toBe(41); // 41 of 47 real NGC2000 objects — the other 8 are Volume-archetype, still blocked
-  // 2,525 pre-existing + 35 clusters + 4 minor planets + 856 NBG + 1,365 GD-1 + 41 NGC2000, none dropped as an id collision.
-  expect(counts.celestial).toBe(4826);
+  // PF-10 C4 closeout (TR-079): Tethys, Dione and Rhea became real destinations. They shipped
+  // sphere textures with no catalog entry, so 17.5 MB of real imagery could never render — found
+  // by live validation, not by a test. Counted individually here per the convention above.
+  expect(counts.saturnmoons).toBe(3);
+  // 2,525 pre-existing + 35 clusters + 4 minor planets + 856 NBG + 1,365 GD-1 + 41 NGC2000
+  // + 3 Saturn moons, none dropped as an id collision.
+  expect(counts.celestial).toBe(4829);
 
   const pleiades = await page.evaluate(() =>
     (
@@ -1616,6 +1623,73 @@ test("babylon: PF-10 C4 arriving at Mars reveals a real textured sphere with rea
   expect(stats.planetSphereReady).toBe(true);
   // Binding two samplers is the TR-059 failure class; on WebGPU a bad bind kills the whole
   // frame and surfaces only as console output.
+  expect(consoleErrors).toEqual([]);
+});
+
+// PF-10 C4.2 — the Venus cloud descent. The assertion that matters is Astra's honesty mandate:
+// once the Magellan RADAR surface is on screen, the directional-lighting fork must be fully
+// engaged, because lighting a radar map manufactures geometry that is not there. That is
+// invisible in a screenshot and would pass any review, so it is asserted as behaviour here.
+test("babylon: PF-10 C4.2 arriving at Venus descends through the real cloud deck", async ({
+  page,
+}) => {
+  test.setTimeout(120000);
+  const consoleErrors: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") consoleErrors.push(m.text());
+  });
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+
+  type SceneEl = HTMLElement & {
+    travelTo: (id: string) => void;
+    arrivedId: string | null;
+    sceneStats(): {
+      venusAltitudeKm: number;
+      venusCloudVisible: boolean;
+      planetSphereBody: string | null;
+    };
+  };
+
+  await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as SceneEl).travelTo("venus"));
+  await expect
+    .poll(
+      () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) => (el as SceneEl).arrivedId),
+      { timeout: 40000 },
+    )
+    .toBe("venus");
+
+  // Deliberately NOT asserting "entry is above 70 km" here: arrival and the first descent tick
+  // are a frame apart, and the poll above can land anywhere in the first seconds of a 20 s
+  // descent, so that assertion is a race. What IS invariant is that the descent starts inside
+  // the deck's range and falls monotonically, which is checked below.
+  const entry = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as SceneEl).sceneStats());
+  expect(entry.planetSphereBody).toBe("venus");
+  expect(entry.venusAltitudeKm).toBeGreaterThan(47.5);
+
+  // The descent runs for 20 s of real time; by the end it must be BELOW the real cloud base
+  // (47.5 km) and above the surface — Astra: do not land, there is nothing to see at 0 km.
+  await expect
+    .poll(
+      () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) => (el as SceneEl).sceneStats().venusAltitudeKm),
+      { timeout: 40000, intervals: [1000] },
+    )
+    .toBeLessThan(47.5);
+
+  const end = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as SceneEl).sceneStats());
+  expect(end.venusAltitudeKm).toBeGreaterThan(0);
   expect(consoleErrors).toEqual([]);
 });
 

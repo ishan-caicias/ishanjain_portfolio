@@ -65,7 +65,12 @@
         "high": "io-surface-high.jpg",
         "ultra": "io-surface-ultra.jpg"
       },
-      "height": null
+      "height": null,
+      "normal": {
+        "base": "io-normal-base.jpg",
+        "high": "io-normal-high.jpg",
+        "ultra": "io-normal-ultra.jpg"
+      }
     },
     "europa": {
       "surface": {
@@ -73,7 +78,12 @@
         "high": "europa-surface-high.jpg",
         "ultra": "europa-surface-ultra.jpg"
       },
-      "height": null
+      "height": null,
+      "normal": {
+        "base": "europa-normal-base.jpg",
+        "high": "europa-normal-high.jpg",
+        "ultra": "europa-normal-ultra.jpg"
+      }
     },
     "titan": {
       "surface": {
@@ -81,7 +91,12 @@
         "high": "titan-surface-high.jpg",
         "ultra": "titan-surface-ultra.jpg"
       },
-      "height": null
+      "height": null,
+      "normal": {
+        "base": "titan-normal-base.jpg",
+        "high": "titan-normal-high.jpg",
+        "ultra": "titan-normal-ultra.jpg"
+      }
     },
     "pluto": {
       "surface": {
@@ -89,21 +104,34 @@
         "high": "pluto-surface-high.jpg",
         "ultra": "pluto-surface-ultra.jpg"
       },
-      "height": null
+      "height": null,
+      "normal": {
+        "base": "pluto-normal-base.jpg",
+        "high": "pluto-normal-high.jpg",
+        "ultra": "pluto-normal-ultra.jpg"
+      }
     },
     "ganymede": {
       "surface": {
         "base": "ganymede-surface-base.jpg",
         "high": "ganymede-surface-high.jpg"
       },
-      "height": null
+      "height": null,
+      "normal": {
+        "base": "ganymede-normal-base.jpg",
+        "high": "ganymede-normal-high.jpg"
+      }
     },
     "ceres": {
       "surface": {
         "base": "ceres-surface-base.jpg",
         "high": "ceres-surface-high.jpg"
       },
-      "height": null
+      "height": null,
+      "normal": {
+        "base": "ceres-normal-base.jpg",
+        "high": "ceres-normal-high.jpg"
+      }
     },
     "jupiter": {
       "surface": {
@@ -118,6 +146,64 @@
         "high": "saturn-surface-high.jpg"
       },
       "height": null
+    },
+    "rhea": {
+      "surface": {
+        "base": "rhea-surface-base.jpg",
+        "high": "rhea-surface-high.jpg",
+        "ultra": "rhea-surface-ultra.jpg"
+      },
+      "height": null,
+      "normal": {
+        "base": "rhea-normal-base.jpg",
+        "high": "rhea-normal-high.jpg",
+        "ultra": "rhea-normal-ultra.jpg"
+      }
+    },
+    "dione": {
+      "surface": {
+        "base": "dione-surface-base.jpg",
+        "high": "dione-surface-high.jpg"
+      },
+      "height": null,
+      "normal": {
+        "base": "dione-normal-base.jpg",
+        "high": "dione-normal-high.jpg"
+      }
+    },
+    "tethys": {
+      "surface": {
+        "base": "tethys-surface-base.jpg",
+        "high": "tethys-surface-high.jpg"
+      },
+      "height": null,
+      "normal": {
+        "base": "tethys-normal-base.jpg",
+        "high": "tethys-normal-high.jpg"
+      }
+    },
+    "earth": {
+      "surface": {
+        "base": "earth-surface-base.jpg",
+        "high": "earth-surface-high.jpg",
+        "ultra": "earth-surface-ultra.jpg"
+      },
+      "height": null,
+      "normal": {
+        "base": "earth-normal-base.jpg",
+        "high": "earth-normal-high.jpg",
+        "ultra": "earth-normal-ultra.jpg"
+      },
+      "cloud": {
+        "base": "earth-cloud-base.jpg",
+        "high": "earth-cloud-high.jpg",
+        "ultra": "earth-cloud-ultra.jpg"
+      },
+      "specular": {
+        "base": "earth-specular-base.jpg",
+        "high": "earth-specular-high.jpg",
+        "ultra": "earth-specular-ultra.jpg"
+      }
     }
   }
 }

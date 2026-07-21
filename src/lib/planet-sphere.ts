@@ -109,6 +109,15 @@ export const PLANET_PHYSICAL: Record<string, PlanetPhysical> = {
  * as the asteroid rocks' 0.9-3.2 unit radii. */
 export const PLANET_SPHERE_RADIUS = 26;
 
+/** Angular width of the surface patch the camera can actually see, in degrees.
+ *
+ * NOT a tuning constant — a derived property of the scene, and the number the whole C4.2
+ * resolution analysis rests on. The camera parks at a FIXED `ARRIVE_STANDOFF` (38) from a
+ * PLANET_SPHERE_RADIUS (26) sphere with no zoom anywhere in the engine, which pins the visible
+ * patch at 23.5° across. `tests/unit/planet-vt.test.ts` recomputes it from those two constants,
+ * so if either moves the test re-derives rather than silently inheriting a stale figure. */
+export const PLANET_PATCH_DEG = 23.5;
+
 /** Vertical exaggeration applied to the height-derived surface normals.
  *
  * ASTRA CORRECTION — 1.0, where this file's first draft had 12.
@@ -138,6 +147,60 @@ export const PLANET_ALBEDO: Record<string, number> = {
   ceres: 0.09,
   jupiter: 0.538,
   saturn: 0.499,
+
+  /* PF-10 C4 CLOSEOUT (2026-07-21) — the three bodies the first pass skipped outright.
+   *
+   * THESE THREE VALUES EXCEED 1.0 AND THAT IS NOT AN ERROR. Geometric albedo is brightness at
+   * zero phase against a perfect Lambertian disc, and the inner Saturnian icy satellites really
+   * do beat that reference: they are continuously resurfaced by fresh E-ring ice grains, and
+   * their regoliths show an extremely strong coherent-backscatter opposition surge (Verbiscer et
+   * al. 2007). Tethys at 1.229 is among the most reflective surfaces in the solar system.
+   *
+   * The renderer must not "fix" this by clamping to 1. Clamping would flatten the single most
+   * distinctive real fact about these bodies — that they are conspicuously brighter than the
+   * Moon, Mars or Ceres sitting beside them in the same scene. */
+  dione: 0.998,
+  rhea: 0.949,
+  tethys: 1.229,
+
+  /** Earth — and this is the one entry in this table that is NOT the body's geometric albedo.
+   *
+   * ASTRA, ranked #6 in the Earth brief's broken-physics table: Earth's real geometric albedo is
+   * 0.434, and putting it here would be **the right number in the wrong place**. Earth is the
+   * first body in this scene rendered as TWO layers — a surface and a cloud deck — and 0.434 is
+   * the composite of both. Applying it to the surface *and* compositing clouds over it counts the
+   * clouds twice: the planet renders ~2x too bright, and worse, the ocean/cloud contrast collapses
+   * because the ocean has been lifted to cloud brightness.
+   *
+   * The surface takes Earth's **clear-sky** geometric albedo, 0.15 / 0.705 = 0.213; the cloud
+   * layer supplies the rest. Astra closed the budget two independent ways: from literature,
+   * (1 - 0.67)*0.213 + 0.67*0.55 = 0.439 against the real 0.434 (1%); and from the shipped cloud
+   * map's own solid-angle-weighted mean byte, (1 - 0.2428)*0.213 + 0.2428*1.0 = 0.404 (7%). */
+  earth: 0.213,
+};
+
+/** Lunar-Lambert coefficient for bodies not in `PLANET_PHYSICAL`. Absent = the 0.55 default.
+ *
+ * Earth is 0, i.e. pure Lambert, and Astra classes reusing Mars's 0.55 or the Moon's 1.0 as
+ * BROKEN PHYSICS by mechanism: the Lommel-Seeliger term models **shadow hiding in porous,
+ * sharp-grained regolith**, and there is no regolith on Earth's visible surface. Water has no
+ * pore structure; a cloud is a multiple-scattering droplet slab. Applying a regolith law to an
+ * ocean is the same class of error as lighting a radar map (TR-078 Part 2) — a real formula
+ * applied to a surface whose physics it does not describe.
+ *
+ * Honest about the magnitude: at this scene's arrival geometry the choice changes the render by
+ * 0% at frame centre and at most 8.6% at the frame edge. It is fixed because it is free, and it
+ * becomes a 37-67% error the moment the arrival phase ever changes. */
+export const PLANET_LUNAR_L: Record<string, number> = {
+  earth: 0.0,
+
+  /* The three icy satellites take 1.0, and Astra was explicit that the 0.55 fallback they were
+   * getting is BROKEN PHYSICS rather than merely imprecise: 0.55 is MARS's coefficient, and Mars
+   * has an atmosphere. These are airless bodies with porous regolith — the same case as the Moon
+   * and Mercury, which already take 1.0. */
+  dione: 1.0,
+  rhea: 1.0,
+  tethys: 1.0,
 };
 
 /** Bodies that must NEVER be rendered as a sphere, however much texture data exists for them.
@@ -168,6 +231,19 @@ export const ROTATION_PERIOD_S: Record<string, number> = {
   titan: 1377648,
   pluto: -551856.7, // 6.387 d, retrograde
   ceres: 32667, // 9h 4m 27s
+
+  // PF-10 C4 closeout. All three are tidally locked, so the sidereal rotation period IS the
+  // orbital period — which is why they are long: these are days-per-rotation worlds, and at
+  // ROTATION_TIME_ACCEL they turn slowly and visibly rather than spinning.
+  // ASTRA CORRECTION: dione was first entered as 236429, which does not match the 2.736915 d
+  // this very comment cited — an arithmetic slip of 40.5 s caught by checking the number against
+  // its own stated source rather than against a second source.
+  dione: 236469.5, // 2.736915 d, synchronous
+  rhea: 390373.5, // 4.518212 d, synchronous
+  tethys: 163106.1, // 1.887802 d, synchronous
+  // SIDEREAL, not the 86400 s solar day — the difference is ~4 minutes and it is the sidereal
+  // figure that governs rotation against the fixed stars, which is what this scene renders.
+  earth: 86164.0905,
 };
 
 /** Rotation time acceleration — DELIBERATELY SEPARATE from the asteroid belt's TIME_ACCEL of 4e5.
@@ -203,7 +279,27 @@ export interface PlanetTierSet {
 }
 export interface PlanetManifestEntry {
   surface: PlanetTierSet;
+  /** An 8-bit greyscale elevation map the shader DIFFERENTIATES into slopes. */
   height: PlanetTierSet | null;
+  /** A pre-baked tangent-space normal map the shader consumes DIRECTLY.
+   *
+   * PF-10 C4 CLOSEOUT (2026-07-21). `height` and `normal` are mutually exclusive across the
+   * entire source pack — a genuine property of the data, not a convention imposed here — which
+   * is why the shader can gate them against each other with one `uHasNormal` and needs no
+   * precedence rule.
+   *
+   * Preferring a baked normal over a height map is the same finding `build-planet-vt.mjs` rests
+   * on: 8-bit quantization is catastrophic under differentiation (it terraces the surface) and
+   * benign under direct consumption. Nine bodies shipped as smooth spheres through TR-076/078
+   * with real relief data sitting unused in the pack, because the first pass read "ships a
+   * height map" as the test for "has real elevation". It is not. */
+  normal?: PlanetTierSet | null;
+  /** Earth only: real city lights, composited on the night side. */
+  night?: PlanetTierSet | null;
+  /** Earth only: the real cloud deck, on its own advection. */
+  cloud?: PlanetTierSet | null;
+  /** Earth only: ocean/land specular mask. */
+  specular?: PlanetTierSet | null;
 }
 export interface PlanetManifest {
   generated: string;
@@ -277,11 +373,87 @@ export const UV_LONGITUDE_OFFSET = 0.5;
  * disc. Small, but a hard step there is one of the tells of a fake planet. */
 export const TERMINATOR_SOFTEN = 0.005;
 
+/* ---------- Earth: the three terms that make it Earth ------------------------
+ *
+ * All from Astra's Earth brief (docs/analysis/2026-07-21-earth-sphere-science-brief.md), whose
+ * single most consequential measurement is about the CAMERA rather than the planet:
+ *
+ *   The arrival phase angle is EXACTLY ZERO, for every body, every time. `travelTo` parks the
+ *   camera at `bodyPos - dir * ARRIVE_STANDOFF` — i.e. between Sol and the body, on the Sun-body
+ *   line — and `sunDirectionFrom` returns `-dir`. So V = L identically, and free-look changes
+ *   orientation only. The terminator is 90 degrees from the sub-camera point and the night
+ *   hemisphere is 100% occluded.
+ *
+ * That one fact decides everything below: it is why there are no city lights (they cannot produce
+ * a single visible pixel), and why the ocean glint is not optional (the mirror condition is
+ * satisfied EXACTLY at the dead centre of the frame — this is the DSCOVR/EPIC geometry, where the
+ * glint is a published, daily-photographed Earth signature).
+ *
+ * It also forced an additive correction to the C4.1 brief, which named "real phases and a real
+ * terminator" as C4's honest headline. True of the physics of a sphere; false of this scene's
+ * arrival geometry. No body in this scene ever shows a phase. Recorded there, not edited away.
+ */
+
+/** Rayleigh optical depth at sea level per RGB band (650 / 550 / 450 nm), Bodhaine et al. 1999,
+ * tau proportional to lambda^-4.09.
+ *
+ * OMITTING THIS TERM IS BROKEN PHYSICS, and it is the largest honesty problem in the Earth
+ * feature — larger than anything about clouds or lights. Astra measured the day map's ocean at
+ * RGB (2, 5, 20) of 255. That is a correct measurement of what the WATER does, and it is nothing
+ * like what EARTH looks like: between **74% and 87% of the light you see over open ocean from
+ * space is scattered air**, not water. The Blue Marble product has it removed on purpose, because
+ * it is a SURFACE product. Rendering it raw does not simplify Earth — it renders the wrong
+ * object, a picture of the sea's reflectance presented as a picture of the planet. */
+export const RAYLEIGH_TAU_RGB: readonly [number, number, number] = [
+  0.0491, 0.0973, 0.2211,
+];
+
+/** Maritime background aerosol, spectrally flat, weak backscatter. */
+export const AEROSOL_TAU = 0.08;
+
+/** Cox & Munk (1954) sea-surface slope variance: sigma2 = 0.003 + 0.00512 * W, at the real
+ * global-mean ocean surface wind of 7.0 m/s (scatterometer climatology, 6.6-7.0). Gives an RMS
+ * slope of 11.15 degrees, a peak glint 2.26x a Lambertian ocean, and a half-power radius of
+ * 209 px on a 1080p frame. */
+export const OCEAN_SIGMA2 = 0.03884;
+
+/** Fresnel reflectance at normal incidence for seawater, n = 1.339 at 550 nm. */
+export const OCEAN_F0 = 0.02101;
+
+/** Lunar-Lambert coefficient for the CLOUD layer — not the surface's 0.
+ *
+ * Astra: Chandrasekhar's exact solution for reflection from a conservative multiple-scattering
+ * slab has the same FORM as Lommel-Seeliger, by a completely different mechanism (single-scatter
+ * albedo of cloud droplets at 550 nm is ~0.9999, not shadow hiding in regolith). Same formula,
+ * different physics, and the coefficient that fits is ~0.9. */
+export const CLOUD_LUNAR_L = 0.9;
+
+/** Cloud shell altitude as a fraction of Earth's radius — 5 km / 6371 km.
+ *
+ * TRUE SCALE, and this is where Venus's precedent must NOT be copied. TR-078 declared the Venus
+ * deck unrepresentable because the whole 70 km column is 0.097 world units at radius 26. Earth's
+ * clouds are drawn at 5 km = 0.0204 wu, which is 24-237 depth quanta at this camera — comfortably
+ * representable. Astra ranks reusing Venus's 2 x 1.012 shell radius as BROKEN PHYSICS #5: it puts
+ * the deck at 76.5 km, in the MESOSPHERE, and produces ~19 px of false cloud/surface parallax at
+ * the frame edge against a true-scale 1.3 px.
+ *
+ * DECLARED SIMPLIFICATION, with its cost measured rather than waved at: the clouds are composited
+ * in this fragment shader rather than drawn on a second shell mesh, which forfeits exactly that
+ * true-scale 1.3 px of parallax on a 2397 px disc — 0.05%. What it buys is no second mesh, no
+ * alpha-ordering, and no depth-precision exposure. The altitude constant is kept because it is
+ * what makes the forfeit quantifiable. */
+export const CLOUD_SHELL_FACTOR = 1.000785;
+
 const PLANET_SHADER_CONSTANTS = `
 const float ELEV_STEP = ${ELEV_SAMPLE_STEP.toFixed(8)};
 const float LON_OFFSET = ${UV_LONGITUDE_OFFSET.toFixed(4)};
 const float TERM_SOFTEN = ${TERMINATOR_SOFTEN.toFixed(5)};
-const float PI = 3.14159265;`;
+const float PI = 3.14159265;
+const vec3 RAYLEIGH_TAU = vec3(${RAYLEIGH_TAU_RGB.map((v) => v.toFixed(5)).join(", ")});
+const float AEROSOL_TAU = ${AEROSOL_TAU.toFixed(4)};
+const float OCEAN_SIGMA2 = ${OCEAN_SIGMA2.toFixed(6)};
+const float OCEAN_F0 = ${OCEAN_F0.toFixed(6)};
+const float CLOUD_L = ${CLOUD_LUNAR_L.toFixed(3)};`;
 
 export const PLANET_VERTEX_GLSL = `
 precision highp float;
@@ -309,12 +481,24 @@ export const PLANET_FRAGMENT_GLSL = `
 precision highp float;
 uniform sampler2D surfaceTex;
 uniform sampler2D heightTex;
+uniform sampler2D normalTex;  // PF-10 C4 closeout: pre-baked tangent-space relief
+uniform float uHasNormal;     // 1 = this body ships a real normal map, 0 = placeholder bound
 uniform vec3 uSunDir;      // world-space unit vector from the body toward the Sun
 uniform float uHasHeight;  // 1 = this body ships real elevation, 0 = placeholder bound
 uniform float uElevScale;  // vertical exaggeration (1.0 = true scale, see PLANET_ELEV_SCALE)
 uniform float uAlbedo;     // real GEOMETRIC albedo
 uniform float uLunarL;     // Lunar-Lambert coefficient: 1 = airless backscatter, 0 = Lambert
 uniform vec3 uCamPos;      // world-space camera, for the emission-angle term
+uniform sampler2D detailTex;  // PF-10 C4.2: streamed VT normal atlas for the visible patch
+uniform vec4 uDetailRect;     // [u0,v0,u1,v1] of the map that atlas covers
+uniform float uHasDetail;     // 1 = a real atlas is bound, 0 = placeholder
+uniform float uFlatLight;     // PF-10 C4.2 Venus fork: 1 = flat shadowless illuminant
+uniform vec3 uFlatTint;       // real Venera illuminant when the fork is engaged
+uniform float uFlatLevel;     // relative illuminance under the deck
+uniform sampler2D cloudTex;   // PF-10 C4 closeout, Earth: real cloud coverage/reflectance product
+uniform sampler2D specularTex;// Earth: real ocean/land mask, 70.06% ocean as measured
+uniform float uHasCloud;      // 1 = a real cloud map is bound
+uniform float uAtmosphere;    // 1 = this body has an atmosphere the Rayleigh term applies to
 varying vec2 vUV;
 varying vec3 vNormal;
 varying vec3 vWorldPos;
@@ -347,6 +531,38 @@ void main(){
   float dHdv = (hU - hD) * uElevScale * uHasHeight;
   vec3 perturbed = normalize(N - east * dHdu + north * dHdv);
 
+  // PF-10 C4 CLOSEOUT: pre-baked relief, for the nine bodies whose pack data is a NORMAL map
+  // rather than a height map. Consumed directly instead of differentiated — which is not a
+  // shortcut but the strictly better path, and the same finding build-planet-vt.mjs rests on:
+  // 8-bit quantization is catastrophic under differentiation (it terraces the surface into
+  // visible steps) and benign under direct consumption.
+  //
+  // The height and normal maps are MUTUALLY EXCLUSIVE across the entire source pack — a real
+  // property of the data, not a convention imposed here — so these two paths can be gated against
+  // each other with one uniform and need no precedence rule. Sampled unconditionally and gated by
+  // multiplication per TR-047; the sampler always has a real texture bound per TR-059, and its
+  // placeholder is the neutral normal (128,128,255) rather than the mid-grey the other samplers
+  // use, because mid-grey decodes to a ZERO vector here rather than to "no change".
+  vec3 nrm = texture2D(normalTex, tUV).rgb * 2.0 - 1.0;
+  vec3 nrmWorld = normalize(east * nrm.x + north * nrm.y + N * max(nrm.z, 0.05));
+  perturbed = normalize(mix(perturbed, nrmWorld, uHasNormal));
+
+  // PF-10 C4.2: streamed high-resolution detail. The visible tile set is a contiguous RECTANGLE
+  // (see planet-vt.ts), so the atlas lookup is one subtract-and-divide with no indirection table.
+  // Sampled unconditionally per TR-047 and gated by multiplication; the sampler always has a real
+  // texture bound per TR-059. The "inside" term fades detail out at the atlas edge rather than
+  // clipping it, so the boundary of the streamed region is never a visible line.
+  vec2 rectSize = uDetailRect.zw - uDetailRect.xy;
+  vec2 dUV = (tUV - uDetailRect.xy) / max(rectSize, vec2(1e-6));
+  vec3 detail = texture2D(detailTex, clamp(dUV, 0.0, 1.0)).rgb * 2.0 - 1.0;
+  vec2 edge = min(dUV, 1.0 - dUV);
+  float inside = smoothstep(0.0, 0.04, min(edge.x, edge.y)) * uHasDetail;
+  // Detail normals are tangent-space (x=east, y=north, z=up); rotate into the surface frame and
+  // blend by that same term. Reconstructing rather than replacing keeps the base elevation's large-scale
+  // shape and adds the streamed level's fine structure on top.
+  vec3 detailWorld = normalize(east * detail.x + north * detail.y + perturbed * max(detail.z, 0.05));
+  perturbed = normalize(mix(perturbed, detailWorld, inside));
+
   // LUNAR-LAMBERT reflectance. Plain Lambert here is BROKEN PHYSICS for airless bodies (Astra):
   // real regolith backscatters, which is why the full Moon is a flat evenly-lit disc with no limb
   // darkening, and why the half Moon is ~9% as bright as the full Moon rather than Lambert's 50%.
@@ -363,7 +579,69 @@ void main(){
   // A dim ambient term keeps the night side legible rather than pure black — a real night side is
   // lit by starlight and, for the Moon, earthshine; this stands in for that without modelling it.
   vec3 lit = surface * uAlbedo * (refl * dayside * 3.6 + 0.06);
-  gl_FragColor = vec4(lit, 1.0);
+
+  // ---- EARTH (PF-10 C4 closeout). Three terms, each with a named mechanism, per Astra's brief.
+  // Every one is sampled/computed unconditionally and gated by multiplication (TR-047); the two
+  // samplers always have a real texture bound (TR-059), black for bodies that have neither.
+  //
+  // 1. OCEAN GLINT — Cox-Munk slope distribution in Torrance-Sparrow form. Not decoration: at this
+  // scene's zero arrival phase the mirror condition H = normalize(L+V) is satisfied EXACTLY at the
+  // dead centre of the frame, which is the DSCOVR/EPIC geometry where ocean glint is a published,
+  // daily-photographed feature. Astra: omitting it is the departure from reality, not adding it.
+  // The map carries no baked glint (Blue-Marble products mask it out), so this is purely additive.
+  float oceanMask = texture2D(specularTex, tUV).r;
+  vec3 Hv = normalize(normalize(uSunDir) + viewDir);
+  float cosTh = max(dot(perturbed, Hv), 1e-4);
+  float cos2Th = cosTh * cosTh;
+  float tan2 = (1.0 - cos2Th) / cos2Th;
+  float slopeP = exp(-tan2 / OCEAN_SIGMA2) / (PI * OCEAN_SIGMA2 * cos2Th * cos2Th);
+  float cosI = max(dot(Hv, viewDir), 0.0);
+  float fres = OCEAN_F0 + (1.0 - OCEAN_F0) * pow(1.0 - cosI, 5.0);
+  // The 1/(4 mu0 mu) denominator diverges at the terminator, where the single-scattering
+  // microfacet form is invalid anyway — clamped rather than allowed to blow up.
+  float glint = oceanMask * fres * slopeP / (4.0 * max(mu0 * mu, 0.02));
+  // BRDF -> this shader's units: a Lambertian albedo A has BRDF A/PI, so multiplying by PI puts
+  // the glint on the same scale as uAlbedo before the shared exposure factor.
+  lit += vec3(glint * PI) * mu0 * 3.6 * dayside;
+
+  // 2. RAYLEIGH + AEROSOL — single scattering, real optical depths, real lambda^-4.09 colour and
+  // the real phase function. See RAYLEIGH_TAU_RGB: omitting this is the feature's biggest honesty
+  // problem, because the ocean in the surface map is RGB (2,5,20) and most of the blue you see
+  // from orbit never reaches the water at all. No texture tap, and the cheapest term here.
+  float cosT = dot(-normalize(uSunDir), viewDir);
+  float phaseR = 0.75 * (1.0 + cosT * cosT);
+  float airDenom = 4.0 * max(mu * mu0, 0.05);
+  vec3 air = (RAYLEIGH_TAU * phaseR + vec3(AEROSOL_TAU * 0.3)) / airDenom;
+  lit += air * uAtmosphere * mu0 * 3.6 * dayside;
+
+  // 3. CLOUDS — composited here rather than on a second shell mesh (see CLOUD_SHELL_FACTOR for
+  // the declared 1.3 px of forfeited parallax). Alpha is the map byte RAW, not sRGB-decoded, and
+  // the cloud is WHITE: Astra settled that from the map itself, since raw alpha x white
+  // reproduces Earth's real geometric albedo to 7% while sRGB-decoding misses by 33%. Contrast is
+  // NOT flattened — that was the right fix for Venus, whose map is a UV image at 20.5% contrast
+  // against a real 1-3%; Earth's clouds really are near-white on near-black.
+  // The deck is LOCKED to the surface: Earth's atmosphere co-rotates to 1.3% and laps in 77 days,
+  // so an independently spinning shell would be broken physics (Astra's #3) however alive it looks.
+  // Compositing over the surface also masks the glint exactly as real DSCOVR imagery shows.
+  float cloudA = texture2D(cloudTex, tUV).r * uHasCloud;
+  float cloudRefl = 2.0 * CLOUD_L * mu0 / max(mu0 + mu, 1e-4) + (1.0 - CLOUD_L) * mu0;
+  vec3 cloudLit = vec3(cloudRefl * dayside * 3.6 + 0.06);
+  lit = mix(lit, cloudLit, cloudA);
+
+  // VENUS FORK (PF-10 C4.2). Astra's mandate, and the most important honesty decision in this
+  // shader: below the cloud deck a Magellan RADAR map must NOT be lit. Radar brightness is
+  // roughness and slope, not reflectance, so a directional Sun plus normal perturbation would
+  // manufacture geometry that is not there and then cast convincing light across it. Real Venera
+  // images show flat, shadowless orange light with no solar disc and no terminator. So under the
+  // deck the surface is presented as an evenly-illuminated radar visualization: no directional
+  // term, no perturbed normal, just the real illuminant at the real relative illuminance.
+  // NAMED flatLit, NOT flat: the bare word is a reserved interpolation qualifier in GLSL ES 3.0 and the
+  // shader fails to compile — which surfaces only as materialReady staying false, with no console
+  // error to point at it. This is TR-045's lesson (reserved identifiers blank the scene) arriving
+  // from the GLSL side rather than the WGSL side; the WGSL twin was named flatLit from the start
+  // and the GLSL one was not, so the twins disagreed and only one of them broke.
+  vec3 flatLit = surface * uFlatTint * uFlatLevel;
+  gl_FragColor = vec4(mix(lit, flatLit, uFlatLight), 1.0);
 }`;
 
 export const PLANET_VERTEX_WGSL = `
@@ -399,17 +677,38 @@ var surfaceTexSampler : sampler;
 var surfaceTex : texture_2d<f32>;
 var heightTexSampler : sampler;
 var heightTex : texture_2d<f32>;
+var normalTexSampler : sampler;
+var normalTex : texture_2d<f32>;
+uniform uHasNormal : f32;
 uniform uSunDir : vec3<f32>;
 uniform uHasHeight : f32;
 uniform uElevScale : f32;
 uniform uAlbedo : f32;
 uniform uLunarL : f32;
 uniform uCamPos : vec3<f32>;
+var detailTexSampler : sampler;
+var detailTex : texture_2d<f32>;
+uniform uDetailRect : vec4<f32>;
+uniform uHasDetail : f32;
+uniform uFlatLight : f32;
+uniform uFlatTint : vec3<f32>;
+uniform uFlatLevel : f32;
+var cloudTexSampler : sampler;
+var cloudTex : texture_2d<f32>;
+var specularTexSampler : sampler;
+var specularTex : texture_2d<f32>;
+uniform uHasCloud : f32;
+uniform uAtmosphere : f32;
 
 const ELEV_STEP : f32 = ${ELEV_SAMPLE_STEP.toFixed(8)};
 const LON_OFFSET : f32 = ${UV_LONGITUDE_OFFSET.toFixed(4)};
 const TERM_SOFTEN : f32 = ${TERMINATOR_SOFTEN.toFixed(5)};
 const PI : f32 = 3.14159265;
+const RAYLEIGH_TAU : vec3<f32> = vec3<f32>(${RAYLEIGH_TAU_RGB.map((v) => v.toFixed(5)).join(", ")});
+const AEROSOL_TAU : f32 = ${AEROSOL_TAU.toFixed(4)};
+const OCEAN_SIGMA2 : f32 = ${OCEAN_SIGMA2.toFixed(6)};
+const OCEAN_F0 : f32 = ${OCEAN_F0.toFixed(6)};
+const CLOUD_L : f32 = ${CLOUD_LUNAR_L.toFixed(3)};
 
 @fragment
 fn main(input : FragmentInputs) -> FragmentOutputs {
@@ -436,7 +735,25 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
 
   let dHdu : f32 = (hR - hL) * uniforms.uElevScale * uniforms.uHasHeight;
   let dHdv : f32 = (hU - hD) * uniforms.uElevScale * uniforms.uHasHeight;
-  let perturbed : vec3<f32> = normalize(N - east * dHdu + north * dHdv);
+  var perturbed : vec3<f32> = normalize(N - east * dHdu + north * dHdv);
+
+  // PF-10 C4 CLOSEOUT — line-for-line twin of the GLSL pre-baked-relief block above.
+  let nrm : vec3<f32> =
+    textureSample(normalTex, normalTexSampler, tUV).rgb * 2.0 - 1.0;
+  let nrmWorld : vec3<f32> =
+    normalize(east * nrm.x + north * nrm.y + N * max(nrm.z, 0.05));
+  perturbed = normalize(mix(perturbed, nrmWorld, uniforms.uHasNormal));
+
+  // PF-10 C4.2 — line-for-line twin of the GLSL detail block above.
+  let rectSize : vec2<f32> = uniforms.uDetailRect.zw - uniforms.uDetailRect.xy;
+  let dUV : vec2<f32> = (tUV - uniforms.uDetailRect.xy) / max(rectSize, vec2<f32>(1e-6, 1e-6));
+  let detail : vec3<f32> =
+    textureSample(detailTex, detailTexSampler, clamp(dUV, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0))).rgb * 2.0 - 1.0;
+  let edge : vec2<f32> = min(dUV, vec2<f32>(1.0, 1.0) - dUV);
+  let inside : f32 = smoothstep(0.0, 0.04, min(edge.x, edge.y)) * uniforms.uHasDetail;
+  let detailWorld : vec3<f32> =
+    normalize(east * detail.x + north * detail.y + perturbed * max(detail.z, 0.05));
+  perturbed = normalize(mix(perturbed, detailWorld, inside));
 
   // LUNAR-LAMBERT reflectance — line-for-line twin of the GLSL above. See that comment for why
   // plain Lambert is broken physics on an airless body.
@@ -448,8 +765,41 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
 
   let dayside : f32 = smoothstep(-TERM_SOFTEN, TERM_SOFTEN,
     dot(normalize(fragmentInputs.vNormal), normalize(uniforms.uSunDir)));
-  let lit : vec3<f32> = surface * uniforms.uAlbedo * (refl * dayside * 3.6 + 0.06);
-  fragmentOutputs.color = vec4<f32>(lit, 1.0);
+  var lit : vec3<f32> = surface * uniforms.uAlbedo * (refl * dayside * 3.6 + 0.06);
+
+  // ---- EARTH (PF-10 C4 closeout) — line-for-line twin of the GLSL block above. See there for
+  // why each term exists; the physics comments are not duplicated, only the code.
+  let oceanMask : f32 = textureSample(specularTex, specularTexSampler, tUV).r;
+  let Hv : vec3<f32> = normalize(normalize(uniforms.uSunDir) + viewDir);
+  let cosTh : f32 = max(dot(perturbed, Hv), 1e-4);
+  let cos2Th : f32 = cosTh * cosTh;
+  let tan2 : f32 = (1.0 - cos2Th) / cos2Th;
+  let slopeP : f32 =
+    exp(-tan2 / OCEAN_SIGMA2) / (PI * OCEAN_SIGMA2 * cos2Th * cos2Th);
+  let cosI : f32 = max(dot(Hv, viewDir), 0.0);
+  let fres : f32 = OCEAN_F0 + (1.0 - OCEAN_F0) * pow(1.0 - cosI, 5.0);
+  let glint : f32 = oceanMask * fres * slopeP / (4.0 * max(mu0 * mu, 0.02));
+  lit = lit + vec3<f32>(glint * PI) * mu0 * 3.6 * dayside;
+
+  let cosT : f32 = dot(-normalize(uniforms.uSunDir), viewDir);
+  let phaseR : f32 = 0.75 * (1.0 + cosT * cosT);
+  let airDenom : f32 = 4.0 * max(mu * mu0, 0.05);
+  let air : vec3<f32> =
+    (RAYLEIGH_TAU * phaseR + vec3<f32>(AEROSOL_TAU * 0.3)) / airDenom;
+  lit = lit + air * uniforms.uAtmosphere * mu0 * 3.6 * dayside;
+
+  let cloudA : f32 =
+    textureSample(cloudTex, cloudTexSampler, tUV).r * uniforms.uHasCloud;
+  let cloudRefl : f32 =
+    2.0 * CLOUD_L * mu0 / max(mu0 + mu, 1e-4) + (1.0 - CLOUD_L) * mu0;
+  let cloudLit : vec3<f32> = vec3<f32>(cloudRefl * dayside * 3.6 + 0.06);
+  lit = mix(lit, cloudLit, cloudA);
+
+  // VENUS FORK — line-for-line twin of the GLSL block above. "flat" is not a reserved WGSL
+  // identifier but IS a WGSL interpolation attribute name, so the variable is named flatLit here
+  // to keep it unambiguous (TR-045's lesson generalized: prefer the unambiguous name).
+  let flatLit : vec3<f32> = surface * uniforms.uFlatTint * uniforms.uFlatLevel;
+  fragmentOutputs.color = vec4<f32>(mix(lit, flatLit, uniforms.uFlatLight), 1.0);
 }`;
 
 /** JS mirror of the shader's tangent-frame construction, so the arithmetic the twins share has an

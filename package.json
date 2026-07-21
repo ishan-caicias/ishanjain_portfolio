@@ -7,8 +7,11 @@
     "node": ">=22.12.0"
   },
   "scripts": {
+    "predev": "npm run assets:sync",
     "dev": "astro dev",
+    "prebuild": "npm run assets:verify",
     "build": "npm run lint && npm run check && astro build",
+    "prepreview": "npm run assets:sync",
     "preview": "astro preview",
     "check": "astro check",
     "lint": "eslint . && prettier --check .",
@@ -21,7 +24,13 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "assets:craft": "node scripts/build-craft-assets.mjs --verify",
+    "assets:planets": "node scripts/build-planet-textures.mjs",
+    "assets:planets:vt": "node scripts/build-planet-vt.mjs",
+    "assets:sync": "node scripts/build-planet-textures.mjs --if-stale && node scripts/build-planet-vt.mjs --if-stale",
+    "assets:verify": "node scripts/build-planet-textures.mjs --verify && node scripts/build-planet-vt.mjs --verify",
+    "assets:cubemap:validate": "node scripts/validate-cubemap-orientation.mjs",
     "budget:check": "node scripts/check-bundle-budgets.mjs",
+    "budget:check:assets": "node scripts/check-bundle-budgets.mjs --assets-only",
     "docs:check": "node scripts/check-docs-drift.mjs",
     "gaia:pipeline": "node scripts/gaia-dataset-pipeline.mjs",
     "gaia:asteroids": "node scripts/gaia-asteroids-pngpack.mjs"

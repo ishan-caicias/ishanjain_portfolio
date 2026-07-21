@@ -103,6 +103,7 @@ import {
   Quaternion,
   Vector2,
   Vector3,
+  Vector4,
 } from "@babylonjs/core/Maths/math.vector";
 import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
@@ -197,8 +198,11 @@ import { REAL_ASTEROIDS } from "../data/asteroids-dr3-physics";
 // PF-10 C4: real planetary spheres. See planet-sphere.ts for why there is exactly one sphere.
 import {
   PLANET_ALBEDO,
+  PLANET_LUNAR_L,
   PLANET_ELEV_SCALE,
+  PLANET_PATCH_DEG,
   rotationAngle,
+  UV_LONGITUDE_OFFSET,
   PLANET_FRAGMENT_GLSL,
   PLANET_FRAGMENT_WGSL,
   PLANET_PHYSICAL,
@@ -210,6 +214,31 @@ import {
   sunDirectionFrom,
   type PlanetManifest,
 } from "./planet-sphere";
+// PF-10 C4.2: virtual-texture streaming for planetary elevation detail.
+import {
+  VT_BODIES,
+  VT_TILE_PX,
+  levelForViewport,
+  patchRect,
+  subCameraUV,
+  type PatchRect,
+} from "./planet-vt";
+import { composeAtlas, rectChanged } from "./planet-vt-stream";
+// PF-10 C4.2: the Venus cloud descent. See venus-descent.ts for Astra's shader-fork mandate.
+import {
+  CLOUD_CONTRAST_SCALE,
+  VENUS_DESCENT_S,
+  cloudAdvection,
+  cloudOpacity,
+  descentAltitudeKm,
+  descentIlluminance,
+  descentTint,
+  flatLightAmount,
+  VENUS_CLOUD_VERTEX_GLSL,
+  VENUS_CLOUD_FRAGMENT_GLSL,
+  VENUS_CLOUD_VERTEX_WGSL,
+  VENUS_CLOUD_FRAGMENT_WGSL,
+} from "./venus-descent";
 import type { StarField } from "./star-field";
 import {
   buildStarBillboards,
@@ -975,6 +1004,13 @@ ShaderStore.ShadersStore["ijPlanetVertexShader"] = PLANET_VERTEX_GLSL;
 ShaderStore.ShadersStore["ijPlanetFragmentShader"] = PLANET_FRAGMENT_GLSL;
 ShaderStore.ShadersStoreWGSL["ijPlanetVertexShader"] = PLANET_VERTEX_WGSL;
 ShaderStore.ShadersStoreWGSL["ijPlanetFragmentShader"] = PLANET_FRAGMENT_WGSL;
+ShaderStore.ShadersStore["ijVenusCloudVertexShader"] = VENUS_CLOUD_VERTEX_GLSL;
+ShaderStore.ShadersStore["ijVenusCloudFragmentShader"] =
+  VENUS_CLOUD_FRAGMENT_GLSL;
+ShaderStore.ShadersStoreWGSL["ijVenusCloudVertexShader"] =
+  VENUS_CLOUD_VERTEX_WGSL;
+ShaderStore.ShadersStoreWGSL["ijVenusCloudFragmentShader"] =
+  VENUS_CLOUD_FRAGMENT_WGSL;
 
 /* Shooting stars (B3): tapered quad per particle, entirely GPU-driven — the
  * vertex shader computes each particle's current head/tail position and fade
@@ -1278,6 +1314,118 @@ class BabylonScene extends HTMLElement {
   private _photoTex?: Texture;
   private _bodyCount = 0;
   private _photoBodyCount = 0;
+  /** PF-10 C4.2: keeps the streamed elevation-detail atlas in step with where the camera is
+   * actually looking.
+   *
+   * Cheap every frame, expensive only when the visible TILE RECT changes — which for a rotating
+   * body is on the order of once per tile-width of rotation, not once per frame. Everything here
+   * is additive: the sphere is already correct before any tile arrives, so a slow or failed
+   * stream costs detail and nothing else. */
+  private _tickPlanetVt(
+    key: string,
+    bodyPos: readonly [number, number, number],
+    spin: number,
+  ) {
+    const vt = VT_BODIES[key];
+    const mat = this._planetMat;
+    if (!vt || !mat) return;
+
+    // Which level this viewport actually needs — the whole reason level 5 is not shipped is that
+    // this function can never ask for it (see planet-vt.ts's measured table).
+    const needed = Math.min(
+      window.innerHeight * (window.devicePixelRatio || 1),
+      4320,
+    );
+    const level = Math.min(
+      vt.maxLevel,
+      levelForViewport(PLANET_PATCH_DEG, needed),
+    );
+    const uv = subCameraUV(this.cam, bodyPos, spin);
+    // The shader samples at tUV = vUV + UV_LONGITUDE_OFFSET, so the rect must be computed in that
+    // same shifted space or the atlas would land half a world away from where it is sampled.
+    const rect = patchRect(
+      [(uv[0] + UV_LONGITUDE_OFFSET) % 1, uv[1]],
+      PLANET_PATCH_DEG,
+      level,
+    );
+    if (!rectChanged(this._planetVtRect, rect)) return;
+    this._planetVtRect = rect;
+
+    const pending = key;
+    void composeAtlas(rect, `/assets/planets/vt/${key}`, VT_TILE_PX)
+      .then((atlas) => {
+        // Guarded on BOTH the body and the rect: an arrival elsewhere, or a rotation past the
+        // next tile boundary, invalidates an atlas that is still composing.
+        if (
+          !atlas ||
+          this._planetBodyId !== pending ||
+          this._planetVtRect !== rect ||
+          !this._planetMat
+        ) {
+          return;
+        }
+        const tex = new Texture(
+          atlas.canvas.toDataURL("image/png"),
+          this._scene,
+        );
+        tex.wrapU = Texture.CLAMP_ADDRESSMODE;
+        tex.wrapV = Texture.CLAMP_ADDRESSMODE;
+        this._planetMat.setTexture("detailTex", tex);
+        this._planetMat.setVector4(
+          "uDetailRect",
+          new Vector4(rect.uv[0], rect.uv[1], rect.uv[2], rect.uv[3]),
+        );
+        this._planetMat.setFloat("uHasDetail", 1);
+        this._planetDetailTex?.dispose();
+        this._planetDetailTex = tex;
+        this._planetVtLoaded = atlas.loaded;
+      })
+      .catch(() => {
+        /* detail is additive; a failure leaves the base surface exactly as it was */
+      });
+  }
+
+  /** PF-10 C4.2: the Venus cloud descent.
+   *
+   * Played as a PARAMETER rather than a camera move, and that is a real constraint rather than a
+   * shortcut: at PLANET_SPHERE_RADIUS = 26 the entire 70 km cloud deck is 0.097 world units
+   * thick, so a literally-scaled descent would translate the camera by a tenth of a unit and put
+   * both shells inside each other's depth precision. Wall-clock progress therefore maps onto REAL
+   * ALTITUDE (venus-descent.ts), and every visual — cloud opacity, illuminant colour,
+   * illuminance, and the lighting fork — keys off that altitude. The altitudes and their ordering
+   * are real; only their mapping to world units is declared.
+   *
+   * Reduced motion holds the descent at its end state rather than animating: you arrive already
+   * below the deck, looking at the surface, which is the informative frame. */
+  private _tickVenusDescent(
+    key: string,
+    bodyPos: readonly [number, number, number],
+    mat: ShaderMaterial,
+  ) {
+    if (key !== "venus" || !this._venusDescentStart) return;
+    const elapsed = (performance.now() - this._venusDescentStart) / 1000;
+    const t = this._reduced ? 1 : Math.min(1, elapsed / VENUS_DESCENT_S);
+    const altKm = descentAltitudeKm(t);
+    this._venusAltitudeKm = altKm;
+
+    // Astra's core mandate: below the deck a RADAR map must not be lit directionally.
+    mat.setFloat("uFlatLight", flatLightAmount(altKm));
+    mat.setFloat("uFlatLevel", descentIlluminance(altKm));
+    const [tr, tg, tb] = descentTint(altKm);
+    mat.setVector3("uFlatTint", this._venusTintScratch.set(tr, tg, tb));
+
+    const cloud = this._venusCloud;
+    const cloudMat = this._venusCloudMat;
+    if (!cloud || !cloudMat) return;
+    const op = cloudOpacity(altKm);
+    cloud.isVisible = op > 0.001;
+    cloud.position.set(bodyPos[0], bodyPos[1], bodyPos[2]);
+    cloudMat.setFloat("uOpacity", op);
+    // Real 100 m/s super-rotation at REAL time 1.0x — on the 1e3 rotation clock this would be
+    // 100 km/s, i.e. 0.033c (Astra).
+    cloud.rotation.y = this._reduced ? 0 : cloudAdvection(elapsed);
+  }
+
   // --- GAP-03: Milky Way band ---
   private _bandMesh?: Mesh;
   private _bandMat?: ShaderMaterial;
@@ -1473,6 +1621,14 @@ class BabylonScene extends HTMLElement {
   /** Which body the sphere is currently dressed as; null when hidden. */
   private _planetBodyId: string | null = null;
   private _planetSurfaceTex?: Texture;
+  /** PF-10 C4 closeout: pre-baked relief for the nine normal-mapped bodies. */
+  private _planetNormalTex?: Texture;
+  /** The neutral-normal (128,128,255) 1x1 bound whenever a body ships no relief — see TR-059. */
+  private _planetFlatNormalTex?: Texture;
+  /** Black 1x1 for the cloud/specular samplers on every body that is not Earth. */
+  private _planetBlackTex?: Texture;
+  private _planetCloudTex?: Texture;
+  private _planetSpecularTex?: Texture;
   private _planetHeightTex?: Texture;
   /** TR-059: a real 1x1 texture bound to BOTH samplers before the mesh can draw. */
   private _planetPlaceholderTex?: RawTexture;
@@ -1482,6 +1638,16 @@ class BabylonScene extends HTMLElement {
   private _planetSurfaceTier: "high" | "ultra" = "high";
   /** Current rotation angle, exposed for E2E. */
   private _planetSpin = 0;
+  /** PF-10 C4.2 streamer state. */
+  private _planetVtRect: PatchRect | null = null;
+  private _planetVtLoaded = 0;
+  private _planetDetailTex?: Texture;
+  /** PF-10 C4.2 Venus descent state. */
+  private _venusCloud?: Mesh;
+  private _venusCloudMat?: ShaderMaterial;
+  private _venusDescentStart = 0;
+  private _venusAltitudeKm = 0;
+  private _venusTintScratch = new Vector3();
   /** Last value pushed to the belt's orbital `uTime`. Exposed in sceneStats so the
    * reduced-motion contract is assertable as BEHAVIOUR (the clock stays 0) rather than only as
    * shader source text — the positions themselves are computed on the GPU and invisible to JS. */
@@ -2034,6 +2200,10 @@ class BabylonScene extends HTMLElement {
           ? this._planetMat.isReady(this._planetMesh)
           : false,
       planetSurfaceTier: this._planetSurfaceTier,
+      venusAltitudeKm: Math.round(this._venusAltitudeKm * 10) / 10,
+      venusCloudVisible: this._venusCloud?.isVisible ?? false,
+      planetVtLevel: this._planetVtRect ? this._planetVtRect.level : -1,
+      planetVtTiles: this._planetVtLoaded,
       planetSpin: Math.round(this._planetSpin * 1000) / 1000,
       planetBodiesAvailable: this._planetManifest
         ? Object.keys(this._planetManifest.bodies).length
@@ -2426,12 +2596,27 @@ class BabylonScene extends HTMLElement {
           "projection",
           "uSunDir",
           "uHasHeight",
+          "uHasNormal",
+          "uHasCloud",
+          "uAtmosphere",
           "uElevScale",
           "uAlbedo",
           "uLunarL",
           "uCamPos",
+          "uDetailRect",
+          "uHasDetail",
+          "uFlatLight",
+          "uFlatTint",
+          "uFlatLevel",
         ],
-        samplers: ["surfaceTex", "heightTex"],
+        samplers: [
+          "surfaceTex",
+          "heightTex",
+          "normalTex",
+          "detailTex",
+          "cloudTex",
+          "specularTex",
+        ],
         shaderLanguage:
           backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
       },
@@ -2451,6 +2636,55 @@ class BabylonScene extends HTMLElement {
     );
     mat.setTexture("surfaceTex", flat);
     mat.setTexture("heightTex", flat);
+    // TR-059 again, and this one is the easiest of the three to forget: the detail sampler is
+    // unbound for the entire life of every body that has no virtual texture at all (10 of 12).
+    mat.setTexture("detailTex", flat);
+
+    // PF-10 C4 CLOSEOUT — the normal sampler needs its OWN placeholder, and it is the one case
+    // in this material where the shared mid-grey would be actively wrong rather than merely
+    // gated. A normal map is decoded as `rgb * 2 - 1`, so (128,128,128) decodes to the ZERO
+    // vector, not to "no change"; the neutral normal is (128,128,255) — straight up. The shader
+    // survives either way (`max(nrm.z, 0.05)` keeps the normalize finite and `uHasNormal` gates
+    // the blend), but binding a placeholder that means what it says is the difference between
+    // code that is correct and code that is accidentally not broken.
+    const flatNormal = RawTexture.CreateRGBATexture(
+      new Uint8Array([128, 128, 255, 255]),
+      1,
+      1,
+      scene,
+      false,
+      false,
+      Texture.NEAREST_SAMPLINGMODE,
+    );
+    mat.setTexture("normalTex", flatNormal);
+    mat.setFloat("uHasNormal", 0);
+    this._planetFlatNormalTex = flatNormal;
+
+    // Earth's two extra maps (PF-10 C4 closeout). BLACK, not the shared mid-grey, and the reason
+    // is the same TR-059 discipline one level of care further on: a mid-grey specular mask would
+    // put half an ocean's worth of Cox-Munk glint on Mars, and a mid-grey cloud map would fog
+    // every airless body in the scene with a 50% white haze. Both are gated to zero anyway
+    // (`uHasCloud`, and `oceanMask` multiplies the glint directly), but a placeholder whose value
+    // would be catastrophic if a gate were ever dropped is a latent defect, not a spare.
+    const black = RawTexture.CreateRGBATexture(
+      new Uint8Array([0, 0, 0, 255]),
+      1,
+      1,
+      scene,
+      false,
+      false,
+      Texture.NEAREST_SAMPLINGMODE,
+    );
+    mat.setTexture("cloudTex", black);
+    mat.setTexture("specularTex", black);
+    mat.setFloat("uHasCloud", 0);
+    mat.setFloat("uAtmosphere", 0);
+    this._planetBlackTex = black;
+    mat.setFloat("uHasDetail", 0);
+    mat.setVector4("uDetailRect", new Vector4(0, 0, 1, 1));
+    mat.setFloat("uFlatLight", 0);
+    mat.setFloat("uFlatLevel", 1);
+    mat.setVector3("uFlatTint", new Vector3(1, 1, 1));
     mat.setFloat("uHasHeight", 0);
     mat.setFloat("uElevScale", 0);
     mat.setFloat("uAlbedo", 0.3);
@@ -2463,6 +2697,52 @@ class BabylonScene extends HTMLElement {
 
     // The manifest is small and drives which bodies are sphere-capable at all; a failure here
     // simply means no body ever goes spherical, and every one keeps its existing billboard.
+    // PF-10 C4.2: the Venus cloud shell — a second, slightly larger sphere carrying the real
+    // cloud map. Built once, hidden unless the descent is running.
+    const cloud = new Mesh("venusCloud", scene);
+    CreateSphereVertexData({
+      diameter: 2 * 1.012,
+      segments: SPHERE_SEGMENTS,
+    }).applyToMesh(cloud, false);
+    cloud.isPickable = false;
+    cloud.isVisible = false;
+    cloud.scaling.setAll(PLANET_SPHERE_RADIUS);
+    this._venusCloud = cloud;
+
+    const cloudMat = new ShaderMaterial(
+      "venusCloud",
+      scene,
+      { vertex: "ijVenusCloud", fragment: "ijVenusCloud" },
+      {
+        attributes: ["position", "uv"],
+        uniforms: [
+          "world",
+          "view",
+          "projection",
+          "uOpacity",
+          "uTint",
+          "uContrast",
+        ],
+        samplers: ["cloudTex"],
+        needAlphaBlending: true,
+        shaderLanguage:
+          backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+      },
+    );
+    // TR-059: bound before the mesh can ever draw, even though it is hidden at boot.
+    cloudMat.setTexture("cloudTex", flat);
+    cloudMat.setFloat("uOpacity", 0);
+    // Measured: the shipped map's contrast is 20.5% against a real 1-3%, because it is a UV map
+    // presented as if it were visible light. Flattened to the real figure (venus-descent.ts).
+    cloudMat.setFloat("uContrast", CLOUD_CONTRAST_SCALE);
+    cloudMat.setVector3("uTint", new Vector3(0.85, 0.69, 0.55));
+    cloudMat.backFaceCulling = false;
+    cloud.material = cloudMat;
+    this._venusCloudMat = cloudMat;
+    const cloudTex = new Texture("/assets/planets/venus-cloud.jpg", scene);
+    cloudTex.wrapU = Texture.WRAP_ADDRESSMODE;
+    cloudMat.setTexture("cloudTex", cloudTex);
+
     void fetch("/assets/planets/manifest.json")
       .then((r) => (r.ok ? r.json() : null))
       .then((m: PlanetManifest | null) => {
@@ -2507,6 +2787,19 @@ class BabylonScene extends HTMLElement {
     if (this._planetBodyId !== key) {
       this._planetBodyId = key;
       this._planetSurfaceTier = "high";
+      // Detail belongs to the previous body; drop it before anything else so a stale atlas can
+      // never be sampled against a new body's UVs.
+      this._planetVtRect = null;
+      this._planetVtLoaded = 0;
+      mat.setFloat("uHasDetail", 0);
+      // PF-10 C4.2: arriving at Venus starts the cloud descent; arriving anywhere else clears it
+      // and restores ordinary lit rendering.
+      this._venusDescentStart = key === "venus" ? performance.now() : 0;
+      if (key !== "venus") {
+        mat.setFloat("uFlatLight", 0);
+        mat.setFloat("uFlatLevel", 1);
+        if (this._venusCloud) this._venusCloud.isVisible = false;
+      }
       const entry = manifest.bodies[key];
       const phys = PLANET_PHYSICAL[key];
 
@@ -2518,7 +2811,13 @@ class BabylonScene extends HTMLElement {
       mat.setFloat("uAlbedo", phys?.albedo ?? PLANET_ALBEDO[key] ?? 0.3);
       // Airless bodies backscatter (Lommel-Seeliger); atmospheres tend toward Lambert. Bodies
       // without a measured coefficient get Mars's 0.55 rather than a hard 0 or 1.
-      mat.setFloat("uLunarL", phys?.lunarLambertL ?? 0.55);
+      // PLANET_LUNAR_L overrides the default for bodies with no PLANET_PHYSICAL entry — Earth
+      // takes 0 (pure Lambert), because Lommel-Seeliger models shadow hiding in regolith and
+      // there is no regolith on an ocean (Astra, Earth brief §1.2).
+      mat.setFloat(
+        "uLunarL",
+        phys?.lunarLambertL ?? PLANET_LUNAR_L[key] ?? 0.55,
+      );
       // Elevation only applies where the body genuinely ships a height map.
       mat.setFloat("uHasHeight", entry.height ? 1 : 0);
       mat.setFloat("uElevScale", entry.height ? PLANET_ELEV_SCALE : 0);
@@ -2574,6 +2873,60 @@ class BabylonScene extends HTMLElement {
         // would silently paint Mars's canyons onto a body that has none.
         mat.setTexture("heightTex", this._planetPlaceholderTex);
       }
+
+      // PF-10 C4 CLOSEOUT: pre-baked relief for the nine bodies whose pack data is a normal map.
+      // Mutually exclusive with `height` across the whole pack, so the two uniforms can never
+      // both be 1 — asserted by tests/unit/planet-asset-pipeline.test.ts rather than assumed.
+      mat.setFloat("uHasNormal", entry.normal ? 1 : 0);
+      if (entry.normal) {
+        // `ultra` where the source justified one, else `high` — the same resolution argument the
+        // surface tier rests on applies unchanged to its relief.
+        const normal = new Texture(
+          `/assets/planets/${entry.normal.ultra ?? entry.normal.high}`,
+          this._scene,
+        );
+        normal.wrapU = Texture.WRAP_ADDRESSMODE;
+        mat.setTexture("normalTex", normal);
+        this._planetNormalTex?.dispose();
+        this._planetNormalTex = normal;
+      } else if (this._planetFlatNormalTex) {
+        // Same discipline as the height path above: never left bound to the PREVIOUS body's
+        // relief, which would carve Europa's ridges into a body that has none.
+        mat.setTexture("normalTex", this._planetFlatNormalTex);
+      }
+
+      // Earth's cloud deck and ocean mask (PF-10 C4 closeout). `uAtmosphere` gates the Rayleigh
+      // term, which is keyed on the cloud map's presence only because Earth is currently the one
+      // body in the pack with either — when a second atmosphere-bearing body arrives this wants
+      // its own real per-body flag rather than this proxy.
+      mat.setFloat("uHasCloud", entry.cloud ? 1 : 0);
+      mat.setFloat("uAtmosphere", entry.cloud ? 1 : 0);
+      if (entry.cloud) {
+        const cloud = new Texture(
+          `/assets/planets/${entry.cloud.ultra ?? entry.cloud.high}`,
+          this._scene,
+        );
+        cloud.wrapU = Texture.WRAP_ADDRESSMODE;
+        mat.setTexture("cloudTex", cloud);
+        this._planetCloudTex?.dispose();
+        this._planetCloudTex = cloud;
+      } else if (this._planetBlackTex) {
+        mat.setTexture("cloudTex", this._planetBlackTex);
+      }
+      if (entry.specular) {
+        const spec = new Texture(
+          `/assets/planets/${entry.specular.ultra ?? entry.specular.high}`,
+          this._scene,
+        );
+        spec.wrapU = Texture.WRAP_ADDRESSMODE;
+        mat.setTexture("specularTex", spec);
+        this._planetSpecularTex?.dispose();
+        this._planetSpecularTex = spec;
+      } else if (this._planetBlackTex) {
+        // Leaving the previous body's ocean mask bound would scatter Cox-Munk sunglint across
+        // whatever body came next — the glint is multiplied by this mask, not by a body flag.
+        mat.setTexture("specularTex", this._planetBlackTex);
+      }
     }
     // The Lommel-Seeliger term needs the real emission angle, so the camera moves this uniform
     // every frame rather than only on arrival.
@@ -2591,6 +2944,8 @@ class BabylonScene extends HTMLElement {
     );
     this._planetSpin = mesh.rotation.y;
     mesh.isVisible = true;
+    this._tickPlanetVt(key, body.pos, mesh.rotation.y);
+    this._tickVenusDescent(key, body.pos, mat);
   }
 
   // --- GAP-03: Milky Way band ---

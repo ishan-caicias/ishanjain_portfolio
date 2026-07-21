@@ -14,6 +14,15 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ELEV_SAMPLE_STEP,
+  OCEAN_F0,
+  OCEAN_SIGMA2,
+  PLANET_LUNAR_L,
+  RAYLEIGH_TAU_RGB,
+  ROTATION_PERIOD_S,
+  PLANET_FRAGMENT_GLSL,
+  PLANET_FRAGMENT_WGSL,
+  PLANET_VERTEX_GLSL,
+  PLANET_VERTEX_WGSL,
   PLANET_ALBEDO,
   PLANET_ELEV_SCALE,
   PLANET_PHYSICAL,
@@ -172,6 +181,129 @@ describe("shader twins (CLAUDE.md non-negotiable #4)", () => {
     expect(src).not.toMatch(/if\s*\([^)]*uHasHeight[^)]*\)\s*\{/);
     expect(src).toContain("* uElevScale * uHasHeight");
     expect(src).toContain("* uniforms.uElevScale * uniforms.uHasHeight");
+  });
+
+  it("ships the pre-baked relief path in BOTH twins (PF-10 C4 closeout)", () => {
+    // Nine bodies carry a NORMAL map rather than a height map. The twins must agree on the
+    // decode, the tangent-frame rotation and the gate, or the nine bodies look right on one
+    // backend and wrong on the other — with no compiler to notice.
+    expect(src).toContain(
+      "vec3 nrm = texture2D(normalTex, tUV).rgb * 2.0 - 1.0;",
+    );
+    expect(src).toContain(
+      "textureSample(normalTex, normalTexSampler, tUV).rgb * 2.0 - 1.0;",
+    );
+    expect(src).toContain(
+      "vec3 nrmWorld = normalize(east * nrm.x + north * nrm.y + N * max(nrm.z, 0.05));",
+    );
+    expect(src).toContain(
+      "normalize(east * nrm.x + north * nrm.y + N * max(nrm.z, 0.05));",
+    );
+    expect(src).toContain("mix(perturbed, nrmWorld, uHasNormal)");
+    expect(src).toContain("mix(perturbed, nrmWorld, uniforms.uHasNormal)");
+  });
+
+  it("takes the normal sample UNCONDITIONALLY too (TR-047)", () => {
+    // Same rule as the height samples: a branch around textureSample is rejected on WebGPU and
+    // accepted on WebGL2. The gate is the mix() factor, never an `if`.
+    expect(src).not.toMatch(/if\s*\([^)]*uHasNormal[^)]*\)\s*\{/);
+  });
+
+  it("declares normalTex in both twins", () => {
+    expect(src).toContain("uniform sampler2D normalTex;");
+    expect(src).toContain("var normalTex : texture_2d<f32>;");
+    expect(src).toContain("var normalTexSampler : sampler;");
+  });
+
+  it("ships all three Earth terms in BOTH twins", () => {
+    // Ocean glint (Cox-Munk), Rayleigh+aerosol, and the cloud composite. Each has a named
+    // mechanism and each is mandatory per Astra's brief — omitting the Rayleigh term in
+    // particular is BROKEN PHYSICS, not a simplification, because 74-87% of Earth's ocean colour
+    // from space is scattered air.
+    for (const frag of [PLANET_FRAGMENT_GLSL, PLANET_FRAGMENT_WGSL]) {
+      expect(frag).toContain("OCEAN_SIGMA2");
+      expect(frag).toContain("OCEAN_F0");
+      expect(frag).toContain("RAYLEIGH_TAU");
+      expect(frag).toContain("AEROSOL_TAU");
+      expect(frag).toContain("CLOUD_L");
+      // The divergence guards Astra called out explicitly — the single-scattering forms blow up
+      // at the terminator, where they are invalid anyway.
+      expect(frag).toContain("max(mu0 * mu, 0.02)");
+      expect(frag).toContain("max(mu * mu0, 0.05)");
+    }
+  });
+
+  it("keeps the glint tied to the real mirror condition, never an always-on sheen", () => {
+    // Astra's broken-physics #10: a rim-lit shiny ocean is a familiar, attractive game-art look
+    // and is decoration wearing physics' clothes. The glint must derive from H = normalize(L + V).
+    expect(src).toContain("vec3 Hv = normalize(normalize(uSunDir) + viewDir);");
+    expect(src).toContain(
+      "let Hv : vec3<f32> = normalize(normalize(uniforms.uSunDir) + viewDir);",
+    );
+  });
+
+  it("bakes Astra's real Earth constants, not round numbers", () => {
+    // Every one of these is a cited measurement; a "tidied" value is a silent physics change.
+    expect(RAYLEIGH_TAU_RGB).toEqual([0.0491, 0.0973, 0.2211]); // Bodhaine 1999, lambda^-4.09
+    expect(OCEAN_SIGMA2).toBeCloseTo(0.003 + 0.00512 * 7.0, 5); // Cox-Munk at 7.0 m/s
+    expect(OCEAN_F0).toBeCloseTo(((1.339 - 1) / (1.339 + 1)) ** 2, 5); // seawater n=1.339
+    // Blue must scatter hardest — the entire reason Earth's ocean reads blue from orbit.
+    expect(RAYLEIGH_TAU_RGB[2]).toBeGreaterThan(RAYLEIGH_TAU_RGB[0] * 4);
+  });
+
+  it("gives Earth the CLEAR-SKY albedo, not its famous composite geometric albedo", () => {
+    // Astra's broken-physics #6, and the subtlest one: 0.434 is the correct, citable NASA
+    // geometric albedo — and it is the right number in the wrong place, because it already
+    // includes the clouds this renderer draws as a second layer. Using it double-counts them.
+    expect(PLANET_ALBEDO.earth).toBeCloseTo(0.213, 3);
+    expect(PLANET_ALBEDO.earth).not.toBeCloseTo(0.434, 2);
+    // Pure Lambert: Lommel-Seeliger models shadow hiding in regolith, and an ocean has none.
+    expect(PLANET_LUNAR_L.earth).toBe(0);
+  });
+
+  it("keeps the icy satellites' real albedos above 1 rather than clamping them", () => {
+    // These exceed 1 because the inner Saturnian moons genuinely beat a Lambertian disc at zero
+    // phase (E-ring resurfacing + coherent-backscatter opposition surge). Clamping would flatten
+    // the most distinctive true fact about them: they are conspicuously brighter than the Moon
+    // sitting beside them in the same scene.
+    expect(PLANET_ALBEDO.tethys).toBeGreaterThan(1);
+    expect(PLANET_ALBEDO.dione).toBeCloseTo(0.998, 3);
+    expect(PLANET_ALBEDO.rhea).toBeCloseTo(0.949, 3);
+    // Airless regolith, exactly like the Moon and Mercury. The 0.55 fallback they would
+    // otherwise get is MARS's coefficient, and Mars has an atmosphere — Astra calls that
+    // broken physics rather than imprecision.
+    for (const id of ["dione", "rhea", "tethys"])
+      expect(PLANET_LUNAR_L[id], id).toBe(1.0);
+  });
+
+  it("keeps each tidally-locked period consistent with the days it cites", () => {
+    // REGRESSION: dione was first entered as 236429 s against the 2.736915 d its own comment
+    // cited — a 40.5 s slip. Caught by checking a number against its stated source rather than
+    // against a second source, which is the cheaper habit and the one that found it.
+    const DAY = 86400;
+    for (const [id, days] of [
+      ["dione", 2.736915],
+      ["rhea", 4.518212],
+      ["tethys", 1.887802],
+    ] as const)
+      expect(ROTATION_PERIOD_S[id], id).toBeCloseTo(days * DAY, 0);
+    // Earth is sidereal, not the 86400 s solar day — a 0.273% difference that is deliberate.
+    expect(ROTATION_PERIOD_S.earth).toBeCloseTo(86164.0905, 3);
+    expect(ROTATION_PERIOD_S.earth).not.toBe(86400);
+  });
+
+  it("uses no BACKTICK inside either shader source (TR-078 Part 5's trap)", () => {
+    // The shader twins are template literals. A backtick in a comment inside them terminates the
+    // literal and turns the rest of the shader into TypeScript — which is exactly what happened
+    // while writing the block above, caught by typecheck. Prose in these strings must use plain
+    // words, not code quoting.
+    for (const [name, shader] of [
+      ["GLSL vertex", PLANET_VERTEX_GLSL],
+      ["GLSL fragment", PLANET_FRAGMENT_GLSL],
+      ["WGSL vertex", PLANET_VERTEX_WGSL],
+      ["WGSL fragment", PLANET_FRAGMENT_WGSL],
+    ] as const)
+      expect(shader.includes("`"), `${name} contains a backtick`).toBe(false);
   });
 
   it("ships the Lunar-Lambert reflectance in BOTH twins", () => {

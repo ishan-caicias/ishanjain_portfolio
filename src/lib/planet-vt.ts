@@ -169,6 +169,69 @@ export function tilesForPatch(
   return out;
 }
 
+/** The visible tile set as a RECTANGLE, which is what makes the streamer simple enough to build
+ * correctly rather than partially.
+ *
+ * TR-077 stopped short of a runtime streamer on the reasoning that multi-tile virtual texturing
+ * needs a tile atlas plus an indirection lookup. Measuring the actual working set retired half of
+ * that: because the camera's visible patch is a single contiguous region of the sphere, the tiles
+ * covering it always form a contiguous rectangle in the grid — worst case **3x3 at level 3 and
+ * 4x4 at level 4**, checked across 400 sub-camera positions. A contiguous rectangle needs no
+ * indirection table at all: compose those tiles into ONE texture and hand the shader the UV rect
+ * it occupies, and the lookup is a single subtract-and-divide.
+ *
+ * Returns the tile rect, the UV rect it covers, and the composed atlas dimensions. */
+export interface PatchRect {
+  level: number;
+  /** Leftmost tile column (may be negative or past `cols` — callers wrap via `tileAt`). */
+  col0: number;
+  row0: number;
+  /** Tile counts, so the atlas is (cols x VT_TILE_PX) by (rows x VT_TILE_PX). */
+  cols: number;
+  rows: number;
+  /** UV rect the composed atlas covers: [u0, v0, u1, v1]. u1 may exceed 1 across the seam. */
+  uv: [number, number, number, number];
+  /** Tiles in row-major order — the order they must be drawn into the atlas. */
+  tiles: VtTile[];
+}
+
+export function patchRect(
+  uv: readonly [number, number],
+  patchDegrees: number,
+  level: number,
+): PatchRect {
+  const grid = tileGrid(level);
+  const halfU = patchDegrees / 2 / 360;
+  const halfV = patchDegrees / 2 / 180;
+  const col0 = Math.floor((uv[0] - halfU) * grid.cols);
+  const col1 = Math.floor((uv[0] + halfU) * grid.cols);
+  const row0 = Math.max(0, Math.floor((uv[1] - halfV) * grid.rows));
+  const row1 = Math.min(grid.rows - 1, Math.floor((uv[1] + halfV) * grid.rows));
+  const cols = col1 - col0 + 1;
+  const rows = row1 - row0 + 1;
+
+  const tiles: VtTile[] = [];
+  for (let r = row0; r <= row1; r++) {
+    for (let c = col0; c <= col1; c++) tiles.push(tileAt(level, c, r));
+  }
+  return {
+    level,
+    col0,
+    row0,
+    cols,
+    rows,
+    // Deliberately NOT wrapped into [0,1): the rect must stay monotonic for the shader's
+    // subtract-and-divide to work across the antimeridian. The shader wraps the sample instead.
+    uv: [
+      col0 / grid.cols,
+      row0 / grid.rows,
+      (col1 + 1) / grid.cols,
+      (row1 + 1) / grid.rows,
+    ],
+    tiles,
+  };
+}
+
 /** Bodies with a real elevation virtual texture in the local packs, and the deepest level each
  * actually ships. Mars's pack has 6 levels (0–5) and the Moon's 5 (0–4); both are capped at
  * VT_MAX_LEVEL for the reason in the header, which happens to be the Moon's natural maximum. */

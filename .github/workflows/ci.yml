@@ -25,6 +25,19 @@ jobs:
       # job, so the branch-protection ruleset's required status-check names
       # stay valid (TR-034).
       - run: npm run docs:check
+      # PF-10 C4: generated-asset integrity gate. `resources/` is gitignored, so CI can
+      # NEVER regenerate these assets — the committed bytes under public/assets are the
+      # deliverable. This asserts the committed bytes still match what the pipelines say
+      # they produce (every declared body/tier/map present, manifests consistent, no
+      # orphans), which is the only half of reproducibility CI can actually check.
+      # Source-free and fast, so it lives as a STEP in this existing job rather than a new
+      # one — keeping the branch-protection ruleset's required status-check names valid
+      # (TR-034), the same reason docs:check was added here.
+      - run: npm run assets:verify
+      # Asset weight, gated for the first time (PF-10 C4). public/assets grew to 209 MB
+      # across PF-10 with nothing watching it. Runs here rather than in the build job
+      # because it reads public/ directly and needs no dist/.
+      - run: npm run budget:check:assets
 
   typecheck:
     name: Type Check
