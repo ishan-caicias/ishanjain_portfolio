@@ -14,9 +14,20 @@
  * Benchmarked at ~250-400ms for the full 1024x512 grid on this machine — a
  * single synchronous call would stall multiple frames past budget (16.6ms
  * desktop). `buildMilkyWayRow` is therefore a PURE, single-row function so
- * the caller can chunk the build across frames (exactly the legacy engine's
- * own `setTimeout(step, 0)` 20-rows-per-tick technique, just driven from
- * Babylon's render loop instead of a raw timer).
+ * the caller can slice the build.
+ *
+ * PF-11 D0.1 (2026-07-22): the pacing is now TIME-budgeted, not row-counted,
+ * and — more importantly — no longer coupled to frame delivery. The original
+ * port built a fixed 20 rows per RENDERED frame (~26 frames), so total build
+ * wall-time scaled with 1/fps: on a loaded SwiftShader CI run at ~1 fps that
+ * is ~26 seconds, which is exactly the "bandReady never true" E2E failure
+ * class TR-080 root-caused. `MilkyWayBandBuilder` below owns the row cursor,
+ * spends a millisecond budget per slice, and paces itself against a wall-clock
+ * DEADLINE so a slow driver gets bigger slices instead of a longer build. The
+ * engine drives it from the render loop (preserving TR-059's
+ * frames-keep-producing contract) and from a `setTimeout(0)` chain between
+ * frames — the latter matters when rAF is suspended, but measurement showed
+ * it cannot carry the build on its own (see the class's header).
  *
  * GAP-06 (2026-07-20): Doppler colour tint IS now ported — see the fragment
  * shader below. The POSITIONAL half (relativistic aberration crowding the
@@ -36,8 +47,25 @@ const TAU = Math.PI * 2;
 
 export const MILKY_WAY_WIDTH = 1024;
 export const MILKY_WAY_HEIGHT = 512;
-/** Rows built per chunk — matches space-engine.js's own pacing exactly. */
-export const MILKY_WAY_ROWS_PER_CHUNK = 20;
+/** Wall-clock budget one build slice may spend on rows (PF-11 D0.1). Chosen
+ * against the 16.6ms desktop frame budget: a slice runs inside a render-loop
+ * tick, so it must leave room for the rest of the frame — 6ms is ~4 rows on
+ * the benchmarked ~250-400ms/512-row machine, and the whole grid finishes in
+ * ~60 slices. Replaces the former fixed `MILKY_WAY_ROWS_PER_CHUNK = 20`,
+ * whose real cost varied with row content and machine speed. */
+export const MILKY_WAY_BUILD_MS_PER_SLICE = 6;
+/** Wall-clock deadline for the WHOLE grid (PF-11 D0.1). A slow driver makes
+ * slices bigger rather than making the build take longer — this is the knob
+ * that stops total build time scaling with 1/fps. Set to 8s: comfortably
+ * above the ~1s a healthy machine needs at `MILKY_WAY_BUILD_MS_PER_SLICE`
+ * (so it never binds there and never costs a frame it didn't have to), and
+ * far below the 65s a saturated SwiftShader run measured without it. */
+export const MILKY_WAY_BUILD_DEADLINE_MS = 8000;
+/** Hard ceiling on a single slice. The deadline is best-effort UNDER this
+ * cap: a driver so slow that the deadline would demand a longer slice gets a
+ * later band, not a stalled frame — TR-059's frames-keep-producing contract
+ * outranks the deadline. */
+export const MILKY_WAY_BUILD_MAX_SLICE_MS = 50;
 
 // North Galactic Pole + ascending node (J2000), matching space-engine.js's
 // constants exactly so both engines agree on which patch of sky is "the
@@ -142,8 +170,8 @@ export function milkyWayPixel(l: number, b: number): [number, number, number] {
 /** Fills ONE row of an equirectangular RGBA buffer (ra across x, dec down y —
  * row 0 is the north celestial pole), matching space-engine.js's raster
  * order exactly. `out` must be at least `(row+1) * width * 4` bytes; callers
- * chunk this across `MILKY_WAY_ROWS_PER_CHUNK`-row groups to stay inside the
- * frame budget (see this file's header). */
+ * slice this under a time budget to stay inside the frame budget — see
+ * `MilkyWayBandBuilder` and this file's header. */
 export function buildMilkyWayRow(
   out: Uint8Array,
   row: number,
@@ -161,6 +189,123 @@ export function buildMilkyWayRow(
     out[o + 1] = g;
     out[o + 2] = bch;
     out[o + 3] = 255;
+  }
+}
+
+/** PF-11 D0.1 — the band texture's row cursor + RGBA buffer, sliced by TIME
+ * and paced against a WALL-CLOCK DEADLINE, deliberately independent of any
+ * particular driver (render loop, timer, or a unit test's fake clock).
+ *
+ * Two properties are what this class exists for:
+ *
+ * 1. **Frames keep producing** (TR-059's contract, non-negotiable #9's
+ *    neighbourhood): a slice normally stops at `budgetMs`, so the build never
+ *    swallows a frame the way one synchronous 250-400ms grid build would.
+ * 2. **Total build wall-time does not scale with 1/fps** (D0.1's exit
+ *    criterion). Each slice measures how long it has been since the previous
+ *    slice and how many rows are still owed before `deadlineMs`, and builds
+ *    at least that many — so on a machine delivering 2 fps the slices simply
+ *    get bigger instead of the build taking 26 seconds. On a healthy machine
+ *    the deadline never binds: `budgetMs` finishes the grid in ~1s and the
+ *    required-rows term stays at 1.
+ *
+ * MEASURED, not assumed (the reason the pacing is deadline-driven at all):
+ * the original D0.1 design was time-budgeted slices driven by the render loop
+ * PLUS a `setTimeout(0)` chain between frames. Probing the built preview
+ * under Playwright's chromium/SwiftShader showed the page main thread is
+ * saturated by the render loop — a self-rescheduling `setTimeout(0)` chain
+ * got **10 callbacks in 5 seconds** (~1 per rendered frame) — so timers alone
+ * cannot decouple anything here. The chain is still driven (it is the ONLY
+ * driver when rAF is suspended, e.g. a backgrounded tab, and it adds ~50%
+ * more slices under load) but the deadline is what carries the guarantee.
+ *
+ * `now` is injectable so tests can simulate arbitrarily slow slices without
+ * burning real milliseconds. */
+export class MilkyWayBandBuilder {
+  /** The equirect RGBA buffer being filled; valid to upload once `done`. */
+  readonly buf: Uint8Array;
+  readonly width: number;
+  readonly height: number;
+  private _row = 0;
+  private _startedAt: number | undefined;
+  private _lastSliceAt: number | undefined;
+  private readonly _budgetMs: number;
+  private readonly _deadlineMs: number;
+  private readonly _maxSliceMs: number;
+  private readonly _now: () => number;
+
+  constructor(
+    opts: {
+      budgetMs?: number;
+      deadlineMs?: number;
+      maxSliceMs?: number;
+      now?: () => number;
+      width?: number;
+      height?: number;
+    } = {},
+  ) {
+    this.width = opts.width ?? MILKY_WAY_WIDTH;
+    this.height = opts.height ?? MILKY_WAY_HEIGHT;
+    this.buf = new Uint8Array(this.width * this.height * 4);
+    this._budgetMs = opts.budgetMs ?? MILKY_WAY_BUILD_MS_PER_SLICE;
+    this._deadlineMs = opts.deadlineMs ?? MILKY_WAY_BUILD_DEADLINE_MS;
+    this._maxSliceMs = opts.maxSliceMs ?? MILKY_WAY_BUILD_MAX_SLICE_MS;
+    this._now = opts.now ?? (() => performance.now());
+  }
+
+  /** Next row to build — equals `height` once complete. */
+  get row(): number {
+    return this._row;
+  }
+
+  get done(): boolean {
+    return this._row >= this.height;
+  }
+
+  /** Fraction of rows built, 0..1 — the honest progress signal D1.1 will read. */
+  get progress(): number {
+    return this._row / this.height;
+  }
+
+  /** Builds one slice: at least the rows the deadline still owes at the
+   * observed slice cadence, and then as many more as `budgetMs` allows —
+   * capped at `maxSliceMs` so a pathologically slow driver degrades the
+   * deadline rather than a frame. ALWAYS builds at least one row, so forward
+   * progress is guaranteed even when a single row costs more than the whole
+   * budget. Returns `done`.
+   *
+   * `paced: false` drops back to the plain `budgetMs` slice for this call —
+   * the caller is doing something the visitor is watching (an in-flight warp)
+   * and the band, which fades in over seconds anyway, must not bid for that
+   * frame time. Cadence is still recorded, so pacing resumes correctly. */
+  buildSlice(paced = true): boolean {
+    const t0 = this._now();
+    if (this._startedAt === undefined) this._startedAt = t0;
+    // How long since the last slice ran — the cadence this build is actually
+    // being driven at, whatever the fps happens to be.
+    const sinceLast =
+      this._lastSliceAt === undefined ? 0 : Math.max(0, t0 - this._lastSliceAt);
+    this._lastSliceAt = t0;
+    const rowsLeft = this.height - this._row;
+    const msLeft = Math.max(1, this._deadlineMs - (t0 - this._startedAt));
+    // Rows this slice must cover to still land the whole grid by the deadline
+    // if the next slice arrives after the same gap as the last one.
+    const required = paced
+      ? Math.min(
+          rowsLeft,
+          Math.max(1, Math.ceil((rowsLeft / msLeft) * sinceLast)),
+        )
+      : 1;
+    let built = 0;
+    while (this._row < this.height) {
+      buildMilkyWayRow(this.buf, this._row, this.width, this.height);
+      this._row++;
+      built++;
+      const spent = this._now() - t0;
+      if (spent >= this._maxSliceMs) break;
+      if (spent >= this._budgetMs && built >= required) break;
+    }
+    return this.done;
   }
 }
 
@@ -262,4 +407,136 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
     col = col * clamp(dop * dop, 0.3, 2.0);
   }
   fragmentOutputs.color = vec4<f32>(col * uniforms.uFade, 1.0);
+}`;
+
+/* ---------- PF-11 D2.2: the external-galaxy impostor -----------------------
+ *
+ * At an extragalactic arrival the 360° band collapses (D2.2) and, toward home,
+ * the whole Milky Way appears as ONE small external galaxy — Astra §1's
+ * "emotional payoff of the whole dataset investment": the band you flew under
+ * all session shrinks into an object. Astra §1/§5: a 30-kpc disc subtends
+ * ~10.3' from 32.6 Mly, the apparent size M101 has in our sky (a faint smudge).
+ *
+ * The impostor's TEXTURE is a PROCEDURAL inclined disc, deliberately NOT the
+ * deferred photographic Milky-Way skybox pack: the Risinger panorama is
+ * credited in docs/research without a printed license string, so per the
+ * licensing tripwire it cannot ship until that verifies. This procedural disc
+ * — a bulge + exponential disc seen ~20° from edge-on, with an alpha that falls
+ * to zero at the rim so the sprite reads as a galaxy and not a quad — is
+ * license-clean (our own math) and declared SIMPLIFIED in the ledger: it
+ * reproduces the appearance of a distant spiral without a photometric model.
+ */
+
+/** Impostor texture edge (px). Small: the sprite is only a few dozen px on
+ * screen at its honest angular size, so a 256² disc is ample. */
+export const MILKY_WAY_IMPOSTOR_SIZE = 256;
+/** Minor/major axis ratio of the inclined disc (~1:3 ≈ 20° from edge-on). */
+const IMPOSTOR_INCLINATION = 0.34;
+
+/** One RGBA pixel (0..255, straight alpha) of the external-galaxy impostor at
+ * normalized disc coordinates (u, v) ∈ [-1, 1]². Pure so it is unit-testable
+ * and identical wherever it runs. Outside the elliptical disc the pixel is
+ * fully transparent (0,0,0,0), so the quad it fills reads as a disc. Shares the
+ * band's warm-toward-the-core palette family (milkyWayPixel's tone curve) so
+ * the impostor and the band are recognisably the same galaxy. */
+export function milkyWayImpostorPixel(
+  u: number,
+  v: number,
+): [number, number, number, number] {
+  // Elliptical radius: compress the minor axis so the disc looks inclined.
+  const rr = Math.hypot(u, v / IMPOSTOR_INCLINATION);
+  if (rr >= 1) return [0, 0, 0, 0];
+  const disc = Math.exp(-rr * 2.6); // exponential surface-brightness profile
+  const bulge = 1.2 * Math.exp(-rr * rr * 26); // bright central bulge
+  const intensity = disc + bulge;
+  const warm = Math.min(1, bulge * 0.9 + Math.exp(-rr * 2.2) * 0.5);
+  const tone = (x: number) =>
+    Math.round(255 * Math.min(1, 1 - Math.exp(-x * 1.6)));
+  // Alpha carries the disc shape: opaque core, feathered to 0 by the rim.
+  const alpha = Math.round(
+    255 * Math.min(1, intensity) * (1 - smoothstepLocal(0.72, 1.0, rr)),
+  );
+  return [
+    tone(intensity * (0.62 + 0.38 * warm)),
+    tone(intensity * (0.66 + 0.24 * warm)),
+    tone(intensity * (0.88 - 0.2 * warm)),
+    alpha,
+  ];
+}
+
+/** Local smoothstep (kept private — milky-way.ts has no other need for one). */
+function smoothstepLocal(a: number, b: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+/** Builds the impostor's RGBA texture buffer (row-major, straight alpha),
+ * `size × size`. Center of the texture is the galaxy core; corners are
+ * transparent. One synchronous call — the buffer is tiny and built once, then
+ * bound as a RawTexture before the mesh ever draws (non-negotiable #9). */
+export function buildMilkyWayImpostor(
+  size: number = MILKY_WAY_IMPOSTOR_SIZE,
+): Uint8Array {
+  const out = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    const v = ((y + 0.5) / size) * 2 - 1;
+    for (let x = 0; x < size; x++) {
+      const u = ((x + 0.5) / size) * 2 - 1;
+      const [r, g, b, a] = milkyWayImpostorPixel(u, v);
+      const o = (y * size + x) * 4;
+      out[o] = r;
+      out[o + 1] = g;
+      out[o + 2] = b;
+      out[o + 3] = a;
+    }
+  }
+  return out;
+}
+
+/* Shader twins for the impostor: a plain textured, camera-facing quad. The
+ * mesh's billboardMode makes the world matrix face the camera; the shader is
+ * just a UV sampler with a straight-alpha blend and a global fade. Mirrors the
+ * band's proven `textureSample(uTex, uTexSampler, ...)` pattern (non-negotiable
+ * #4 — both twins, line-parallel, identifier-identical). */
+export const MILKY_WAY_IMPOSTOR_VERTEX_GLSL = `
+precision highp float;
+attribute vec3 position;
+attribute vec2 uv;
+uniform mat4 worldViewProjection;
+varying vec2 vUV;
+void main(){
+  gl_Position = worldViewProjection * vec4(position, 1.0);
+  vUV = uv;
+}`;
+
+export const MILKY_WAY_IMPOSTOR_FRAGMENT_GLSL = `
+precision mediump float;
+uniform sampler2D uTex;
+uniform float uFade;
+varying vec2 vUV;
+void main(){
+  vec4 c = texture2D(uTex, vUV);
+  gl_FragColor = vec4(c.rgb, c.a * uFade);
+}`;
+
+export const MILKY_WAY_IMPOSTOR_VERTEX_WGSL = `
+attribute position : vec3<f32>;
+attribute uv : vec2<f32>;
+uniform worldViewProjection : mat4x4<f32>;
+varying vUV : vec2<f32>;
+@vertex
+fn main(input : VertexInputs) -> FragmentInputs {
+  vertexOutputs.position = uniforms.worldViewProjection * vec4<f32>(vertexInputs.position, 1.0);
+  vertexOutputs.vUV = vertexInputs.uv;
+}`;
+
+export const MILKY_WAY_IMPOSTOR_FRAGMENT_WGSL = `
+varying vUV : vec2<f32>;
+var uTex : texture_2d<f32>;
+var uTexSampler : sampler;
+uniform uFade : f32;
+@fragment
+fn main(input : FragmentInputs) -> FragmentOutputs {
+  var c : vec4<f32> = textureSample(uTex, uTexSampler, fragmentInputs.vUV);
+  fragmentOutputs.color = vec4<f32>(c.rgb, c.a * uniforms.uFade);
 }`;

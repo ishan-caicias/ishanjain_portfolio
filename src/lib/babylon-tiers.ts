@@ -43,6 +43,16 @@ export interface QualityBudget {
   asteroids: number;
   /** Heat-shimmer refraction post-pass on/off. */
   shimmer: boolean;
+  /** PF-11 D6.3.2 — how far up the planet-surface texture ladder this tier climbs.
+   *
+   * `"base"` finally CONSUMES the 2048-wide tier, which the pipeline has been baking and
+   * shipping since C4 while the engine only ever fetched `high` — 6.58 MB of assets downloaded
+   * by nobody (the delivery plan's B5 item). `"high"` stops at 4096. `"ultra-progressive"` is
+   * the shipped behaviour: `high` lands fast so the body is on screen, then `ultra` swaps in.
+   *
+   * Deliberately a LADDER CEILING rather than a fixed choice, so it composes with D9's Render
+   * Console: a tier is the default preset, never the cap (ADR-0010). */
+  planetTexture: "base" | "high" | "ultra-progressive";
 }
 
 export const QUALITY_BUDGETS: Record<QualityTierName, QualityBudget> = {
@@ -54,6 +64,7 @@ export const QUALITY_BUDGETS: Record<QualityTierName, QualityBudget> = {
     nebulaTexScale: 0.5,
     asteroids: 48,
     shimmer: true,
+    planetTexture: "ultra-progressive",
   },
   balanced: {
     name: "balanced",
@@ -63,6 +74,7 @@ export const QUALITY_BUDGETS: Record<QualityTierName, QualityBudget> = {
     nebulaTexScale: 0.4,
     asteroids: 32,
     shimmer: true,
+    planetTexture: "high",
   },
   lite: {
     name: "lite",
@@ -72,6 +84,7 @@ export const QUALITY_BUDGETS: Record<QualityTierName, QualityBudget> = {
     nebulaTexScale: 1 / 3,
     asteroids: 20,
     shimmer: false,
+    planetTexture: "base",
   },
 };
 

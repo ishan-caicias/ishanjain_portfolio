@@ -3,6 +3,7 @@ import type { CelestialEntry } from "@/data/celestial/celestial.d.ts";
 import type { SpaceEngineElement } from "@/lib/space-engine.d.ts";
 import { entryForFieldStar, fmtDist, rarityColor } from "@/lib/spaceHelpers";
 import { SHORT_BIO } from "@/content/links";
+import { EXTRAGALACTIC_LY } from "@/lib/ship-dynamics";
 import { INITIAL_SCENE_STATE, SECTOR_BODIES, STATIONS } from "./space/types";
 import type {
   CardStyleMode,
@@ -40,6 +41,16 @@ import SectionOverlay from "./space/SectionOverlay";
 import StationSprites from "./space/StationSprites";
 import type { SpriteRefMap } from "./space/StationSprites";
 import type { SpaceEngineBody } from "@/lib/space-engine.d.ts";
+import PreFlight from "./space/PreFlight";
+import AscentSkip from "./space/AscentSkip";
+import type { LoadStage, StageProgress } from "@/lib/load-progress";
+import FunnelOverlay from "./space/FunnelOverlay";
+import {
+  FunnelRecorder,
+  resolveFunnelOverlay,
+  FUNNEL_OVERLAY_STORAGE_KEY,
+  type FunnelSession,
+} from "@/lib/funnel";
 
 interface SpaceSceneProps {
   density?: number;
@@ -61,6 +72,31 @@ function engineEl(): SpaceEngineElement | null {
 
 function catalog(): CelestialEntry[] {
   return window.CELESTIAL || [];
+}
+
+/** Extracted so PF-11 D1.4 can compute an accurate result count for the value a keystroke is
+ * ABOUT to produce, synchronously inside the `onCmdChange` callback — a `useEffect` reacting
+ * to `state.cmd` would sit after this component's `if (!engineReady) return null` early exit
+ * once state settles, which is a Rules-of-Hooks violation (React error #310), not a scope
+ * choice. Kept behaviorally identical to the inline expression it replaces. */
+function computeSuggestions(cmd: string): CommandSuggestion[] {
+  const q = cmd.trim().toLowerCase();
+  if (q.length < 1) return [];
+  return catalog()
+    .filter(
+      (e) =>
+        e.n.toLowerCase().includes(q) ||
+        e.d.toLowerCase().includes(q) ||
+        e.t.toLowerCase().includes(q),
+    )
+    .slice(0, 6)
+    .map((e) => ({
+      id: e.id,
+      name: e.n,
+      type: e.t,
+      dist: fmtDist(e),
+      color: rarityColor(e.r),
+    }));
 }
 
 function entryFor(id: string | null): CelestialEntry | null {
@@ -108,6 +144,53 @@ export default function SpaceScene({
   /** Render backend reported by <babylon-scene> ("webgpu" | "webgl2"); null on
    * the WebGL engine or before Babylon's async init resolves. */
   const [backend, setBackend] = useState<string | null>(null);
+
+  // PF-11 D1.2: the PreFlight dossier's own inputs. Kept OUT of the shared `state`/`patch()`
+  // object deliberately — `stages` updates up to 4 Hz per stage across up to nine stages
+  // (D1.1's throttle), and folding that into the same state object every other component
+  // subscribes to via `patch()` would re-render the whole scene tree on every byte tick.
+  // `preflightBackend` is a second, always-live copy of the render backend (`backend` above
+  // only updates behind `?perf=1`'s interval) so the dossier's "engine line" is real without
+  // depending on the debug overlay being on.
+  const [stages, setStages] = useState<
+    Partial<Record<LoadStage, StageProgress>>
+  >({});
+  const [preflightBackend, setPreflightBackend] = useState<string | null>(null);
+
+  // PF-11 D1.4: first-party funnel instrumentation (`?funnel=1`, UX research plan §3). The
+  // recorder itself always runs (same convention as `window.__ijPerf` below) — only the
+  // VISIBLE overlay is gated, so a visitor who adds the param mid-session still sees the
+  // whole session rather than just the tail.
+  const funnelRef = useRef<FunnelRecorder | null>(null);
+  const [funnelOverlayOn, setFunnelOverlayOn] = useState(false);
+  const [funnelSession, setFunnelSession] = useState<FunnelSession | null>(
+    null,
+  );
+
+  // PF-11 D1.3: the launch cinematic. `launched` dismisses the PreFlight dossier; `revealReady`
+  // clears `body.ij-loading` (revealing the hero copy + console). They are SEPARATE now: on a real
+  // LAUNCH the console reveal WAITS for the ascent to finish (`cosmos:ascent-done`), so the
+  // cinematic plays unobstructed. On a skip/bypass, or an engine with no ascent, they coincide.
+  const [revealReady, setRevealReady] = useState(false);
+  const [ascentActive, setAscentActive] = useState(false);
+
+  const onLaunch = useCallback((ascent: boolean) => {
+    funnelRef.current?.record("launch-pressed");
+    const en = engineEl();
+    if (ascent && en && typeof en.beginAscent === "function") {
+      setAscentActive(true);
+      en.beginAscent(); // reveal deferred to cosmos:ascent-done (fired even under reduced motion)
+    } else {
+      setRevealReady(true); // skip / bypass / no-ascent engine → reveal now
+    }
+  }, []);
+
+  const skipAscent = useCallback(() => {
+    engineEl()?.skipAscent?.();
+    // Defensive: if the engine lacks skipAscent (archived engine), still reveal.
+    setAscentActive(false);
+    setRevealReady(true);
+  }, []);
 
   // Mobile responsive pass (design_handoff_mobile_responsive): auto-resolves nav mode to
   // scroll on mobile / travel on desktop unless the user has explicitly overridden it via
@@ -169,24 +252,18 @@ export default function SpaceScene({
     document.body.classList.toggle("ij-warping", !!state.warp);
   }, [state.warp]);
 
-  // PF-08 F0 (TR-022): landing loading choreography. body.ij-loading (set
-  // server-side) hides the hero copy + WHERE-TO bar; cleared when the star
-  // stream AND the craft are ready. Grace paths: 2.5 s after stars if the
-  // craft never reports (opt-out/no-WebGL), 8 s absolute, instant outside
-  // travel mode (mobile scroll default must never wait).
+  // PF-08 F0 (TR-022) / PF-11 D1.2: landing loading choreography. body.ij-loading (set
+  // server-side) hides the hero copy + WHERE-TO bar; now cleared by a real visitor action
+  // (LAUNCH, SKIP INTRO, or the returning-visitor bypass — all funnel through `onLaunch`
+  // above) rather than an automatic ready&&craftDone check with grace/hard timers. The old
+  // 2.5s craft-grace and 8s hard timer are gone: craft is a background stage that no longer
+  // blocks the reveal (PreFlight arms on `state.ready` alone), and PreFlight's own S1e stall
+  // detector + mandatory skip affordances are the honest replacement for "give up after Nms"
+  // — instant outside travel mode is unchanged (mobile scroll default must never wait). The
+  // 9s CSS failsafe in global.css is untouched and still the absolute last resort.
   useEffect(() => {
-    const clear = () => document.body.classList.remove("ij-loading");
-    if (!isTravel || (state.ready && state.craftDone)) {
-      clear();
-      return;
-    }
-    const grace = state.ready ? setTimeout(clear, 2500) : undefined;
-    const hard = setTimeout(clear, 8000);
-    return () => {
-      clearTimeout(grace);
-      clearTimeout(hard);
-    };
-  }, [isTravel, state.ready, state.craftDone]);
+    if (!isTravel || revealReady) document.body.classList.remove("ij-loading");
+  }, [isTravel, revealReady]);
 
   // PF-08 F0: the WHERE-TO bar docks between the ship and the title while at
   // the home vista (global.css repositions #ij-mission-bar under ij-at-home).
@@ -308,6 +385,56 @@ export default function SpaceScene({
     };
   }, [engineResolved, engineKind]);
 
+  // PF-11 D1.4: create the session recorder + resolve the debug-overlay flag. Two separate
+  // effects (recorder lifecycle vs. URL/stored resolution) so re-resolving the overlay flag
+  // never tears down and recreates the recorder itself.
+  useEffect(() => {
+    if (!engineResolved) return;
+    const recorder = new FunnelRecorder(
+      deviceSignature(readDeviceContext(window)),
+    );
+    funnelRef.current = recorder;
+    const funnelWin = window as unknown as { __ijFunnel?: () => FunnelSession };
+    funnelWin.__ijFunnel = () => recorder.snapshot();
+    const onUnload = () => recorder.persist();
+    window.addEventListener("pagehide", onUnload);
+    return () => {
+      delete funnelWin.__ijFunnel;
+      window.removeEventListener("pagehide", onUnload);
+      recorder.persist();
+      funnelRef.current = null;
+    };
+  }, [engineResolved]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlVal = params.get("funnel");
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem(FUNNEL_OVERLAY_STORAGE_KEY);
+    } catch {
+      stored = null; // storage blocked (private mode/quota) — URL param still governs
+    }
+    setFunnelOverlayOn(resolveFunnelOverlay(urlVal, stored));
+    if (urlVal === "1" || urlVal === "0") {
+      try {
+        localStorage.setItem(FUNNEL_OVERLAY_STORAGE_KEY, urlVal);
+      } catch {
+        /* storage blocked — the URL param still governs this load */
+      }
+    }
+  }, []);
+
+  // Live refresh for the visible overlay only — recording itself never depends on this.
+  useEffect(() => {
+    if (!funnelOverlayOn) return;
+    const id = window.setInterval(() => {
+      const snap = funnelRef.current?.snapshot();
+      if (snap) setFunnelSession(snap);
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [funnelOverlayOn]);
+
   // --- Phase 1: load the browser-only engine + data modules client-side only.
   // Gated on the resolved engine (B0): imports the current WebGL engine by
   // default, or the Babylon module when ?engine=babylon. ---
@@ -396,7 +523,31 @@ export default function SpaceScene({
 
     on("cosmos:progress", ((e: CustomEvent) =>
       patch({ progress: e.detail })) as EventListener);
-    on("cosmos:ready", (() => patch({ ready: true })) as EventListener);
+    on("cosmos:ready", (() => {
+      patch({ ready: true });
+      // PF-11 D1.4: state.ready is exactly the `armed` flag PreFlight renders from — no
+      // separate "armed" signal exists to record, so this IS the moment the gate arms.
+      funnelRef.current?.record("launch-armed");
+    }) as EventListener);
+    // PF-11 D1.1/D1.2: the PreFlight dossier's real byte-progress feed. `setStages` merges
+    // by stage id so a slower-updating stage's last-known reading is never clobbered by a
+    // different stage's event (each cosmos:stage event describes exactly one stage).
+    on("cosmos:stage", ((e: CustomEvent<StageProgress>) => {
+      const p = e.detail;
+      // PF-11 D1.4: the first cosmos:stage event is the earliest observable proxy for "the
+      // PRE-FLIGHT dossier is now showing real progress" — cheaper and no less accurate than
+      // threading a second mount-signal out of PreFlight.tsx for a debug-only recorder.
+      funnelRef.current?.record("dossier-visible");
+      setStages((prev) => ({ ...prev, [p.stage]: p }));
+      // `engine-init`'s completion is the earliest point `<babylon-scene>.backend` is set
+      // (babylon-engine.ts sets it synchronously right after createEngine resolves, well
+      // before first-frame) — read it here rather than waiting on the ?perf=1 interval,
+      // so the dossier's engine line is real on every load, not just debug ones.
+      if (p.stage === "engine-init" && p.done) {
+        const el = engineEl() as unknown as { backend?: string | null } | null;
+        setPreflightBackend(el?.backend ?? null);
+      }
+    }) as EventListener);
     on("cosmos:craft", ((e: CustomEvent) => {
       const st = e.detail?.state;
       if (st === "ready" || st === "error") patch({ craftDone: true });
@@ -424,6 +575,11 @@ export default function SpaceScene({
         patch({ hover: null, vista: null });
         return;
       }
+      // PF-11 D1.4: cosmos:select — not cosmos:warp — is the one-shot "a journey started"
+      // signal. cosmos:warp fires once per rendered frame for the whole journey (TR-081),
+      // and by its first tick `state.warp` is already the "aim"-phase object this handler
+      // is about to set, so a null-check there can never observe the transition.
+      funnelRef.current?.record("travel", { id: detail.id });
       patch({
         warp: { id: detail.id, t: 0, ly: null, phase: "aim" },
         hover: null,
@@ -452,6 +608,7 @@ export default function SpaceScene({
       if (sectionTravelRef.current) {
         const sec = sectionTravelRef.current;
         sectionTravelRef.current = null;
+        funnelRef.current?.record("arrival", { id });
         patch({
           warp: null,
           arrivedId: id,
@@ -476,13 +633,29 @@ export default function SpaceScene({
         });
         return;
       }
+      funnelRef.current?.record("arrival", { id });
       patch({ warp: null, arrivedId: id, vista: { id }, hover: null });
       clearTimeout(vistaTimeoutRef.current);
-      vistaTimeoutRef.current = setTimeout(() => patch({ vista: null }), 5500);
+      vistaTimeoutRef.current = setTimeout(() => {
+        // PF-11 D1.4: the 5.5s auto-timeout is today's only "vista dismissed" path pending
+        // D4.1's click-anywhere/Space/Escape dismissal — recorded honestly as such, not
+        // silently left uninstrumented (see the slice TR for D4.1's expected extension).
+        funnelRef.current?.record("vista-dismissed", { via: "timeout" });
+        patch({ vista: null });
+      }, 5500);
     }) as EventListener);
     on("cosmos:home", (() => {
       patch({ warp: null, arrivedId: null, vista: null });
       setTimeout(() => dispatchRoute(), 80);
+    }) as EventListener);
+    // PF-11 D1.3: the ascent hands off here — reveal the console into its dock, end the skip
+    // overlay, record the funnel milestone. Fires ~8s after LAUNCH, or synchronously under
+    // reduced motion / on SKIP. Guarded by `ascentActive`-independent state so a stray event
+    // can't un-reveal a already-shown scene.
+    on("cosmos:ascent-done", (() => {
+      funnelRef.current?.record("cinematic-done");
+      setAscentActive(false);
+      setRevealReady(true);
     }) as EventListener);
 
     const handleKeydown = (e: KeyboardEvent) => {
@@ -706,25 +879,7 @@ export default function SpaceScene({
   const vistaEntry = state.vista ? entryFor(state.vista.id) : null;
   const cardEntry = state.cardId ? entryFor(state.cardId) : null;
 
-  const q = state.cmd.trim().toLowerCase();
-  const suggestions: CommandSuggestion[] =
-    q.length >= 1
-      ? catalog()
-          .filter(
-            (e) =>
-              e.n.toLowerCase().includes(q) ||
-              e.d.toLowerCase().includes(q) ||
-              e.t.toLowerCase().includes(q),
-          )
-          .slice(0, 6)
-          .map((e) => ({
-            id: e.id,
-            name: e.n,
-            type: e.t,
-            dist: fmtDist(e),
-            color: rarityColor(e.r),
-          }))
-      : [];
+  const suggestions: CommandSuggestion[] = computeSuggestions(state.cmd);
 
   const engineStyle = {
     position: "fixed",
@@ -777,6 +932,10 @@ export default function SpaceScene({
         </div>
       )}
 
+      {funnelOverlayOn && funnelSession && (
+        <FunnelOverlay session={funnelSession} />
+      )}
+
       <HUD
         progress={state.progress}
         ready={state.ready}
@@ -788,7 +947,24 @@ export default function SpaceScene({
         onOpenCredits={openCredits}
         isTravel={isTravel}
         onToggleNavMode={toggleNavMode}
+        farField={
+          !state.warp &&
+          !!state.arrivedId &&
+          (catalog().find((e) => e.id === state.arrivedId)?.ly ?? 0) >=
+            EXTRAGALACTIC_LY
+        }
       />
+
+      <PreFlight
+        isTravel={isTravel}
+        engineKind={engineKind}
+        engineBackend={preflightBackend}
+        stages={stages}
+        armed={state.ready}
+        onLaunch={onLaunch}
+      />
+
+      {ascentActive && <AscentSkip onSkip={skipAscent} />}
 
       <StationSprites
         onRefsReady={(refs) => {
@@ -803,16 +979,31 @@ export default function SpaceScene({
         <MissionControlBar
           cmd={state.cmd}
           suggestions={suggestions}
-          onCmdChange={(value) => patch({ cmd: value })}
+          onCmdChange={(value) => {
+            patch({ cmd: value });
+            // PF-11 D1.4: computed synchronously against THIS keystroke's value, not the
+            // stale `suggestions` from the render that's about to be superseded — the
+            // zero-result-query flag (research plan §3) needs the query paired with the
+            // count it actually produced.
+            const trimmed = value.trim().toLowerCase();
+            if (trimmed) {
+              funnelRef.current?.record("search-keystroke", {
+                query: trimmed,
+                resultCount: computeSuggestions(value).length,
+              });
+            }
+          }}
           onCmdKeyDown={(e) => {
             if (e.key === "Enter" && suggestions.length) {
               const s = suggestions[0];
+              funnelRef.current?.record("search-travel", { id: s.id });
               patch({ cmd: "", hover: null });
               engineEl()?.travelTo(s.id);
             }
             if (e.key === "Escape") patch({ cmd: "" });
           }}
           onSuggestionSelect={(s) => {
+            funnelRef.current?.record("search-travel", { id: s.id });
             patch({ cmd: "", hover: null });
             engineEl()?.travelTo(s.id);
           }}
@@ -830,6 +1021,7 @@ export default function SpaceScene({
           entry={vistaEntry}
           onOpenCard={() => {
             clearTimeout(vistaTimeoutRef.current);
+            funnelRef.current?.record("vista-dismissed", { via: "open-card" });
             patch({
               vista: null,
               cardId: vistaEntry.id,

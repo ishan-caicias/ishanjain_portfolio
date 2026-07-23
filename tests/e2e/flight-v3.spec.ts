@@ -245,10 +245,23 @@ test("launch points at the click: camera holds during aim while the ship turns",
 test("free-look drag stays authoritative over the chase mid-flight", async ({
   page,
 }) => {
+  // PF-11 D1.2 named test change (CLAUDE.md #15): this file's tests all rely on
+  // Playwright's 30s default; this one gains one more real step below (dismissing the
+  // PRE-FLIGHT gate) than it had before, and its Babylon-path twin
+  // (engine-select.spec.ts's equivalent test) measured 27-31s across repeated runs even
+  // pre-D1.2 — near-zero margin. Widened defensively to the same 60s budget rather than
+  // wait for this one to flake too. Assertions unchanged.
+  test.setTimeout(60000);
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
   await page.goto("/?engine=webgl");
   await page.waitForSelector("space-engine");
+  // PF-11 D1.2 named test change (CLAUDE.md #15): the PRE-FLIGHT dossier now covers the
+  // lower hero region until a real visitor action (LAUNCH/SKIP INTRO), including its
+  // pointer-events over the viewport-center coordinate this test drags at — dismissing it
+  // is what a real visitor would do before ever reaching free-look, so this test does the
+  // same rather than fighting the gate. Assertion below (drag pins yaw) is unchanged.
+  await page.getByRole("button", { name: "SKIP INTRO" }).click();
   await waitForStations(page);
   await page
     .getByRole("navigation", { name: "Main navigation" })

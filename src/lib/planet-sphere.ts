@@ -298,6 +298,12 @@ export interface PlanetManifestEntry {
   night?: PlanetTierSet | null;
   /** Earth only: the real cloud deck, on its own advection. */
   cloud?: PlanetTierSet | null;
+  /** PF-11 D6.3.4 — this body's atmosphere is described by the shader's Rayleigh + aerosol term.
+   *
+   * Narrow by design: that term carries EARTH's sea-level optical depths, so "has an atmosphere"
+   * is not sufficient to set it. Absent (undefined) on every body but Earth. Replaces the engine's
+   * old `entry.cloud ? 1 : 0` proxy — see the declaration in build-planet-textures.mjs. */
+  atmosphere?: boolean;
   /** Earth only: ocean/land specular mask. */
   specular?: PlanetTierSet | null;
 }
@@ -372,6 +378,199 @@ export const UV_LONGITUDE_OFFSET = 0.5;
  * 0.533° at the Moon, so the day/night boundary has a real penumbra — about 3 px on a 1000-px
  * disc. Small, but a hard step there is one of the tells of a fake planet. */
 export const TERMINATOR_SOFTEN = 0.005;
+
+/* ---------- PF-11 D6.1: exposure — surge into `refl`, then Reinhard -----------------------
+ *
+ * MEASURED FIRST, then changed. `TR-087`'s instrument re-derived the cos-latitude-weighted mean
+ * luminance of every shipped `-surface-high.jpg` and reproduced Astra's independent A2.3 table to
+ * three decimals on the bodies both measured — and then found **two more clipping bodies than the
+ * brief's table listed**: Saturn (1.500) and Jupiter (1.207) were never in it, because A2.3
+ * sampled nine of the sixteen shipped bodies. **Eight bodies clip today, not six.**
+ *
+ * Three changes land together because each one moves the others' numbers:
+ *
+ *   1. D6.3.1 sRGB decode. `surface` was sampled RAW and multiplied as if it were linear — the
+ *      CLAUDE.md #10 violation. Decoding drops mid-tones by ~2x, so the gain has to move with it.
+ *   2. D6.1a the opposition surge moves out of `uAlbedo` into the phase function, where it
+ *      physically lives (Astra A2.4). `uAlbedo` becomes the surge-free BASE albedo.
+ *   3. D6.1b Reinhard `L/(1+L)` immediately before the output encode (owner decision, ADR-0010).
+ */
+
+/** Exposure gain, replacing the hard-coded `3.6` that appeared in four places.
+ *
+ * NOT a taste value — SOLVED for. The old 3.6 was fitted against the two bodies that happened to
+ * fall inside the displayable range (Astra: "only Mars and the Moon, the two bodies it was tuned
+ * on"). Adding the sRGB decode and the Reinhard curve moves everything, so this gain is chosen so
+ * that those same two bodies land where they already render — measured at 1.9: **Moon −2.8%,
+ * Mars −0.5%** in final display units, against the implementation plan's "unchanged within ~5%".
+ * Every other body changes, and that IS the fix: eight were clipping and none now does. */
+export const EXPOSURE_GAIN = 1.9;
+
+/** Night-side floor, unchanged from C4. Stands in for starlight and (on the Moon) earthshine
+ * without modelling either. Named here only because the gain beside it stopped being a literal. */
+export const AMBIENT_NIGHT = 0.06;
+
+/** Opposition-surge angular width, degrees (Astra A2.4).
+ *
+ * Deliberately dominated by the SHOE (shadow hiding, 1-6°) rather than the CBOE (coherent
+ * backscatter, 0.1-0.5°): the CBOE at this scene's 0.045°-per-pixel scale is a 2-11 px dot that no
+ * amount of correctness makes worth a shader term. At 2° the surge e-folds by 44 px and is gone by
+ * ~150 px on a 1198-px disc — the scale at which opposition spots have actually been photographed
+ * on the Moon and on Cassini's icy-satellite approaches. */
+export const SURGE_W_DEG = 2.0;
+
+/** Bodies whose geometric albedo is an opposition-surge PEAK rather than a disc-wide value.
+ *
+ * WHY THIS EXISTS. Geometric albedo is defined at phase angle 0.000° and is only valid there.
+ * Applying Tethys's 1.229 uniformly across its disc paints a two-pixel coherent-backscatter spike
+ * over an entire world — a real, correctly-measured number applied at a geometry where it does not
+ * hold, which is BROKEN PHYSICS in this repo's taxonomy by exactly the same shape as lighting a
+ * radar map (TR-078). The fix is not to clamp the number but to put it where it belongs:
+ *
+ *   base = Bond albedo A_B (energy-bounded, always < 1)
+ *   surge(α) = 1 + B0 · exp(−α_deg / SURGE_W_DEG),  B0 = p/A_B − 1
+ *
+ * so that `base × surge(0) == p`, the real geometric albedo, EXACTLY. A unit test asserts that
+ * identity for every row here — it is what makes this a relocation rather than a re-grade.
+ *
+ * MARS IS DELIBERATELY ABSENT and must stay absent: its dusty forward-scattering atmosphere makes
+ * A_B (0.25) exceed p (0.17), so its surge coefficient is NEGATIVE. Astra: "Leave Mars alone."
+ *
+ * The payoff is the one this scene is uniquely built for. Every body arrives at phase angle
+ * 0.000° (see the Earth block below), which is the single geometry at which an opposition surge is
+ * visible at all — and these are the strongest surges ever measured. The camera that ruins Earth
+ * is the camera that was built for Tethys. */
+export const PLANET_SURGE: Record<string, { base: number; b0: number }> = {
+  tethys: { base: 0.8, b0: 0.536 },
+  dione: { base: 0.63, b0: 0.584 },
+  rhea: { base: 0.48, b0: 0.977 },
+  moon: { base: 0.11, b0: 0.236 },
+};
+
+/** Splits a body's shipped geometric albedo into the base albedo the shader multiplies and the
+ * surge coefficient it feeds the phase function. Bodies outside `PLANET_SURGE` pass through
+ * unchanged with a zero coefficient, so `surge(α) == 1` and nothing about them moves. */
+export function exposureTermsFor(
+  bodyId: string,
+  geometricAlbedo: number,
+): { baseAlbedo: number; surgeB0: number } {
+  const s = PLANET_SURGE[bodyId];
+  return s
+    ? { baseAlbedo: s.base, surgeB0: s.b0 }
+    : { baseAlbedo: geometricAlbedo, surgeB0: 0 };
+}
+
+/* ---------- PF-11 D6.4: the home vantage (Earth revealed by goHome) -----------------------
+ *
+ * Astra's Earth brief §B3 is unambiguous that Earth MUST NOT be a `travelTo` destination: the
+ * catalog frame is geocentric, so Earth's direction is 0/0 and its distance is 0 — not hard to
+ * measure, NON-EXISTENT. `bodyDepth(0)` would place it deeper than Neptune. It is the origin, and
+ * the origin is where `goHome` already goes.
+ *
+ * That is not a consolation prize, and this is the finding the whole slice rests on. Every
+ * `travelTo` arrival is pinned to phase angle 0.000° — the camera parks on the Sun-body line and
+ * `sunDirectionFrom` returns the negated body direction, so V = L identically. That degeneracy is
+ * what makes a terminator, a twilight band and city lights impossible everywhere else in this
+ * scene. **At the origin the two vectors decouple**, because the Sun direction comes from the
+ * Sun's own catalog entry while the camera's parked bearing is a genuinely free parameter — a
+ * spacecraft in Earth orbit really can be anywhere, so choosing one is a vantage, not a lie. */
+
+/** The Sun's own catalog entry (celestial-catalog.js), J2000 geocentric apparent place. */
+export const SUN_RA_DEG = 250.0;
+export const SUN_DEC_DEG = -20.5;
+
+/** Where the home camera parks: quadrature, chosen so the phase angle is exactly 90°.
+ *
+ * NOT a look chosen and then justified — 250 − 90 = 160 is the construction, and a unit test
+ * recomputes the phase angle from these four numbers rather than trusting this comment. At 90°
+ * the terminator falls dead centre, the night hemisphere is ~50% of the frame, and the ~290 px
+ * twilight band and the city lights become visible for the only body in this scene that has
+ * them. The declared trade (Astra §2.6): the ocean glint is LOST, its specular point 45°
+ * off-frame. Glint and city lights are mutually exclusive at this FOV, and at home the trade can
+ * be taken for Earth alone without touching any other body's arrival. */
+export const HOME_VANTAGE_RA_DEG = 160.0;
+export const HOME_VANTAGE_DEC_DEG = 0.0;
+
+/** Screen-time period of the home orbit, seconds (owner requirement R16).
+ *
+ * DECLARED LICENSE, ~31x compressed: a real 400 km LEO orbit takes 92.7 minutes. 180 s is chosen
+ * so a visitor who parks at home sees the vantage genuinely moving rather than frozen, without
+ * the motion competing with the flight sequence for attention. The orbit axis is the SUN
+ * DIRECTION, which is what holds the 90° phase angle constant all the way around — the orbit
+ * changes where you are without changing how Earth is lit. */
+export const HOME_ORBIT_PERIOD_S = 180;
+
+/** Camera position for a given home-orbit phase, in world space.
+ *
+ * Pure, so the geometry that guarantees the 90° phase hold is unit-testable off-GPU rather than
+ * asserted from a screenshot. Construction: the orbit lies in the plane PERPENDICULAR to the Sun
+ * direction and passes through the chosen quadrature vantage, so every point on it is 90° from
+ * the Sun by construction — the phase angle is invariant around the whole revolution, which is
+ * the property the whole reveal depends on.
+ *
+ * Basis: `u` is the vantage direction (already perpendicular to the Sun, by choice of ra 160),
+ * and `v = sun × u` completes an orthonormal pair in that plane. Phase 0 is the vantage itself,
+ * so a reduced-motion visitor parked at phase 0 sees exactly the spec'd view. */
+export function homeOrbitPosition(
+  phase: number,
+  radius: number = HOME_ORBIT_RADIUS,
+): [number, number, number] {
+  const d2r = Math.PI / 180;
+  const sr = SUN_RA_DEG * d2r,
+    sd = SUN_DEC_DEG * d2r;
+  const sun: [number, number, number] = [
+    Math.cos(sd) * Math.cos(sr),
+    Math.cos(sd) * Math.sin(sr),
+    Math.sin(sd),
+  ];
+  const vr = HOME_VANTAGE_RA_DEG * d2r,
+    vd = HOME_VANTAGE_DEC_DEG * d2r;
+  const u: [number, number, number] = [
+    Math.cos(vd) * Math.cos(vr),
+    Math.cos(vd) * Math.sin(vr),
+    Math.sin(vd),
+  ];
+  // v = sun × u, normalized — the second in-plane axis.
+  const vx = sun[1] * u[2] - sun[2] * u[1];
+  const vy = sun[2] * u[0] - sun[0] * u[2];
+  const vz = sun[0] * u[1] - sun[1] * u[0];
+  const vl = Math.hypot(vx, vy, vz) || 1;
+  const c = Math.cos(phase),
+    s = Math.sin(phase);
+  return [
+    (u[0] * c + (vx / vl) * s) * radius,
+    (u[1] * c + (vy / vl) * s) * radius,
+    (u[2] * c + (vz / vl) * s) * radius,
+  ];
+}
+
+/** Orbit radius — the same standoff every other arrival uses (`ARRIVE_STANDOFF`), so the sphere
+ * reads at the identical size it does everywhere else and nothing about the framing is special-
+ * cased. Duplicated as a literal rather than imported to keep this module free of engine deps;
+ * a unit test asserts the two agree. */
+export const HOME_ORBIT_RADIUS = 38;
+
+/** Night-side city-light exposure (Astra §2.3).
+ *
+ * DECLARED LICENSE, and one of the largest in this codebase — stated as a number rather than a
+ * feeling. The real radiance ratio between a lit city and the sunlit dayside is ~7.7e-6, about
+ * 17 stops. Rendered at this factor the cities sit ~2.7 stops down instead, a lift of ~14 stops.
+ * There is no exposure at which both are simultaneously correct, which is exactly what NASA's own
+ * Black Marble composites do and say. The floor subtraction matters as much as the gain: the map
+ * carries a non-zero background that, lifted 14 stops, would wash the entire night side grey. */
+export const NIGHT_LIGHT_GAIN = 0.15;
+export const NIGHT_LIGHT_FLOOR = 0.06;
+
+/** Sine of the local solar elevation below which relief is treated as self-shadowing (D6.3.3).
+ *
+ * DECLARED SIMPLIFIED, and the declaration matters more than the number. Real relief casts real
+ * shadows, and near the terminator the Sun grazes so those shadows are long — which is why
+ * spacecraft terminator images are a band of black-and-white speckle rather than a smooth
+ * Lambertian falloff. Modelling that properly means ray-marching the height field per fragment;
+ * that is out of scope here. What ships is the cheap standard approximation: below ~7° of local
+ * solar elevation, surfaces that carry real relief darken faster than the reflectance law alone
+ * predicts. Gated on `uHasHeight`/`uHasNormal`, so bodies shipping neither are bit-identical. */
+export const SELF_SHADOW_ELEV = 0.12;
 
 /* ---------- Earth: the three terms that make it Earth ------------------------
  *
@@ -453,7 +652,28 @@ const vec3 RAYLEIGH_TAU = vec3(${RAYLEIGH_TAU_RGB.map((v) => v.toFixed(5)).join(
 const float AEROSOL_TAU = ${AEROSOL_TAU.toFixed(4)};
 const float OCEAN_SIGMA2 = ${OCEAN_SIGMA2.toFixed(6)};
 const float OCEAN_F0 = ${OCEAN_F0.toFixed(6)};
-const float CLOUD_L = ${CLOUD_LUNAR_L.toFixed(3)};`;
+const float CLOUD_L = ${CLOUD_LUNAR_L.toFixed(3)};
+const float NIGHT_GAIN = ${NIGHT_LIGHT_GAIN.toFixed(4)};
+const float NIGHT_FLOOR = ${NIGHT_LIGHT_FLOOR.toFixed(4)};
+const float EXPOSURE = ${EXPOSURE_GAIN.toFixed(3)};
+const float AMBIENT = ${AMBIENT_NIGHT.toFixed(3)};
+const float SURGE_W = ${SURGE_W_DEG.toFixed(3)};
+const float SELF_SHADOW_ELEV = ${SELF_SHADOW_ELEV.toFixed(4)};`;
+
+/** sRGB transfer functions, shared verbatim by both twins (D6.3.1 / CLAUDE.md #10).
+ *
+ * The EXACT piecewise sRGB EOTF, not the `pow(c, 2.2)` approximation — chosen so that the offline
+ * instrument that solved `EXPOSURE_GAIN` and the shader that ships compute the same numbers. An
+ * approximation on one side of that comparison would quietly invalidate the measurement the gain
+ * rests on. Branch-free (`step`/`mix`), so TR-047's uniform-control-flow rule is unaffected. */
+const SRGB_HELPERS_GLSL = `
+vec3 srgbToLinear(vec3 c){
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+vec3 linearToSrgb(vec3 c){
+  c = max(c, vec3(0.0));
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}`;
 
 export const PLANET_VERTEX_GLSL = `
 precision highp float;
@@ -499,15 +719,25 @@ uniform sampler2D cloudTex;   // PF-10 C4 closeout, Earth: real cloud coverage/r
 uniform sampler2D specularTex;// Earth: real ocean/land mask, 70.06% ocean as measured
 uniform float uHasCloud;      // 1 = a real cloud map is bound
 uniform float uAtmosphere;    // 1 = this body has an atmosphere the Rayleigh term applies to
+uniform float uSurgeB0;    // PF-11 D6.1: opposition-surge coefficient, 0 for bodies without one
+uniform sampler2D nightTex;   // PF-11 D6.4, Earth: real city lights for the night hemisphere
+uniform float uHasNight;      // 1 = a real night map is bound (placeholder otherwise, #9)
 varying vec2 vUV;
 varying vec3 vNormal;
 varying vec3 vWorldPos;
 ${PLANET_SHADER_CONSTANTS}
+${SRGB_HELPERS_GLSL}
 void main(){
   // Longitude origin correction — see UV_LONGITUDE_OFFSET. Sampler is in WRAP mode, so no
   // fract() is needed and the derivative stays continuous across the seam.
   vec2 tUV = vec2(vUV.x + LON_OFFSET, vUV.y);
-  vec3 surface = texture2D(surfaceTex, tUV).rgb;
+  // PF-11 D6.3.1: DECODE to linear before anything multiplies it (CLAUDE.md #10). Only this
+  // sampler is decoded, and the exclusions are the point rather than an oversight: heightTex is
+  // elevation, normalTex/detailTex are VECTORS, specularTex is an ocean coverage mask and
+  // cloudTex is a coverage fraction whose raw byte Astra already validated against Earth's real
+  // geometric albedo (see the cloud block below). Decoding any of those would corrupt data that
+  // was never a colour.
+  vec3 surface = srgbToLinear(texture2D(surfaceTex, tUV).rgb);
 
   // TR-047: these four samples are taken UNCONDITIONALLY and gated by multiplication, never by
   // branching — see this file's header. The cost of sampling a 1x1 placeholder is nil.
@@ -574,11 +804,25 @@ void main(){
   float mu = max(dot(perturbed, viewDir), 0.0);
   float refl = 2.0 * uLunarL * mu0 / max(mu0 + mu, 1e-4) + (1.0 - uLunarL) * mu0;
 
+  // PF-11 D6.1: OPPOSITION SURGE, in the phase function where it physically lives. uAlbedo is now
+  // the surge-free BASE albedo and this restores the real geometric albedo exactly at alpha = 0
+  // (see PLANET_SURGE). The phase angle is the Sun-body-camera angle, i.e. between L and V — not
+  // an approximation of it, since both vectors are already here for the Lommel-Seeliger term.
+  float cosAlpha = clamp(dot(normalize(uSunDir), viewDir), -1.0, 1.0);
+  float alphaDeg = degrees(acos(cosAlpha));
+  refl *= 1.0 + uSurgeB0 * exp(-alphaDeg / SURGE_W);
+
+  // PF-11 D6.3.3: relief SELF-SHADOWING near the terminator (declared SIMPLIFIED — see
+  // SELF_SHADOW_ELEV). Applies only where a body ships real relief, so smooth bodies are
+  // bit-identical to before this term existed.
+  float reliefAmt = max(uHasHeight, uHasNormal);
+  refl *= mix(1.0, smoothstep(0.0, SELF_SHADOW_ELEV, mu0), reliefAmt);
+
   // Real terminator penumbra — the Sun is a disc, not a point (TERM_SOFTEN).
   float dayside = smoothstep(-TERM_SOFTEN, TERM_SOFTEN, dot(normalize(vNormal), normalize(uSunDir)));
   // A dim ambient term keeps the night side legible rather than pure black — a real night side is
   // lit by starlight and, for the Moon, earthshine; this stands in for that without modelling it.
-  vec3 lit = surface * uAlbedo * (refl * dayside * 3.6 + 0.06);
+  vec3 lit = surface * uAlbedo * (refl * dayside * EXPOSURE + AMBIENT);
 
   // ---- EARTH (PF-10 C4 closeout). Three terms, each with a named mechanism, per Astra's brief.
   // Every one is sampled/computed unconditionally and gated by multiplication (TR-047); the two
@@ -602,7 +846,7 @@ void main(){
   float glint = oceanMask * fres * slopeP / (4.0 * max(mu0 * mu, 0.02));
   // BRDF -> this shader's units: a Lambertian albedo A has BRDF A/PI, so multiplying by PI puts
   // the glint on the same scale as uAlbedo before the shared exposure factor.
-  lit += vec3(glint * PI) * mu0 * 3.6 * dayside;
+  lit += vec3(glint * PI) * mu0 * EXPOSURE * dayside;
 
   // 2. RAYLEIGH + AEROSOL — single scattering, real optical depths, real lambda^-4.09 colour and
   // the real phase function. See RAYLEIGH_TAU_RGB: omitting this is the feature's biggest honesty
@@ -612,7 +856,7 @@ void main(){
   float phaseR = 0.75 * (1.0 + cosT * cosT);
   float airDenom = 4.0 * max(mu * mu0, 0.05);
   vec3 air = (RAYLEIGH_TAU * phaseR + vec3(AEROSOL_TAU * 0.3)) / airDenom;
-  lit += air * uAtmosphere * mu0 * 3.6 * dayside;
+  lit += air * uAtmosphere * mu0 * EXPOSURE * dayside;
 
   // 3. CLOUDS — composited here rather than on a second shell mesh (see CLOUD_SHELL_FACTOR for
   // the declared 1.3 px of forfeited parallax). Alpha is the map byte RAW, not sRGB-decoded, and
@@ -625,8 +869,37 @@ void main(){
   // Compositing over the surface also masks the glint exactly as real DSCOVR imagery shows.
   float cloudA = texture2D(cloudTex, tUV).r * uHasCloud;
   float cloudRefl = 2.0 * CLOUD_L * mu0 / max(mu0 + mu, 1e-4) + (1.0 - CLOUD_L) * mu0;
-  vec3 cloudLit = vec3(cloudRefl * dayside * 3.6 + 0.06);
+  vec3 cloudLit = vec3(cloudRefl * dayside * EXPOSURE + AMBIENT);
   lit = mix(lit, cloudLit, cloudA);
+
+  // 4. CITY LIGHTS (PF-11 D6.4). Refused for two phases and shipped now for one reason only: the
+  // geometry changed. Every travelTo arrival is phase angle 0.000°, where the night hemisphere is
+  // 100% occluded and any light on screen is a view that does not exist (Astra's broken-physics
+  // #1). Earth is revealed by goHome at the ORIGIN instead, parked at 90.0000° phase, where the
+  // night side is ~50% of the frame.
+  //
+  // MASKED ON THE TRUE N.L, and nothing else — masking on anything else is the specific failure
+  // Astra named: 1 - dayside is the exact complement of the term that lights the day side, so a
+  // city can appear only where the Sun genuinely cannot reach, and the terminator's real penumbra
+  // (TERM_SOFTEN) gives the transition for free.
+  //
+  // FLOOR-SUBTRACTED BEFORE THE GAIN: the map carries a non-zero background which, lifted ~14
+  // stops, would wash the whole night side grey instead of showing cities against black.
+  //
+  // NOT sRGB-DECODED, and this one was MEASURED rather than argued (TR-088). The map's luminance
+  // distribution is p50 0.036 / p95 0.093 / p999 0.260 raw, but 0.0045 mean / 0.055 p999 once
+  // decoded — so in linear space the 0.06 floor sits ABOVE the 99.9th percentile and erases
+  // essentially the whole map, leaving a night side that is nearly black. The floor/gain pair is
+  // a DECLARED EMISSIVE COMPOSITE calibrated against the real 17-stop radiance ratio in the space
+  // the Black Marble product was authored in; it is not a reflectance being lit, which is why the
+  // linear-pipeline rule that governs the surface map does not govern it. Same reasoning as cloudTex.
+  //
+  // COMPOSITED HERE — in linear, BEFORE the tone map. Added after it, lights are additive in
+  // display space and clip to flat white blobs with no structure (Astra §2.3). That ordering is
+  // the whole reason this slice had to follow D6.1's Reinhard rather than precede it.
+  // Clouds occlude cities, so this goes after the cloud mix and is attenuated by cloud alpha.
+  vec3 night = max(texture2D(nightTex, tUV).rgb - NIGHT_FLOOR, vec3(0.0)) * uHasNight;
+  lit += night * NIGHT_GAIN * (1.0 - dayside) * (1.0 - cloudA);
 
   // VENUS FORK (PF-10 C4.2). Astra's mandate, and the most important honesty decision in this
   // shader: below the cloud deck a Magellan RADAR map must NOT be lit. Radar brightness is
@@ -641,7 +914,20 @@ void main(){
   // from the GLSL side rather than the WGSL side; the WGSL twin was named flatLit from the start
   // and the GLSL one was not, so the twins disagreed and only one of them broke.
   vec3 flatLit = surface * uFlatTint * uFlatLevel;
-  gl_FragColor = vec4(mix(lit, flatLit, uFlatLight), 1.0);
+  vec3 outLin = mix(lit, flatLit, uFlatLight);
+
+  // PF-11 D6.1b: REINHARD, then encode (owner decision, ADR-0010). L/(1+L) is not an artistic
+  // curve — it is the Naka-Rushton / Michaelis-Menten photoreceptor response, the measured
+  // response of vertebrate photoreceptors, and the reason an eye can see both the Moon and Tethys
+  // at all. It asymptotes to 1, so nothing can ever clip again; eight bodies did before this
+  // (TR-087 measured it — two more than the brief's own table listed). Strictly monotonic, so
+  // every body keeps its rank.
+  //
+  // DECLARED LICENSE, recorded in the ledger: the true zero-phase Tethys:Moon ratio of 9.04:1
+  // compresses to 3.38:1 after the curve. The compression is the price of a [0,1] display for a
+  // body whose albedo genuinely exceeds 1, and no gain avoids it.
+  outLin = outLin / (1.0 + outLin);
+  gl_FragColor = vec4(linearToSrgb(outLin), 1.0);
 }`;
 
 export const PLANET_VERTEX_WGSL = `
@@ -699,6 +985,10 @@ var specularTexSampler : sampler;
 var specularTex : texture_2d<f32>;
 uniform uHasCloud : f32;
 uniform uAtmosphere : f32;
+uniform uSurgeB0 : f32;
+var nightTexSampler : sampler;
+var nightTex : texture_2d<f32>;
+uniform uHasNight : f32;
 
 const ELEV_STEP : f32 = ${ELEV_SAMPLE_STEP.toFixed(8)};
 const LON_OFFSET : f32 = ${UV_LONGITUDE_OFFSET.toFixed(4)};
@@ -709,13 +999,31 @@ const AEROSOL_TAU : f32 = ${AEROSOL_TAU.toFixed(4)};
 const OCEAN_SIGMA2 : f32 = ${OCEAN_SIGMA2.toFixed(6)};
 const OCEAN_F0 : f32 = ${OCEAN_F0.toFixed(6)};
 const CLOUD_L : f32 = ${CLOUD_LUNAR_L.toFixed(3)};
+const NIGHT_GAIN : f32 = ${NIGHT_LIGHT_GAIN.toFixed(4)};
+const NIGHT_FLOOR : f32 = ${NIGHT_LIGHT_FLOOR.toFixed(4)};
+const EXPOSURE : f32 = ${EXPOSURE_GAIN.toFixed(3)};
+const AMBIENT : f32 = ${AMBIENT_NIGHT.toFixed(3)};
+const SURGE_W : f32 = ${SURGE_W_DEG.toFixed(3)};
+const SELF_SHADOW_ELEV : f32 = ${SELF_SHADOW_ELEV.toFixed(4)};
+
+// sRGB transfer functions — line-for-line twin of SRGB_HELPERS_GLSL. Uses select() rather than
+// mix()+step() because WGSL's select takes a vec3<bool> directly; same branch-free result.
+fn srgbToLinear(c : vec3<f32>) -> vec3<f32> {
+  return select(c / 12.92, pow((c + 0.055) / 1.055, vec3<f32>(2.4)), c > vec3<f32>(0.04045));
+}
+fn linearToSrgb(cIn : vec3<f32>) -> vec3<f32> {
+  let c : vec3<f32> = max(cIn, vec3<f32>(0.0));
+  return select(c * 12.92, 1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055, c > vec3<f32>(0.0031308));
+}
 
 @fragment
 fn main(input : FragmentInputs) -> FragmentOutputs {
   // Longitude origin correction — line-for-line twin of the GLSL above.
   let tUV : vec2<f32> = vec2<f32>(fragmentInputs.vUV.x + LON_OFFSET, fragmentInputs.vUV.y);
+  // PF-11 D6.3.1 — twin of the GLSL decode above; see there for which samplers are deliberately
+  // NOT decoded and why.
   let surface : vec3<f32> =
-    textureSample(surfaceTex, surfaceTexSampler, tUV).rgb;
+    srgbToLinear(textureSample(surfaceTex, surfaceTexSampler, tUV).rgb);
 
   // TR-047: uniform control flow — sampled unconditionally, gated by multiplication.
   let hL : f32 = textureSample(heightTex, heightTexSampler,
@@ -760,12 +1068,21 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   let viewDir : vec3<f32> = normalize(uniforms.uCamPos - fragmentInputs.vWorldPos);
   let mu0 : f32 = max(dot(perturbed, normalize(uniforms.uSunDir)), 0.0);
   let mu : f32 = max(dot(perturbed, viewDir), 0.0);
-  let refl : f32 =
+  var refl : f32 =
     2.0 * uniforms.uLunarL * mu0 / max(mu0 + mu, 1e-4) + (1.0 - uniforms.uLunarL) * mu0;
+
+  // PF-11 D6.1 opposition surge — line-for-line twin of the GLSL above.
+  let cosAlpha : f32 = clamp(dot(normalize(uniforms.uSunDir), viewDir), -1.0, 1.0);
+  let alphaDeg : f32 = degrees(acos(cosAlpha));
+  refl = refl * (1.0 + uniforms.uSurgeB0 * exp(-alphaDeg / SURGE_W));
+
+  // PF-11 D6.3.3 relief self-shadowing — line-for-line twin of the GLSL above.
+  let reliefAmt : f32 = max(uniforms.uHasHeight, uniforms.uHasNormal);
+  refl = refl * mix(1.0, smoothstep(0.0, SELF_SHADOW_ELEV, mu0), reliefAmt);
 
   let dayside : f32 = smoothstep(-TERM_SOFTEN, TERM_SOFTEN,
     dot(normalize(fragmentInputs.vNormal), normalize(uniforms.uSunDir)));
-  var lit : vec3<f32> = surface * uniforms.uAlbedo * (refl * dayside * 3.6 + 0.06);
+  var lit : vec3<f32> = surface * uniforms.uAlbedo * (refl * dayside * EXPOSURE + AMBIENT);
 
   // ---- EARTH (PF-10 C4 closeout) — line-for-line twin of the GLSL block above. See there for
   // why each term exists; the physics comments are not duplicated, only the code.
@@ -779,27 +1096,40 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   let cosI : f32 = max(dot(Hv, viewDir), 0.0);
   let fres : f32 = OCEAN_F0 + (1.0 - OCEAN_F0) * pow(1.0 - cosI, 5.0);
   let glint : f32 = oceanMask * fres * slopeP / (4.0 * max(mu0 * mu, 0.02));
-  lit = lit + vec3<f32>(glint * PI) * mu0 * 3.6 * dayside;
+  lit = lit + vec3<f32>(glint * PI) * mu0 * EXPOSURE * dayside;
 
   let cosT : f32 = dot(-normalize(uniforms.uSunDir), viewDir);
   let phaseR : f32 = 0.75 * (1.0 + cosT * cosT);
   let airDenom : f32 = 4.0 * max(mu * mu0, 0.05);
   let air : vec3<f32> =
     (RAYLEIGH_TAU * phaseR + vec3<f32>(AEROSOL_TAU * 0.3)) / airDenom;
-  lit = lit + air * uniforms.uAtmosphere * mu0 * 3.6 * dayside;
+  lit = lit + air * uniforms.uAtmosphere * mu0 * EXPOSURE * dayside;
 
   let cloudA : f32 =
     textureSample(cloudTex, cloudTexSampler, tUV).r * uniforms.uHasCloud;
   let cloudRefl : f32 =
     2.0 * CLOUD_L * mu0 / max(mu0 + mu, 1e-4) + (1.0 - CLOUD_L) * mu0;
-  let cloudLit : vec3<f32> = vec3<f32>(cloudRefl * dayside * 3.6 + 0.06);
+  let cloudLit : vec3<f32> = vec3<f32>(cloudRefl * dayside * EXPOSURE + AMBIENT);
   lit = mix(lit, cloudLit, cloudA);
+
+  // PF-11 D6.4 city lights — line-for-line twin of the GLSL block above. See there for why this
+  // is masked on the true N.L, floor-subtracted, and composited before the tone map.
+  let night : vec3<f32> =
+    max(textureSample(nightTex, nightTexSampler, tUV).rgb - vec3<f32>(NIGHT_FLOOR),
+        vec3<f32>(0.0)) * uniforms.uHasNight;
+  lit = lit + night * NIGHT_GAIN * (1.0 - dayside) * (1.0 - cloudA);
 
   // VENUS FORK — line-for-line twin of the GLSL block above. "flat" is not a reserved WGSL
   // identifier but IS a WGSL interpolation attribute name, so the variable is named flatLit here
   // to keep it unambiguous (TR-045's lesson generalized: prefer the unambiguous name).
   let flatLit : vec3<f32> = surface * uniforms.uFlatTint * uniforms.uFlatLevel;
-  fragmentOutputs.color = vec4<f32>(mix(lit, flatLit, uniforms.uFlatLight), 1.0);
+  var outLin : vec3<f32> = mix(lit, flatLit, uniforms.uFlatLight);
+
+  // PF-11 D6.1b Reinhard + encode — line-for-line twin of the GLSL above. See there for why the
+  // curve is a photoreceptor response rather than an artistic choice, and for the declared
+  // ratio-compression license.
+  outLin = outLin / (1.0 + outLin);
+  fragmentOutputs.color = vec4<f32>(linearToSrgb(outLin), 1.0);
 }`;
 
 /** JS mirror of the shader's tangent-frame construction, so the arithmetic the twins share has an

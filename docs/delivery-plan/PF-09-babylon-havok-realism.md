@@ -26,7 +26,18 @@ owner. The flagship-underperforms-mid-tier anomaly is now reproducible across tw
 sessions. Leading hypothesis: uncapped `adaptToDeviceRatio` fill-rate cost on the flagship's
 higher-resolution display — not yet confirmed; the confirming data (device signature + ENGINE/TIER
 line) is already computed and already shown on the `?perf=1` overlay, just not yet reported. B6
-stays open. **GAP-06 through GAP-16 — relativistic aberration/Doppler, ember sparks + idle hull bob,
+stays open. **A third, independent device pass ran 2026-07-22 as PF-11's D0.3
+([TR-083](../test-reports/TR-083.md))** — the flagship-underperforms-mid-tier anomaly REVERSED:
+S24 Ultra 60 fps (its best reading across all three rounds), S20 FE 45 fps (consistent with its
+established 42-49 fps band); both now clear A3's ≥40 fps floor for the first time together.
+Desktop improved to 45-52 fps (still short of A1's 60 fps target, up from 40 fps). The
+ENGINE/TIER/device-signature line remains uncaptured for a third consecutive round, so the
+reversal's cause (tier resolution, backend, or device/session state) is not yet confirmed —
+recorded as a real result, not a closed hypothesis. iPad (A2) and WebGL2 fallback (A4) remain
+untested. **B6's §A gate is upgraded from MIXED-with-a-reproducible-anomaly to
+MIXED-anomaly-reversed-pending-backend-confirmation — still not unilaterally closed**, consistent
+with TR-068/069's standard of not rubber-stamping a request against incomplete data. **GAP-06
+through GAP-16 — relativistic aberration/Doppler, ember sparks + idle hull bob,
 free-look drag, field-star + body hover picking, canvas keyboard access, station sprite markers,
 HTML attribute parity, a scoped scroll-cadence port, and the `cosmos:aim`/`cosmos:craft`/
 `cosmos:hover`+`cosmos:unhover` event-contract gaps — are all resolved**

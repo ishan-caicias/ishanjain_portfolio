@@ -12,13 +12,14 @@ on every device.** The site is the demonstration of engineering skill.
 This file holds only durable rules. **Everything volatile lives in `docs/` and must be read
 there, never assumed:**
 
-| Question                            | Authoritative source                                             |
-| ----------------------------------- | ---------------------------------------------------------------- |
-| Current phase / what's shipped      | `docs/delivery-plan/` (status header)                            |
-| Latest verification + test counts   | `docs/test-reports/README.md` (last row)                         |
-| Why a decision was made             | `docs/adr/` + `docs/adr/README.md`                               |
-| Known gaps between the two engines  | `docs/analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md` |
-| Architecture + the dual-engine seam | `docs/architecture/overview.md`                                  |
+| Question                            | Authoritative source                                                         |
+| ----------------------------------- | ---------------------------------------------------------------------------- |
+| Current phase / what's shipped      | `docs/delivery-plan/` (status header)                                        |
+| HOW to build the current plan       | `docs/implementation/` (technical companion; delivery plan wins on conflict) |
+| Latest verification + test counts   | `docs/test-reports/README.md` (last row)                                     |
+| Why a decision was made             | `docs/adr/` + `docs/adr/README.md`                                           |
+| Known gaps between the two engines  | `docs/analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md`             |
+| Architecture + the dual-engine seam | `docs/architecture/overview.md`                                              |
 
 **Never quote a test count, version, or phase status from memory or from this file.** Run the
 command or read the index. Stale numbers in docs are how the last major drift happened.
@@ -131,6 +132,41 @@ Each cost a real defect. Sources in `docs/test-reports/`.
 24. `prefers-reduced-motion` is a per-feature contract on **both** engines and composes with
     any quality tier — it is not a tier. Every visual feature defines its reduced-motion and
     no-WebGL behaviour at design time. (TR-042/051)
+
+**Delivery gate — vertical slices**
+
+25. **Every vertical feature slice ends with the full gate executed and a manual regression
+    pass — before the slice is called delivered.** Concretely: `npm run build && npm run test
+&& npm run test:e2e && npm run budget:check` green at the end of EACH slice (not batched
+    at phase end), plus a hands-on manual regression on the built preview (`npm run preview`):
+    boot console-clean, travel to one near and one far body, arrival dossier open/dismiss,
+    where-to search, classic-view toggle, and reduced-motion. A slice with failing or unrun
+    tests is not done; unverified behaviour is how incidents ship. Test-count deltas and the
+    manual-regression checklist go in the slice's TR.
+
+**Verification economics** — added 2026-07-22 after the D0.1 run audit (TR-081): that slice
+took 3h01m, of which **67% was the E2E suite running** and ~45 min was thrown away on a load
+harness nobody had validated. The full suite is ~13 min at `workers: 1` and dominates every
+slice from here on. These two rules are about not paying that twice.
+
+26. **Calibrate a harness before you let it gate anything.** Any load generator, timing
+    ceiling, or measurement rig you introduce gets ONE baseline validation run first — on the
+    unchanged build — proving the suite is green under it. An uncalibrated instrument that
+    goes red tells you nothing about your change. This is rule "an instrument needs its own
+    validity checks" (below) applied to test harnesses, not just to `perf-telemetry`. D0.1
+    ran three full suites (43 min) under an 8-worker load that a later control showed fails
+    on the pre-change build too. (TR-081)
+27. **Budget three full-suite runs per slice** — a mid-slice check, the final gate, and one
+    spare. **Never run the full suite to characterize a single failing spec**: run that spec
+    in isolation ×3-4, and against a `git stash`-ed baseline when you need to know whether
+    it is yours. D0.1 spent 122 min across six full runs where isolation answered the same
+    questions in three. Corollary: `npx prettier --write` the files you touched BEFORE
+    `npm run build` — lint short-circuits the chain, so each miss costs a whole cycle.
+
+**Also from that audit, not rules but true:** probe an environmental assumption before
+implementing on top of it (a 60-second probe disproved D0.1's prescribed mechanism after the
+implementation was already written), and pin under-specified exit criteria at PLAN time — "green
+under load" with no load level named is what sent D0.1 down the wrong path.
 
 ## Measurement discipline
 

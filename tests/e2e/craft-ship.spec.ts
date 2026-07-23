@@ -21,6 +21,23 @@
  */
 import { expect, test } from "@playwright/test";
 
+/**
+ * PF-11 D0.1 — named test change, no assertion weakened (CLAUDE.md #15).
+ *
+ * Every `data-craft-state="ready"` wait in this file used a hand-written
+ * 20000ms. TR-080's addendum measured those waits at 19.1s and 14.2s on a
+ * QUIET machine — near-zero margin — which is why the failing member of this
+ * file rotated between runs under load (TR-052's signature) instead of
+ * pointing at a defect. The ceiling was calibrated for a pre-PF-10 scene:
+ * craft-ready now competes with the SDSS DR18 fetch/decode/mesh build, the
+ * DR3 belt, and the bonus star layers. 45s is the same recalibration TR-080
+ * applied to the GAP-03/04/05 and distance-scaled specs; what these tests
+ * assert (the craft reaches `ready`, console-clean, at the expected tier) is
+ * unchanged — the ceiling simply stops enforcing a CI-renderer performance
+ * floor the suite was never meant to enforce.
+ */
+const CRAFT_READY_TIMEOUT_MS = 45_000;
+
 for (const tier of ["1k", "2k"] as const) {
   test(`?craft=${tier} loads the textured craft without errors`, async ({
     page,
@@ -36,7 +53,7 @@ for (const tier of ["1k", "2k"] as const) {
       if (msg.type() === "error") consoleErrors.push(msg.text());
     });
     await page.waitForSelector(`babylon-scene[data-craft-state="ready"]`, {
-      timeout: 20000,
+      timeout: CRAFT_READY_TIMEOUT_MS,
     });
 
     expect(pageErrors).toEqual([]);
@@ -55,9 +72,15 @@ test("warp travel completes with the craft active (P2 world-space staging)", asy
   // same real reason (SDSS DR18's ~14.5M-vertex background galaxy field extends real frame
   // time under CI's software rendering; this test's own real-clock polls were previously
   // tight enough (5000ms) to be affected).
-  test.setTimeout(60000);
+  // PF-11 D0.1: raised 60s → 90s alongside the CRAFT_READY_TIMEOUT_MS change
+  // above — this test's ready-wait used Playwright's implicit 30s default,
+  // and a 45s ready ceiling plus the flight polls below does not fit in 60s.
+  // Same widening the GAP-03/04/05 test took in TR-080; assertions unchanged.
+  test.setTimeout(90000);
   await page.goto("/?craft=2k");
-  await page.waitForSelector('babylon-scene[data-craft-state="ready"]');
+  await page.waitForSelector('babylon-scene[data-craft-state="ready"]', {
+    timeout: CRAFT_READY_TIMEOUT_MS,
+  });
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
 
@@ -98,7 +121,7 @@ test("?craft=on auto-resolves to the 2k tier on a capable desktop (P4)", async (
 }) => {
   await page.goto("/?craft=on");
   await page.waitForSelector('babylon-scene[data-craft-state="ready"]', {
-    timeout: 20000,
+    timeout: CRAFT_READY_TIMEOUT_MS,
   });
   await expect(page.locator("babylon-scene")).toHaveAttribute("craft", "2k");
 });
@@ -109,7 +132,7 @@ test("?craft=on picks the 1k tier on a narrow viewport (P4)", async ({
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/?craft=on");
   await page.waitForSelector('babylon-scene[data-craft-state="ready"]', {
-    timeout: 20000,
+    timeout: CRAFT_READY_TIMEOUT_MS,
   });
   await expect(page.locator("babylon-scene")).toHaveAttribute("craft", "1k");
 });
@@ -122,7 +145,7 @@ test("stored quality override applies without any URL flag (P4)", async ({
   });
   await page.goto("/");
   await page.waitForSelector('babylon-scene[data-craft-state="ready"]', {
-    timeout: 20000,
+    timeout: CRAFT_READY_TIMEOUT_MS,
   });
   await expect(page.locator("babylon-scene")).toHaveAttribute("craft", "1k");
 });
@@ -159,7 +182,7 @@ test("default page loads the craft via the auto policy (P5 rollout)", async ({
 }) => {
   await page.goto("/");
   await page.waitForSelector('babylon-scene[data-craft-state="ready"]', {
-    timeout: 20000,
+    timeout: CRAFT_READY_TIMEOUT_MS,
   });
   await expect(page.locator("babylon-scene")).toHaveAttribute("craft", "2k");
 });

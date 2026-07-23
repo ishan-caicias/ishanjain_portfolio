@@ -124,11 +124,16 @@ import { Material } from "@babylonjs/core/Materials/material";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import {
-  buildMilkyWayRow,
+  buildMilkyWayImpostor,
+  MilkyWayBandBuilder,
   MILKY_WAY_FRAGMENT_GLSL,
   MILKY_WAY_FRAGMENT_WGSL,
   MILKY_WAY_HEIGHT,
-  MILKY_WAY_ROWS_PER_CHUNK,
+  MILKY_WAY_IMPOSTOR_FRAGMENT_GLSL,
+  MILKY_WAY_IMPOSTOR_FRAGMENT_WGSL,
+  MILKY_WAY_IMPOSTOR_SIZE,
+  MILKY_WAY_IMPOSTOR_VERTEX_GLSL,
+  MILKY_WAY_IMPOSTOR_VERTEX_WGSL,
   MILKY_WAY_SPHERE_RADIUS,
   MILKY_WAY_VERTEX_GLSL,
   MILKY_WAY_VERTEX_WGSL,
@@ -199,6 +204,12 @@ import { REAL_ASTEROIDS } from "../data/asteroids-dr3-physics";
 import {
   PLANET_ALBEDO,
   PLANET_LUNAR_L,
+  exposureTermsFor,
+  homeOrbitPosition,
+  HOME_ORBIT_PERIOD_S,
+  HOME_ORBIT_RADIUS,
+  SUN_RA_DEG,
+  SUN_DEC_DEG,
   PLANET_ELEV_SCALE,
   PLANET_PATCH_DEG,
   rotationAngle,
@@ -224,6 +235,17 @@ import {
   type PatchRect,
 } from "./planet-vt";
 import { composeAtlas, rectChanged } from "./planet-vt-stream";
+// PF-11 D1.3: the launch-from-Earth ascent curves (pure; Astra §4 physics, Vega motion-spec).
+import {
+  ASCENT_DURATION_MS,
+  ascentStateAt,
+  LIMB_GLOW_RGB,
+  LIMB_SHELL_FACTOR,
+  LIMB_VERTEX_GLSL,
+  LIMB_FRAGMENT_GLSL,
+  LIMB_VERTEX_WGSL,
+  LIMB_FRAGMENT_WGSL,
+} from "./ascent";
 // PF-10 C4.2: the Venus cloud descent. See venus-descent.ts for Astra's shader-fork mandate.
 import {
   CLOUD_CONTRAST_SCALE,
@@ -348,6 +370,9 @@ import {
   quatMultiply,
   QUAT_IDENTITY,
   raDecToDir,
+  frameLadderFade,
+  furnitureVisibility,
+  localFieldVisibility,
   SHIP_MAX_DT,
   SHIP_VIEW_DEPTH,
   SHIP_WARP_SCALE,
@@ -359,9 +384,40 @@ import {
   WARP_MIN_MS,
   type Ember,
 } from "./ship-dynamics";
+// PF-11 D1.1: real byte progress for every boot-path and post-ready fetch.
+import {
+  fetchWithProgress,
+  isBootCritical,
+  StageAggregator,
+  type LoadStage,
+  type StageProgress,
+} from "./load-progress";
 
 const emit = (name: string, detail: unknown) =>
   window.dispatchEvent(new CustomEvent(name, { detail }));
+
+/* PF-11 D1.1 — the honesty contract's transport.
+ *
+ * `cosmos:stage` is ADDITIVE and does not touch `cosmos:progress`, whose
+ * {loaded,total} payload the HUD and the E2E suite already depend on (the
+ * event bus is shared by both engines and its existing shapes never change
+ * silently). Everything the pre-flight dossier (D1.2) shows derives from these
+ * events — real bytes off a ReadableStream reader, real record counts, real
+ * completion signals — never a timed animation. */
+const emitStage = (p: StageProgress) => emit("cosmos:stage", p);
+
+/** Completion signal for a boot stage that downloads nothing (engine init, first
+ * rendered frame). Zero bytes is the honest reading for these — they are
+ * checkpoints, not transfers — so the dossier renders them as a checklist line
+ * rather than a byte bar. */
+const emitStageDone = (stage: LoadStage) =>
+  emitStage({
+    stage,
+    loadedBytes: 0,
+    totalBytes: 0,
+    done: true,
+    bootCritical: isBootCritical(stage),
+  });
 
 const D2R = Math.PI / 180;
 
@@ -462,6 +518,18 @@ const UP_AXIS: [number, number, number] = [0, 1, 0];
  * rather than copying the frame-rate-dependent raw increment. A very slow
  * spin (~14.5 minutes per revolution), not a feature — just enough that the
  * home view isn't perfectly frozen while idle. */
+/** PF-11 D6.4 / R16 — home-orbit angular rate, rad/s, derived from the declared 180 s screen-time
+ * period rather than written as a magic number. Real 400 km LEO is 92.7 min; the ~31x compression
+ * is a declared license (see HOME_ORBIT_PERIOD_S). */
+const HOME_ORBIT_RATE = (2 * Math.PI) / HOME_ORBIT_PERIOD_S;
+
+/** PF-11 D1.3 — the scene's vacuum-black clear colour (kept in sync with the `scene.clearColor`
+ * set in `_boot`), as the target the ascent sky-colour lerp converges to. A module const so the
+ * lerp and the restore-on-handback agree by construction. */
+const SPACE_BLACK_RGB: readonly [number, number, number] = [
+  0.003, 0.004, 0.012,
+];
+
 const IDLE_DRIFT_RATE = 0.0072;
 
 /* --- GAP-08/GAP-10: free-look direction --------------------------------
@@ -517,10 +585,11 @@ const KEY_LOOK_DAMP = 0.9;
 const SHOOTING_STAR_CYCLE_S = 5;
 
 /** idle: parked. aim: launch-turn preview before the burn (position holds).
- * warp: the eased chase-camera flight itself. Mirrors space-engine.js's
- * warp.mode values so the host (WarpOverlay, HUD) needs no engine-specific
- * branching. */
-type WarpMode = "idle" | "aim" | "warp";
+ * warp: the eased chase-camera flight itself. ascent (PF-11 D1.3): the
+ * launch-from-Earth title sequence, a rails climb from the surface to the home
+ * vantage. Mirrors space-engine.js's warp.mode values so the host (WarpOverlay,
+ * HUD) needs no engine-specific branching. */
+type WarpMode = "idle" | "aim" | "warp" | "ascent";
 
 interface BabylonWarp {
   mode: WarpMode;
@@ -535,6 +604,10 @@ interface BabylonWarp {
   lyTotal?: number; // 0 for goHome — matches the live engine's cosmos:warp payload
   aimDur?: number; // resolved once at launch (reduced-motion-aware)
   warpDur?: number; // resolved once at launch — distance-scaled, reduced-motion-aware
+  /** PF-11 D1.3: ascent progress, RAW 0..1 wall-clock fraction (the eased `k`
+   * is derived from it in `_tickAscent`). Separate from `prog` so the ascent
+   * and a warp can never share integration state. */
+  ascentProg?: number;
   /** B4 step 2: INTEGRATED warp progress (0..1). Advanced each frame by
    * dt/warpDur × the belt-density slow factor, so passing through the
    * asteroid field genuinely eases the ship. The single source of k for
@@ -564,8 +637,17 @@ const SHIP_BOB_WORLD = 0.05;
  * transport the live engine uses, so both engines read byte-identical assets
  * and no new payload ships. This half is DOM-bound; the decode itself is pure
  * and lives in star-catalog.ts. */
-async function loadChunkRGB(url: string): Promise<Uint8Array> {
-  const blob = await (await fetch(url)).blob();
+async function loadChunkRGB(
+  url: string,
+  // PF-11 D1.1: when a stage sink is supplied the transfer streams through a
+  // ReadableStream reader so real bytes reach the dossier; without one this
+  // stays the exact plain fetch it has always been (the decode half below is
+  // untouched either way).
+  progress?: { stage: LoadStage; sink: (p: StageProgress) => void },
+): Promise<Uint8Array> {
+  const blob = progress
+    ? await fetchWithProgress(url, progress.stage, progress.sink)
+    : await (await fetch(url)).blob();
   const bmp = await createImageBitmap(blob);
   // Read the dimensions BEFORE close() — closing an ImageBitmap zeroes its
   // width/height, which silently decodes an empty catalog and downgrades to the
@@ -599,7 +681,12 @@ async function loadChunkRGB(url: string): Promise<Uint8Array> {
  * returns the raw decoded RGB chunks (not just the merged field) so a later
  * bonus-layer merge (see `_loadBonusStarLayers`) can re-decode them alongside
  * new chunks without re-fetching/re-decoding the base catalog's images. */
-async function loadStarField(): Promise<{
+async function loadStarField(
+  // PF-11 D1.1: both catalog chunks report into ONE `star-catalog` stage — the
+  // aggregator sums them so the dossier's counter never jumps backwards when
+  // the second chunk starts.
+  agg?: StageAggregator,
+): Promise<{
   field: StarField;
   source: "catalog" | "procedural";
   baseChunks: Uint8Array[] | null;
@@ -607,7 +694,10 @@ async function loadStarField(): Promise<{
   try {
     const chunks = await Promise.all(
       CATALOG_CHUNKS.map((u) =>
-        loadChunkRGB(u).catch((e) => {
+        loadChunkRGB(
+          u,
+          agg ? { stage: "star-catalog", sink: agg.sink(u) } : undefined,
+        ).catch((e) => {
           // A missing deep layer degrades; a missing base catalog does not.
           if (u === CATALOG_CHUNKS[0]) throw e;
           console.warn(`[babylon-engine] optional chunk ${u} failed`, e);
@@ -830,6 +920,7 @@ varying vec3 vColor;
 varying float vAlpha;
 varying float vType;
 varying float vHalo;
+uniform float uLayerFade;   // PF-11 D2: per-layer frame-ladder fade (1 = fully present)
 void main(){
   float d = length(vCorner);
   if(d > 1.0) discard;
@@ -840,7 +931,7 @@ void main(){
   else if (ty > 5.5 && ty < 6.5) { a = exp(-d*d*9.0)*0.70; }  // DR3 asteroid: tight, no bloom
   else if (ty > 6.5)             { a = exp(-d*d*3.2)*0.55; }  // oort dust grain
   else { a = exp(-d*d*6.0) + vHalo*exp(-d*3.0)*0.18; }        // stellar PSF + bloom
-  gl_FragColor = vec4(vColor, a*vAlpha);
+  gl_FragColor = vec4(vColor, a*vAlpha*uLayerFade);
 }`;
 
 // Babylon-flavoured WGSL twin (vertexInputs / uniforms / vertexOutputs …).
@@ -982,6 +1073,7 @@ varying vColor : vec3<f32>;
 varying vAlpha : f32;
 varying vType : f32;
 varying vHalo : f32;
+uniform uLayerFade : f32;   // PF-11 D2: per-layer frame-ladder fade (1 = fully present)
 
 @fragment
 fn main(input : FragmentInputs) -> FragmentOutputs {
@@ -994,7 +1086,7 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
   else if (ty > 5.5 && ty < 6.5) { a = exp(-d * d * 9.0) * 0.70; }
   else if (ty > 6.5) { a = exp(-d * d * 3.2) * 0.55; }
   else { a = exp(-d * d * 6.0) + fragmentInputs.vHalo * exp(-d * 3.0) * 0.18; }
-  fragmentOutputs.color = vec4<f32>(fragmentInputs.vColor, a * fragmentInputs.vAlpha);
+  fragmentOutputs.color = vec4<f32>(fragmentInputs.vColor, a * fragmentInputs.vAlpha * uniforms.uLayerFade);
 }`;
 
 // PF-10 C4: planetary sphere twins. Kept in planet-sphere.ts rather than inline here because,
@@ -1004,6 +1096,11 @@ ShaderStore.ShadersStore["ijPlanetVertexShader"] = PLANET_VERTEX_GLSL;
 ShaderStore.ShadersStore["ijPlanetFragmentShader"] = PLANET_FRAGMENT_GLSL;
 ShaderStore.ShadersStoreWGSL["ijPlanetVertexShader"] = PLANET_VERTEX_WGSL;
 ShaderStore.ShadersStoreWGSL["ijPlanetFragmentShader"] = PLANET_FRAGMENT_WGSL;
+// PF-11 D1.3: the launch-ascent limb-glow rim.
+ShaderStore.ShadersStore["ijLimbVertexShader"] = LIMB_VERTEX_GLSL;
+ShaderStore.ShadersStore["ijLimbFragmentShader"] = LIMB_FRAGMENT_GLSL;
+ShaderStore.ShadersStoreWGSL["ijLimbVertexShader"] = LIMB_VERTEX_WGSL;
+ShaderStore.ShadersStoreWGSL["ijLimbFragmentShader"] = LIMB_FRAGMENT_WGSL;
 ShaderStore.ShadersStore["ijVenusCloudVertexShader"] = VENUS_CLOUD_VERTEX_GLSL;
 ShaderStore.ShadersStore["ijVenusCloudFragmentShader"] =
   VENUS_CLOUD_FRAGMENT_GLSL;
@@ -1216,6 +1313,15 @@ ShaderStore.ShadersStore["ijMilkyWayFragmentShader"] = MILKY_WAY_FRAGMENT_GLSL;
 ShaderStore.ShadersStoreWGSL["ijMilkyWayVertexShader"] = MILKY_WAY_VERTEX_WGSL;
 ShaderStore.ShadersStoreWGSL["ijMilkyWayFragmentShader"] =
   MILKY_WAY_FRAGMENT_WGSL;
+// PF-11 D2.2: the external-galaxy impostor (a camera-facing textured disc).
+ShaderStore.ShadersStore["ijImpostorVertexShader"] =
+  MILKY_WAY_IMPOSTOR_VERTEX_GLSL;
+ShaderStore.ShadersStore["ijImpostorFragmentShader"] =
+  MILKY_WAY_IMPOSTOR_FRAGMENT_GLSL;
+ShaderStore.ShadersStoreWGSL["ijImpostorVertexShader"] =
+  MILKY_WAY_IMPOSTOR_VERTEX_WGSL;
+ShaderStore.ShadersStoreWGSL["ijImpostorFragmentShader"] =
+  MILKY_WAY_IMPOSTOR_FRAGMENT_WGSL;
 ShaderStore.ShadersStore["ijConstellationVertexShader"] =
   CONSTELLATION_VERTEX_GLSL;
 ShaderStore.ShadersStore["ijConstellationFragmentShader"] =
@@ -1305,6 +1411,33 @@ class BabylonScene extends HTMLElement {
   private _camera?: FreeCamera;
   private _stars?: Mesh;
   private _starMat?: ShaderMaterial;
+  // --- PF-11 D2: frame ladder (sky honesty by destination) ---
+  /** `_starMat` clone on the main 168,959-star field; carries the local-galaxy
+   * collapse fade (D2.2). The base `_starMat` stays with SDSS at fade 1. */
+  private _localMat?: ShaderMaterial;
+  /** `_starMat` clone on the DR3 asteroid belt; carries the furniture fade (D2.1). */
+  private _beltMat?: ShaderMaterial;
+  /** Live 0..1 fades, driven per frame from the warp state by `_updateFrameLadder`. */
+  private _furnitureFade = 1;
+  private _localFieldFade = 1;
+  private _furnitureFadeFrom = 1;
+  private _furnitureFadeTo = 1;
+  private _localFadeFrom = 1;
+  private _localFadeTo = 1;
+  /** False once the belt has faded out — belt Havok forces/shake sleep (D2.1). */
+  private _beltPhysicsAwake = true;
+  /** External-galaxy impostor (D2.2): a license-clean procedural disc that
+   * appears toward home once the local field collapses at an extragalactic
+   * arrival (Astra §1). */
+  private _impostorMesh?: Mesh;
+  private _impostorMat?: ShaderMaterial;
+  private _impostorTex?: RawTexture;
+  private _impostorVisible = false;
+  /** Direction (unit, toward the destination) and real distance (ly) of the
+   * last extragalactic target — the impostor sits astern of it, sized by the
+   * true angular subtense. */
+  private _farDestDir: [number, number, number] = [0, 0, -1];
+  private _farDestLy = 0;
   private _shootMesh?: Mesh;
   // --- GAP-01/GAP-02: curated celestial bodies ---
   private _bodyMesh?: Mesh;
@@ -1433,8 +1566,12 @@ class BabylonScene extends HTMLElement {
   /** 1x1 stand-in bound until the real equirect texture finishes building —
    * see _setupMilkyWay's WebGPU regression note. Disposed once swapped out. */
   private _bandPlaceholderTex?: RawTexture;
-  private _bandBuf?: Uint8Array;
-  private _bandRow = 0;
+  /** PF-11 D0.1: owns the row cursor + RGBA buffer, sliced by time budget.
+   * Driven from the render loop AND the `_bandBuildTimer` chain below. */
+  private _bandBuilder?: MilkyWayBandBuilder;
+  /** Pending `setTimeout(0)` build slice — the between-frames driver that
+   * decouples total build wall-time from frame delivery. Cleared on dispose. */
+  private _bandBuildTimer?: ReturnType<typeof setTimeout>;
   private _bandReady = false;
   private _bandFadeAmt = 0;
   // --- GAP-04: constellation figures ---
@@ -1628,6 +1765,20 @@ class BabylonScene extends HTMLElement {
   /** Black 1x1 for the cloud/specular samplers on every body that is not Earth. */
   private _planetBlackTex?: Texture;
   private _planetCloudTex?: Texture;
+  private _planetNightTex?: Texture;
+  /** CLAUDE.md #23: keeps Babylon's canvas out of the tab order no matter when its deferred
+   * input setup re-stamps tabindex. Disconnected on teardown. */
+  private _tabIndexGuard?: MutationObserver;
+  /** PF-11 D6.4 / R16: armed on arriving home, cleared on any departure. */
+  private _homeOrbit = false;
+  private _homeOrbitPhase = 0;
+  /** PF-11 D1.3: the launch ascent's own progress (0..1 raw wall-clock fraction), mirrored on
+   * `warp.ascentProg`; kept as a field too so `sceneStats` and the skip path can read it. */
+  private _ascentProg = 0;
+  /** The limb-glow shell (fresnel rim just outside Earth), visible only during the ascent's
+   * 80-120 km beat. Lazily built on the first ascent. */
+  private _limbMesh?: Mesh;
+  private _limbMat?: ShaderMaterial;
   private _planetSpecularTex?: Texture;
   private _planetHeightTex?: Texture;
   /** TR-059: a real 1x1 texture bound to BOTH samplers before the mesh can draw. */
@@ -1635,7 +1786,7 @@ class BabylonScene extends HTMLElement {
   /** Reused so the per-frame camera push allocates nothing (frame-budget rule). */
   private _camScratch = new Vector3();
   /** Which surface tier is bound -- "high" until the ultra upgrade lands. */
-  private _planetSurfaceTier: "high" | "ultra" = "high";
+  private _planetSurfaceTier: "base" | "high" | "ultra" = "high";
   /** Current rotation angle, exposed for E2E. */
   private _planetSpin = 0;
   /** PF-10 C4.2 streamer state. */
@@ -1770,12 +1921,21 @@ class BabylonScene extends HTMLElement {
     } catch (e) {
       // Parity with space-engine's no-WebGL fallback: never blank the page.
       console.warn("[babylon-engine] engine init failed", e);
+      // PF-11 D1.1/D1-AC7: the no-WebGL visitor's dossier must not hang waiting
+      // for stages that will never run. Close every boot-critical stage here so
+      // the pre-flight surface resolves to the DOM fallback promptly, rather
+      // than stalling and then arming LAUNCH over a scene that cannot start.
+      emitStageDone("engine-init");
+      emitStageDone("star-catalog");
+      emitStageDone("atlas-map");
+      emitStageDone("first-frame");
       emit("cosmos:progress", { loaded: 0, total: 0 });
       emit("cosmos:ready", {});
       return;
     }
     this._engine = engine;
     this.backend = backend;
+    emitStageDone("engine-init");
 
     // B6 accessibility re-audit fix: Babylon's engine sets tabindex="1" on
     // its canvas — a POSITIVE tabindex that hijacks the page tab order
@@ -1783,6 +1943,24 @@ class BabylonScene extends HTMLElement {
     // path has no canvas-level keyboard interaction (all input rides the
     // shared chrome), so the canvas leaves the tab order entirely.
     canvas.tabIndex = -1;
+
+    // PF-11 D6.4 HARDENING (CLAUDE.md #23, TR-088). The line above and the per-frame re-assert
+    // at the top of the render loop still leave one window open, and the render loop's own
+    // comment records it happening once already: Babylon's deferred pointer setup can re-stamp
+    // tabindex="1" BEFORE the first frame ever runs, and an axe scan landing in that window sees
+    // a serious violation. Nothing about when that window opens is under this code's control —
+    // it is whenever Babylon's lazy input setup happens to fire — so a MutationObserver closes it
+    // rather than another timing guess. An accessibility contract must not depend on frame
+    // pacing, which is exactly what moving the re-assert to the top of the frame was already
+    // trying to say; this finishes the thought.
+    this._tabIndexGuard?.disconnect();
+    this._tabIndexGuard = new MutationObserver(() => {
+      if (canvas.tabIndex !== -1) canvas.tabIndex = -1;
+    });
+    this._tabIndexGuard.observe(canvas, {
+      attributes: true,
+      attributeFilter: ["tabindex"],
+    });
 
     // B5: resolve the quality tier ONCE, from the backend that actually
     // initialized + the same device classifier the perf HUD reports, with a
@@ -1829,7 +2007,15 @@ class BabylonScene extends HTMLElement {
       }),
     );
 
-    const { field, source, baseChunks } = await loadStarField();
+    // PF-11 D1.1: the largest boot-critical download (2.02 + 0.87 MB), and the
+    // one the pre-flight dossier spends most of its time showing. No try/finally
+    // is needed to guarantee the stage closes: `loadStarField` cannot throw — it
+    // catches internally and degrades to the procedural field — so this line is
+    // reached on every path, including a total asset failure, and the stage
+    // always ends with a real record count.
+    const catalogStage = new StageAggregator("star-catalog", emitStage);
+    const { field, source, baseChunks } = await loadStarField(catalogStage);
+    catalogStage.finish(field.count);
     this.starSource = source;
     this._baseCatalogRgb = baseChunks;
 
@@ -1857,6 +2043,7 @@ class BabylonScene extends HTMLElement {
           "uGamma",
           "uWarpDir",
           "uTime",
+          "uLayerFade",
         ],
         needAlphaBlending: true,
         shaderLanguage:
@@ -1873,6 +2060,10 @@ class BabylonScene extends HTMLElement {
     // an unbound sampler-or-uniform is the TR-059 class of failure, and 0 is also exactly the
     // reduced-motion contract (a frozen but correctly-placed belt, not a missing one).
     mat.setFloat("uTime", 0);
+    // PF-11 D2: fully present by default. The base material stays at 1 (SDSS,
+    // which shares it, must never fade — Astra §1); the belt and local-field
+    // clones below carry the destination-keyed fade.
+    mat.setFloat("uLayerFade", 1);
     const pushViewport = () =>
       mat.setVector2(
         "uViewport",
@@ -1881,8 +2072,19 @@ class BabylonScene extends HTMLElement {
     pushViewport();
     mat.backFaceCulling = false;
     mat.alphaMode = Constants.ALPHA_ADD;
-    mesh.material = mat;
     this._starMat = mat; // GAP-06: aberration/Doppler uniforms pushed here
+    // PF-11 D2.2: the 168,959-star local field collapses at extragalactic
+    // arrivals (Astra §1). Its own clone so `uLayerFade` differs from SDSS's
+    // (which stays on the base `mat` at 1) and the belt's. Clones share the
+    // compiled program; per-clone uniforms are cheap. Created here, right after
+    // the base is fully configured, so it inherits uSize/uHaloAmp/uViewport/
+    // uTime/uLayerFade=1 at clone time (see _pushAberration / resize / uTime
+    // fan-out for the per-frame uniforms it must keep receiving too).
+    const localMat = mat.clone("ijStarLocal");
+    localMat.backFaceCulling = false;
+    localMat.alphaMode = Constants.ALPHA_ADD;
+    this._localMat = localMat;
+    mesh.material = localMat;
     this._applyDensity(); // GAP-12: honour a `density` attribute set before boot finished
 
     // B3: GPU-particle idle shooting stars — new work, not a port (the live
@@ -1932,6 +2134,7 @@ class BabylonScene extends HTMLElement {
     // Synchronous, cheap geometry/material setup — the band's actual texture
     // fills in progressively via _tickMilkyWay (see that method).
     this._setupMilkyWay(scene, backend);
+    this._setupImpostor(scene, backend); // PF-11 D2.2
     this._setupConstellations(scene, backend);
     this._setupStarTrails(scene, engine, backend, field);
     // PF-10 C4: the planet sphere. Built hidden; revealed by _tickPlanetSphere on arrival.
@@ -1991,6 +2194,7 @@ class BabylonScene extends HTMLElement {
       this._tickGovernor(performance.now(), scrolledAway);
 
       this._tickWarp(camera);
+      this._updateFrameLadder(); // PF-11 D2 — before band/asteroids read the fades
       this._tickMilkyWay();
       this._tickTrails();
       this._tickNebula(camera, engine);
@@ -2009,6 +2213,11 @@ class BabylonScene extends HTMLElement {
       // Only type-6 vertices consult it; the stars, galaxies, Oort and white-dwarf layers
       // sharing this material are unaffected.
       this._starMat?.setFloat("uTime", bodyT);
+      // PF-11 D2: the belt/local-field clones share the same orbital clock (the
+      // belt clone's type-6 vertices consult it; the local clone's do not, but
+      // keeping all three in lockstep costs nothing and avoids a divergent belt).
+      this._beltMat?.setFloat("uTime", bodyT);
+      this._localMat?.setFloat("uTime", bodyT);
       this._beltOrbitClock = bodyT;
       // GAP-14: aim readout, throttled to every 8th frame — matches
       // space-engine.js's `this._frame % 8 === 0` exactly. Reads the
@@ -2034,6 +2243,11 @@ class BabylonScene extends HTMLElement {
       if (first) {
         first = false;
         emit("cosmos:progress", { loaded: field.count, total: field.count });
+        // PF-11 D1.1: the last boot-critical stage, and the one that means what
+        // `cosmos:ready` only implies — a frame has genuinely been drawn. Emitted
+        // BEFORE cosmos:ready so a dossier listening to both sees the stage close
+        // first and never renders "ready" over an unfinished checklist.
+        emitStageDone("first-frame");
         emit("cosmos:ready", {});
         // PF-10 C1: kick off the bonus background-layer fetch only after the first real frame
         // has rendered — never awaited, never gating cosmos:ready itself.
@@ -2050,6 +2264,9 @@ class BabylonScene extends HTMLElement {
       engine.resize();
       pushViewport(); // px-sized billboards depend on the render target size
       const vp = new Vector2(engine.getRenderWidth(), engine.getRenderHeight());
+      // PF-11 D2: the frame-ladder clones size their billboards off uViewport too.
+      this._localMat?.setVector2("uViewport", vp);
+      this._beltMat?.setVector2("uViewport", vp);
       this._bodyMat?.setVector2("uViewport", vp);
       this._photoMat?.setVector2("uViewport", vp);
       this._emberMat?.setVector2("uViewport", vp); // GAP-07
@@ -2087,6 +2304,16 @@ class BabylonScene extends HTMLElement {
 
   disconnectedCallback() {
     this._ro?.disconnect();
+    this._tabIndexGuard?.disconnect();
+    this._tabIndexGuard = undefined;
+    // PF-11 D0.1: the band build's between-frames driver outlives the render
+    // loop unless it is cancelled here — a timer callback firing after
+    // engine.dispose() would build rows for a scene that no longer exists.
+    if (this._bandBuildTimer !== undefined) {
+      clearTimeout(this._bandBuildTimer);
+      this._bandBuildTimer = undefined;
+    }
+    this._bandBuilder = undefined;
     this._engine?.dispose();
   }
 
@@ -2131,7 +2358,16 @@ class BabylonScene extends HTMLElement {
       photoBodyTextureReady: this._photoTex?.isReady() ?? false,
       // GAP-03: Milky Way band diagnostics.
       bandReady: this._bandReady,
-      bandFade: Math.round(this._bandFadeAmt * 1000) / 1000,
+      // PF-11 D0.1: rows built so far / 512 — lets a test watch the build
+      // ADVANCE (the liveness signal) rather than only observing its end
+      // state, and is the honest progress source D1.1's dossier will read.
+      bandProgress: this._bandReady ? 1 : (this._bandBuilder?.progress ?? 0),
+      // PF-11 D2.2: the EFFECTIVE band opacity — the boot fade-in modulated by
+      // the extragalactic collapse (`_localFieldFade`), matching the actual
+      // `uFade` uniform. 1 in-galaxy, 0 at an SDSS/NBG arrival. (`_localFieldFade`
+      // is 1 everywhere else, so this is unchanged for all in-galaxy travel.)
+      bandFade:
+        Math.round(this._bandFadeAmt * this._localFieldFade * 1000) / 1000,
       bandTextureReady: this._bandTex?.isReady() ?? false,
       bandMeshReady: this._bandMesh ? this._bandMesh.isReady(true) : false,
       // GAP-04: constellation figure diagnostics.
@@ -2210,9 +2446,19 @@ class BabylonScene extends HTMLElement {
         : 0,
       asteroidOrbitClock: Math.round(this._beltOrbitClock * 100) / 100,
       asteroidVisualReady:
-        this._asteroidVisualMesh && this._starMat
-          ? this._starMat.isReady(this._asteroidVisualMesh)
+        this._asteroidVisualMesh && this._beltMat
+          ? this._beltMat.isReady(this._asteroidVisualMesh)
           : false,
+      // PF-11 D2: the frame ladder — destination-keyed layer fades. `furnitureFade`
+      // (belt/glare) is ~1 in the solar system, 0 at any DSO; `localFieldFade`
+      // (band/star field/figures) is 1 inside the galaxy, 0 at extragalactic
+      // arrivals; `impostorVisible` flips true when the external-galaxy sprite
+      // shows; `beltPhysicsAwake` is the Havok sleep signal (D2.1/D7.5).
+      furnitureFade: Math.round(this._furnitureFade * 1000) / 1000,
+      localFieldFade: Math.round(this._localFieldFade * 1000) / 1000,
+      beltPhysicsAwake: this._beltPhysicsAwake,
+      impostorVisible: this._impostorVisible,
+      impostorTextureReady: this._impostorTex?.isReady() ?? false,
       // B4 step 2: proximity-slowdown diagnostics. warpSlowMin persists past
       // arrival so E2E can prove a belt crossing eased the journey.
       warpSlow: Math.round(this._warpSlow * 1000) / 1000,
@@ -2222,6 +2468,31 @@ class BabylonScene extends HTMLElement {
       impactCount: this._impactCount,
       shakeAmp: Math.round(this._shakeAmp * 1000) / 1000,
       // B5: the resolved quality tier and its key applied budgets.
+      // PF-11 D6.4 / R16 — the home reveal + orbit, for E2E. `homePhaseDeg` is recomputed from
+      // the live camera and sun vectors rather than reported as the constant it should be, so the
+      // test proves the 90 degree hold instead of restating it.
+      homeOrbit: this._homeOrbit,
+      homeOrbitPhaseDeg:
+        Math.round(((this._homeOrbitPhase * 180) / Math.PI) * 10) / 10,
+      // PF-11 D1.3 — the launch ascent, for E2E.
+      ascentMode: this.warp.mode === "ascent",
+      ascentProg: Math.round(this._ascentProg * 1000) / 1000,
+      limbVisible: this._limbMesh?.isVisible ?? false,
+      homePhaseDeg: (() => {
+        const r = Math.hypot(this.cam[0], this.cam[1], this.cam[2]);
+        if (r < 1e-6) return null;
+        const d2r = Math.PI / 180;
+        const sr = SUN_RA_DEG * d2r,
+          sd = SUN_DEC_DEG * d2r;
+        const dot =
+          (this.cam[0] / r) * (Math.cos(sd) * Math.cos(sr)) +
+          (this.cam[1] / r) * (Math.cos(sd) * Math.sin(sr)) +
+          (this.cam[2] / r) * Math.sin(sd);
+        return (
+          Math.round((Math.acos(Math.max(-1, Math.min(1, dot))) / d2r) * 100) /
+          100
+        );
+      })(),
       qualityTier: this._quality.name,
       haloAmp: this._quality.haloAmp,
       shootCount: this._quality.shootingStars,
@@ -2301,10 +2572,17 @@ class BabylonScene extends HTMLElement {
     // set to a no-op today, ready to be re-armed with real thresholds once real-device numbers
     // land — never reintroduced blind.
     const chunkUrls = BONUS_CATALOG_CHUNKS;
+    // PF-11 D1.1: ~5.8 MB across four chunks, all summed into one `bonus-layers`
+    // stage. NOT boot-critical — the dossier shows these as "STREAMING IN
+    // BACKGROUND" and LAUNCH never waits on them.
+    const bonusStage = new StageAggregator("bonus-layers", emitStage);
     try {
       const bonusRgb = await Promise.all(
         chunkUrls.map((u) =>
-          loadChunkRGB(u).catch((e) => {
+          loadChunkRGB(u, {
+            stage: "bonus-layers",
+            sink: bonusStage.sink(u),
+          }).catch((e) => {
             console.warn(`[babylon-engine] bonus star layer ${u} failed`, e);
             return new Uint8Array(0);
           }),
@@ -2320,12 +2598,20 @@ class BabylonScene extends HTMLElement {
       // means the one-time enhancement never competes with an active flight for frame time.
       await this._waitForWarpIdle();
       this._applyStarFieldGeometry(merged, this._engine);
+      bonusStage.finish(merged.count);
       emit("cosmos:bonus-stars", { total: merged.count });
     } catch (e) {
       console.warn(
         "[babylon-engine] bonus star layers failed, keeping base catalog",
         e,
       );
+    } finally {
+      // Idempotent — a no-op after the success path's record-carrying finish
+      // above. Present for the two paths that skip it: the `return` when every
+      // chunk failed, and the catch. A background stage that never closes would
+      // sit in the dossier as permanently "STREAMING" long after the engine
+      // gave up on it.
+      bonusStage.finish();
     }
   }
 
@@ -2344,8 +2630,16 @@ class BabylonScene extends HTMLElement {
   private async _loadSdssGalaxyLayer(scene: Scene, engine: AbstractEngine) {
     if (this._sdssLayerRequested) return;
     this._sdssLayerRequested = true;
+    // PF-11 D1.1: 47.1 MB — by far the largest single transfer the site makes, and
+    // the one whose real progress matters most to a visitor on a slow link. Not
+    // boot-critical: it streams behind an already-interactive scene.
+    const sdssStage = new StageAggregator("sdss-field", emitStage);
+    const sdssUrl = "assets/sdss18.png";
     try {
-      const rgb = await loadChunkRGB("assets/sdss18.png");
+      const rgb = await loadChunkRGB(sdssUrl, {
+        stage: "sdss-field",
+        sink: sdssStage.sink(sdssUrl),
+      });
       const field = decodeStarCatalog([rgb]);
       if (field.count === 0) return;
       await this._waitForWarpIdle();
@@ -2362,9 +2656,12 @@ class BabylonScene extends HTMLElement {
       mesh.material = this._starMat ?? null;
       this._sdssMesh = mesh;
       this._sdssGalaxyCount = field.count;
+      sdssStage.finish(field.count);
       emit("cosmos:sdss-galaxies", { total: field.count });
     } catch (e) {
       console.warn("[babylon-engine] SDSS galaxy layer failed", e);
+    } finally {
+      sdssStage.finish(); // idempotent; closes the zero-count and error paths
     }
   }
 
@@ -2390,8 +2687,14 @@ class BabylonScene extends HTMLElement {
   private async _loadAsteroidVisualLayer(scene: Scene, engine: AbstractEngine) {
     if (this._asteroidLayerRequested) return;
     this._asteroidLayerRequested = true;
+    // PF-11 D1.1: 2.08 MB, post-ready, not boot-critical.
+    const beltStage = new StageAggregator("asteroid-belt", emitStage);
+    const beltUrl = "assets/asteroids-dr3.png";
     try {
-      const rgb = await loadChunkRGB("assets/asteroids-dr3.png");
+      const rgb = await loadChunkRGB(beltUrl, {
+        stage: "asteroid-belt",
+        sink: beltStage.sink(beltUrl),
+      });
       const field = decodeStarCatalog([rgb]);
       if (field.count === 0) return;
       await this._waitForWarpIdle();
@@ -2405,12 +2708,28 @@ class BabylonScene extends HTMLElement {
         new VertexBuffer(engine, bb.meta, "starMeta", false, false, 2),
       );
       mesh.alwaysSelectAsActiveMesh = true;
-      mesh.material = this._starMat ?? null;
+      // PF-11 D2.1: the belt is solar-system furniture — it fades out by
+      // ~0.1 ly departure (Astra §2: it subtends 16 mas from M42). Its own
+      // `_starMat` clone so `uLayerFade` is the furniture fade, independent of
+      // the star field and SDSS. Clone inherits the base's current uSize/
+      // uHaloAmp/uViewport/uTime; the per-frame fan-outs keep it in sync.
+      if (this._starMat) {
+        const beltMat = this._starMat.clone("ijStarBelt");
+        beltMat.backFaceCulling = false;
+        beltMat.alphaMode = Constants.ALPHA_ADD;
+        this._beltMat = beltMat;
+        mesh.material = beltMat;
+      } else {
+        mesh.material = null;
+      }
       this._asteroidVisualMesh = mesh;
       this._asteroidVisualCount = field.count;
+      beltStage.finish(field.count);
       emit("cosmos:asteroid-belt", { total: field.count });
     } catch (e) {
       console.warn("[babylon-engine] DR3 asteroid visual layer failed", e);
+    } finally {
+      beltStage.finish(); // idempotent; closes the zero-count and error paths
     }
   }
 
@@ -2428,9 +2747,20 @@ class BabylonScene extends HTMLElement {
     backend: "webgpu" | "webgl2",
   ) {
     let atlasMap: AtlasMap | null = null;
+    // PF-11 D1.1: small (11 KB) but boot-critical — LAUNCH waits on it, so it is
+    // reported like everything else rather than silently. `finish()` is in the
+    // `finally` precisely BECAUSE this path degrades gracefully: a 404 or parse
+    // failure still ends the stage, or the dossier would stall forever on a
+    // scene that had already recovered and moved on.
+    const atlasStage = new StageAggregator("atlas-map", emitStage);
+    const atlasUrl = "/assets/atlas-map.json";
     try {
-      const res = await fetch("/assets/atlas-map.json");
-      if (res.ok) atlasMap = (await res.json()) as AtlasMap;
+      const blob = await fetchWithProgress(
+        atlasUrl,
+        "atlas-map",
+        atlasStage.sink(atlasUrl),
+      );
+      atlasMap = JSON.parse(await blob.text()) as AtlasMap;
     } catch (e) {
       // Same fallback philosophy as loadStarField: a missing/broken atlas map
       // degrades every body to procedural rather than blanking anything.
@@ -2438,6 +2768,8 @@ class BabylonScene extends HTMLElement {
         "[babylon-engine] atlas-map fetch failed, all bodies render procedurally",
         e,
       );
+    } finally {
+      atlasStage.finish();
     }
 
     const { procedural, photo } = partitionCelestialBodies(
@@ -2559,6 +2891,18 @@ class BabylonScene extends HTMLElement {
     // Not awaited: Babylon loads the texture in the background and reports
     // readiness via isReady(); the mesh renders untextured until it lands,
     // exactly like the ship GLB's own async-not-awaited load.
+    //
+    // PF-11 D1.1 — the ONE named asset deliberately left without a
+    // `cosmos:stage` reader, recorded here rather than silently skipped.
+    // atlas.jpg is 3.5 MB and real, but Babylon's `Texture` performs its own
+    // internal fetch and exposes only completion (`onLoadObservable`), never
+    // byte progress. Reporting it would mean re-routing this load through
+    // `fetchWithProgress` and handing Babylon a blob: URL — which this site's
+    // CSP does already permit (`img-src`/`connect-src` carry blob: precisely
+    // for the texture path) — but that changes how the GAP-02 photographic
+    // body layer loads, and that deserves its own slice and its own
+    // verification rather than riding along inside the instrumentation slice.
+    // The `atlas-photo` LoadStage exists in load-progress.ts ready for it.
     const tex = new Texture("/assets/atlas.jpg", scene);
     this._photoTex = tex;
     photoMat.setTexture("uTex", tex);
@@ -2602,6 +2946,8 @@ class BabylonScene extends HTMLElement {
           "uElevScale",
           "uAlbedo",
           "uLunarL",
+          "uSurgeB0",
+          "uHasNight",
           "uCamPos",
           "uDetailRect",
           "uHasDetail",
@@ -2616,6 +2962,7 @@ class BabylonScene extends HTMLElement {
           "detailTex",
           "cloudTex",
           "specularTex",
+          "nightTex",
         ],
         shaderLanguage:
           backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
@@ -2677,6 +3024,9 @@ class BabylonScene extends HTMLElement {
     );
     mat.setTexture("cloudTex", black);
     mat.setTexture("specularTex", black);
+    // PF-11 D6.4: bound black from boot, per #9 — a declared sampler needs a REAL texture object
+    // before the mesh ever draws, and on WebGPU an empty binding kills the whole frame.
+    mat.setTexture("nightTex", black);
     mat.setFloat("uHasCloud", 0);
     mat.setFloat("uAtmosphere", 0);
     this._planetBlackTex = black;
@@ -2689,6 +3039,10 @@ class BabylonScene extends HTMLElement {
     mat.setFloat("uElevScale", 0);
     mat.setFloat("uAlbedo", 0.3);
     mat.setFloat("uLunarL", 0.55);
+    // PF-11 D6.1: no surge until a real body is dressed. 0 makes surge(alpha) == 1 identically,
+    // so the placeholder sphere is unaffected by the phase term.
+    mat.setFloat("uSurgeB0", 0);
+    mat.setFloat("uHasNight", 0);
     mat.setVector3("uSunDir", new Vector3(0, 0, 1));
     mat.setVector3("uCamPos", new Vector3(0, 0, 0));
     this._planetPlaceholderTex = flat;
@@ -2770,23 +3124,47 @@ class BabylonScene extends HTMLElement {
 
     const manifest = this._planetManifest;
     const arrived = this.arrivedId;
-    if (!manifest || !arrived) {
+    if (!manifest) {
       mesh.isVisible = false;
       this._planetBodyId = null;
       return;
     }
 
-    const body = this.bodies.find((b) => b.e.id === arrived);
-    const key = body ? sphereIdFor(body.e, manifest.bodies) : null;
-    if (!key || !body) {
+    /* PF-11 D6.4 — THE HOME REVEAL. Earth is deliberately NOT a catalog body and must never
+     * become one: this catalog's frame is geocentric, so Earth's direction is 0/0 and its
+     * distance is 0, and `bodyDepth(0)` would place it deeper than Neptune (Astra, Earth brief
+     * §B3). It is the origin. So the sphere gets a second, body-less path that keys on being at
+     * home rather than on `arrivedId`, and everything downstream — the re-dress block, the
+     * rotation, the per-frame camera uniform — is shared.
+     *
+     * The payoff is the phase angle. Every `travelTo` arrival is pinned to 0.000°, because the
+     * camera parks on the Sun-body line and `sunDirectionFrom` returns the negated body
+     * direction: V = L, forced, which is why no other body in this scene can show a terminator.
+     * At the origin the vectors decouple, and the home vantage is chosen at quadrature — exactly
+     * 90.0000°, unit-asserted from the Sun's own catalog entry. */
+    const atHome = this._isAtHomeVantage();
+    const homeReveal = !arrived && atHome && !!manifest.bodies.earth;
+
+    const body = arrived
+      ? this.bodies.find((b) => b.e.id === arrived)
+      : undefined;
+    const key = homeReveal
+      ? "earth"
+      : body
+        ? sphereIdFor(body.e, manifest.bodies)
+        : null;
+    if (!key || (!body && !homeReveal)) {
       mesh.isVisible = false;
       this._planetBodyId = null;
       return;
     }
+    // Origin for the home reveal; the body's real catalog position otherwise.
+    const spherePos: [number, number, number] = body ? body.pos : [0, 0, 0];
 
     if (this._planetBodyId !== key) {
       this._planetBodyId = key;
-      this._planetSurfaceTier = "high";
+      this._planetSurfaceTier =
+        this._quality.planetTexture === "base" ? "base" : "high";
       // Detail belongs to the previous body; drop it before anything else so a stale atlas can
       // never be sampled against a new body's UVs.
       this._planetVtRect = null;
@@ -2804,11 +3182,29 @@ class BabylonScene extends HTMLElement {
       const phys = PLANET_PHYSICAL[key];
 
       // Real sun direction for this body's real catalog position — see planet-sphere.ts.
-      const [sx, sy, sz] = sunDirectionFrom(body.pos);
+      //
+      // PF-11 D6.4: at the origin `sunDirectionFrom` CANNOT be used — its own guard returns the
+      // documented "arbitrary but stable" [0,0,1] fallback for a zero-length input, which would
+      // put the terminator wherever that happens to land. The home reveal reads the Sun's OWN
+      // catalog entry instead (ra 250 / dec -20.5, a real geocentric solar position), which is
+      // both the honest datum and the thing that makes the 90° vantage computable.
+      const [sx, sy, sz] = homeReveal
+        ? raDecToDir(SUN_RA_DEG, SUN_DEC_DEG)
+        : sunDirectionFrom(spherePos);
       mat.setVector3("uSunDir", new Vector3(sx, sy, sz));
       // Astra's real geometric albedos: PLANET_PHYSICAL for the three bodies with elevation,
       // PLANET_ALBEDO for the surface-only ones, neutral default otherwise.
-      mat.setFloat("uAlbedo", phys?.albedo ?? PLANET_ALBEDO[key] ?? 0.3);
+      //
+      // PF-11 D6.1: that geometric albedo is now SPLIT rather than sent whole. For the four
+      // bodies whose published value is an opposition-surge peak (Tethys, Dione, Rhea, Moon) the
+      // shader gets the surge-free base and the coefficient separately, and multiplies them back
+      // together in the phase function — recovering the real geometric albedo exactly at alpha=0
+      // and nowhere else, which is the only place it was ever valid. Every other body passes
+      // through with surgeB0 = 0 and is arithmetically unchanged.
+      const geometricAlbedo = phys?.albedo ?? PLANET_ALBEDO[key] ?? 0.3;
+      const { baseAlbedo, surgeB0 } = exposureTermsFor(key, geometricAlbedo);
+      mat.setFloat("uAlbedo", baseAlbedo);
+      mat.setFloat("uSurgeB0", surgeB0);
       // Airless bodies backscatter (Lommel-Seeliger); atmospheres tend toward Lambert. Bodies
       // without a measured coefficient get Mars's 0.55 rather than a hard 0 or 1.
       // PLANET_LUNAR_L overrides the default for bodies with no PLANET_PHYSICAL entry — Earth
@@ -2822,19 +3218,24 @@ class BabylonScene extends HTMLElement {
       mat.setFloat("uHasHeight", entry.height ? 1 : 0);
       mat.setFloat("uElevScale", entry.height ? PLANET_ELEV_SCALE : 0);
 
-      mesh.position.set(body.pos[0], body.pos[1], body.pos[2]);
+      mesh.position.set(spherePos[0], spherePos[1], spherePos[2]);
       mesh.scaling.setAll(PLANET_SPHERE_RADIUS);
 
-      const surface = new Texture(
-        `/assets/planets/${entry.surface.high}`,
-        this._scene,
-      );
+      // PF-11 D6.3.2: the ladder's FIRST RUNG is now tier-chosen. `lite` takes the 2048-wide
+      // `base` tier — which the pipeline has baked and shipped since C4 while the engine only
+      // ever fetched `high`, so 6.58 MB of assets have been downloaded by nobody (the delivery
+      // plan's B5 item, finally consumed). `balanced`/`full` still start at `high`.
+      const ladder = this._quality.planetTexture;
+      const firstFile =
+        ladder === "base" ? entry.surface.base : entry.surface.high;
+      const surface = new Texture(`/assets/planets/${firstFile}`, this._scene);
       // WRAP is load-bearing, not a default: the shader adds UV_LONGITUDE_OFFSET to u without
       // fract(), so sampling relies on the sampler wrapping past 1.0 (see planet-sphere.ts).
       surface.wrapU = Texture.WRAP_ADDRESSMODE;
       mat.setTexture("surfaceTex", surface);
       this._planetSurfaceTex?.dispose();
       this._planetSurfaceTex = surface;
+      this._planetSurfaceTier = ladder === "base" ? "base" : "high";
 
       // PROGRESSIVE UPGRADE (PF-10 C4.2). The `high` tier lands fast and gets the body on
       // screen; `ultra` is 4-6 MB — worth waiting for, but not worth staring at a grey ball for.
@@ -2842,7 +3243,12 @@ class BabylonScene extends HTMLElement {
       // patch is 23.5 degrees across, so a 4096 map supplies only ~268 texels for a 1080-px
       // viewport — a 4x magnification. 8192 halves that. The swap is guarded on the body not
       // having changed mid-fetch, or arriving elsewhere would paint the wrong planet.
-      const ultraFile = entry.surface.ultra;
+      //
+      // PF-11 D6.3.2: gated on the tier reaching `ultra-progressive`. Below that the upgrade is
+      // not merely skipped — it is never FETCHED, which is the whole point on a constrained
+      // device: the 4-6 MB download was previously unconditional regardless of tier.
+      const ultraFile =
+        ladder === "ultra-progressive" ? entry.surface.ultra : undefined;
       if (ultraFile) {
         const pending = key;
         const ultra = new Texture(`/assets/planets/${ultraFile}`, this._scene);
@@ -2895,12 +3301,13 @@ class BabylonScene extends HTMLElement {
         mat.setTexture("normalTex", this._planetFlatNormalTex);
       }
 
-      // Earth's cloud deck and ocean mask (PF-10 C4 closeout). `uAtmosphere` gates the Rayleigh
-      // term, which is keyed on the cloud map's presence only because Earth is currently the one
-      // body in the pack with either — when a second atmosphere-bearing body arrives this wants
-      // its own real per-body flag rather than this proxy.
+      // Earth's cloud deck and ocean mask (PF-10 C4 closeout). PF-11 D6.3.4: `uAtmosphere` now
+      // reads a REAL per-body manifest flag instead of inferring itself from the cloud map's
+      // presence — the proxy this call site's own comment asked to replace. The two happen to
+      // agree today (Earth is the only body with either), which is exactly why the proxy survived
+      // this long and exactly why it had to go before a second body made them disagree silently.
       mat.setFloat("uHasCloud", entry.cloud ? 1 : 0);
-      mat.setFloat("uAtmosphere", entry.cloud ? 1 : 0);
+      mat.setFloat("uAtmosphere", entry.atmosphere ? 1 : 0);
       if (entry.cloud) {
         const cloud = new Texture(
           `/assets/planets/${entry.cloud.ultra ?? entry.cloud.high}`,
@@ -2912,6 +3319,24 @@ class BabylonScene extends HTMLElement {
         this._planetCloudTex = cloud;
       } else if (this._planetBlackTex) {
         mat.setTexture("cloudTex", this._planetBlackTex);
+      }
+      // PF-11 D6.4: city lights. Only Earth ships a night map, and it is capped at `high`
+      // (MAP_TIER_CAP) so there is no `ultra` to prefer.
+      if (entry.night) {
+        const night = new Texture(
+          `/assets/planets/${entry.night.high ?? entry.night.base}`,
+          this._scene,
+        );
+        night.wrapU = Texture.WRAP_ADDRESSMODE;
+        mat.setTexture("nightTex", night);
+        this._planetNightTex?.dispose();
+        this._planetNightTex = night;
+        mat.setFloat("uHasNight", 1);
+      } else if (this._planetBlackTex) {
+        // Same hazard the ocean mask has: a stale night map would paint another body's cities
+        // across whatever came next, since the term is gated by uHasNight, not by body id.
+        mat.setTexture("nightTex", this._planetBlackTex);
+        mat.setFloat("uHasNight", 0);
       }
       if (entry.specular) {
         const spec = new Texture(
@@ -2944,8 +3369,8 @@ class BabylonScene extends HTMLElement {
     );
     this._planetSpin = mesh.rotation.y;
     mesh.isVisible = true;
-    this._tickPlanetVt(key, body.pos, mesh.rotation.y);
-    this._tickVenusDescent(key, body.pos, mat);
+    this._tickPlanetVt(key, spherePos, mesh.rotation.y);
+    this._tickVenusDescent(key, spherePos, mat);
   }
 
   // --- GAP-03: Milky Way band ---
@@ -3020,43 +3445,191 @@ class BabylonScene extends HTMLElement {
     mat.setTexture("uTex", placeholder);
     this._bandPlaceholderTex = placeholder;
 
-    this._bandBuf = new Uint8Array(MILKY_WAY_WIDTH * MILKY_WAY_HEIGHT * 4);
+    this._bandBuilder = new MilkyWayBandBuilder();
+    // PF-11 D0.1: start the between-frames driver immediately, so the build
+    // progresses even before (or without) the first rendered frame.
+    this._scheduleBandBuild();
   }
 
-  /** Chunked texture build (MILKY_WAY_ROWS_PER_CHUNK rows/frame — the
-   * benchmarked full-grid cost, ~300ms+, would stall many frames if done in
-   * one call) followed by a slow fade-in once the single upload lands. */
+  /** PF-11 D0.1 — the between-frames half of the band build.
+   *
+   * Before this, the build ran ONLY inside the render loop, so its wall-time
+   * scaled with 1/fps: at the ~1-3 fps a loaded SwiftShader CI run delivers,
+   * the 512-row grid took tens of seconds and produced the "bandReady never
+   * true" E2E failure class (TR-080 root cause; delivery plan D0.1).
+   *
+   * This chain runs build slices BETWEEN frames. Measured honestly (TR-081),
+   * it is a supporting driver, not the fix: while the scene renders, the page
+   * main thread is saturated and a self-rescheduling `setTimeout(0)` gets only
+   * ~10 callbacks in 5 seconds — about one per frame. What it uniquely buys is
+   * the case where rAF does NOT run at all (a backgrounded tab), where it is
+   * the only driver. The wall-clock guarantee lives in the builder's deadline
+   * pacing. Self-terminating: the chain stops once the builder reports done. */
+  private _scheduleBandBuild() {
+    if (this._bandBuildTimer !== undefined) return;
+    if (!this._bandBuilder || this._bandReady) return;
+    this._bandBuildTimer = setTimeout(() => {
+      this._bandBuildTimer = undefined;
+      this._buildBandSlice();
+      this._scheduleBandBuild();
+    }, 0);
+  }
+
+  /** One time-budgeted slice of the band texture build, finishing with the
+   * single upload + placeholder swap (TR-059 / non-negotiable #9) whenever
+   * the last row lands. Safe to call from either driver: the builder owns the
+   * shared row cursor, so neither driver repeats the other's work. */
+  private _buildBandSlice() {
+    const builder = this._bandBuilder;
+    if (!builder || this._bandReady) return;
+    // The deadline yields to an in-flight warp. Deadline pacing spends MORE
+    // frame time the slower the machine is — exactly the wrong trade during
+    // the one sequence the visitor is watching frame by frame, and the same
+    // reasoning `_waitForWarpIdle` already applies to the bulk layers. Idle
+    // frames get the paced slice; warping frames get the plain 6 ms budget
+    // and the band simply lands a little later.
+    if (!builder.buildSlice(this.warp.mode === "idle")) return;
+    this._bandReady = true;
+    if (this._bandBuildTimer !== undefined) {
+      clearTimeout(this._bandBuildTimer);
+      this._bandBuildTimer = undefined;
+    }
+    const tex = RawTexture.CreateRGBATexture(
+      builder.buf,
+      MILKY_WAY_WIDTH,
+      MILKY_WAY_HEIGHT,
+      this._scene ?? null,
+      true,
+      false,
+      Texture.TRILINEAR_SAMPLINGMODE,
+    );
+    this._bandTex = tex;
+    this._bandMat?.setTexture("uTex", tex);
+    this._bandPlaceholderTex?.dispose();
+    this._bandPlaceholderTex = undefined;
+  }
+
+  /** Per-frame entry point: one build slice while the texture is still being
+   * assembled (TR-059's frames-keep-producing contract — the band build must
+   * never be the reason frames stop), then a slow fade-in once the single
+   * upload lands. */
+  /* --- PF-11 D2: the frame ladder (sky honesty by destination) --- */
+
+  /** Builds the external-galaxy impostor (D2.2): a camera-facing quad with a
+   * PROCEDURAL galaxy-disc texture (license-clean — see milky-way.ts's header
+   * on why the photographic pano cannot ship). Hidden until an extragalactic
+   * arrival. The texture is bound synchronously at creation — a declared
+   * sampler needs a real resource before the mesh can ever draw (#9). */
+  private _setupImpostor(scene: Scene, backend: "webgpu" | "webgl2") {
+    const mesh = new Mesh("mwImpostor", scene);
+    // Unit quad in the XY plane; billboardMode turns it to face the camera.
+    const vd = new VertexData();
+    vd.positions = [-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0];
+    vd.uvs = [0, 0, 1, 0, 1, 1, 0, 1];
+    vd.indices = [0, 1, 2, 0, 2, 3];
+    vd.applyToMesh(mesh, false);
+    mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
+    mesh.isPickable = false;
+    mesh.alwaysSelectAsActiveMesh = true;
+    mesh.isVisible = false;
+
+    const mat = new ShaderMaterial(
+      "mwImpostor",
+      scene,
+      { vertex: "ijImpostor", fragment: "ijImpostor" },
+      {
+        attributes: ["position", "uv"],
+        uniforms: ["worldViewProjection", "uFade"],
+        samplers: ["uTex"],
+        needAlphaBlending: true,
+        shaderLanguage:
+          backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+      },
+    );
+    mat.backFaceCulling = false;
+    mat.alphaMode = Constants.ALPHA_COMBINE;
+    mat.setFloat("uFade", 0);
+    const tex = RawTexture.CreateRGBATexture(
+      buildMilkyWayImpostor(),
+      MILKY_WAY_IMPOSTOR_SIZE,
+      MILKY_WAY_IMPOSTOR_SIZE,
+      scene,
+      true, // mipmaps — the sprite is minified hard at its real angular size
+      false,
+      Texture.TRILINEAR_SAMPLINGMODE,
+    );
+    tex.hasAlpha = true;
+    mat.setTexture("uTex", tex);
+    mesh.material = mat;
+    this._impostorMesh = mesh;
+    this._impostorMat = mat;
+    this._impostorTex = tex;
+  }
+
+  /** Drives the destination-keyed frame-ladder fades from the live warp state.
+   * Called each frame after `_tickWarp` (so `prog` is fresh) and before the
+   * band/asteroid ticks read the results. */
+  private _updateFrameLadder() {
+    const w = this.warp;
+    // k: 0 while aiming (fades hold at their start), the integrated warp
+    // progress during the burn, 1 once arrived/idle/ascending (fades at target).
+    const k = w.mode === "warp" ? (w.prog ?? 0) : w.mode === "aim" ? 0 : 1;
+    this._furnitureFade = frameLadderFade(
+      this._furnitureFadeFrom,
+      this._furnitureFadeTo,
+      k,
+      this._reduced,
+    );
+    this._localFieldFade = frameLadderFade(
+      this._localFadeFrom,
+      this._localFadeTo,
+      k,
+      this._reduced,
+    );
+    this._beltMat?.setFloat("uLayerFade", this._furnitureFade);
+    this._localMat?.setFloat("uLayerFade", this._localFieldFade);
+    // Belt Havok sleeps once the belt is gone (D2.1). The band's own uFade is
+    // handled in _tickMilkyWay, the constellation alpha in _pushAberration —
+    // both read `_localFieldFade` directly.
+    this._beltPhysicsAwake = this._furnitureFade > 0;
+    this._updateImpostor();
+  }
+
+  /** Places, sizes and reveals the external-galaxy impostor from the live
+   * `_localFieldFade`. It fades in as the local field collapses, sits astern of
+   * the extragalactic target, and is sized by that target's real angular
+   * subtense (Astra §1/§5: a 30-kpc disc → ~10' from 32.6 Mly), floored to a
+   * visible minimum — the same declared-license overbrightness the belt carries. */
+  private _updateImpostor() {
+    const mesh = this._impostorMesh;
+    const mat = this._impostorMat;
+    if (!mesh || !mat) return;
+    const appear = 1 - this._localFieldFade; // 0 in-galaxy … 1 fully collapsed
+    const visible = appear > 0.001;
+    this._impostorVisible = visible;
+    if (mesh.isVisible !== visible) mesh.isVisible = visible;
+    if (!visible) return;
+    mat.setFloat("uFade", appear);
+    // Astern of the target, at a fixed far depth just inside the band radius.
+    const D = MILKY_WAY_SPHERE_RADIUS * 0.9;
+    mesh.position.set(
+      -this._farDestDir[0] * D,
+      -this._farDestDir[1] * D,
+      -this._farDestDir[2] * D,
+    );
+    // 2·atan(R_MW / d), R_MW ≈ 15 kpc = 48,930 ly, floored so the honest ~10'
+    // subtense still reads on screen (declared license, like the belt exposure).
+    const MW_HALF_LY = 48930;
+    const IMPOSTOR_MIN_HALF = 45;
+    const theta =
+      2 * Math.atan(MW_HALF_LY / Math.max(this._farDestLy, MW_HALF_LY));
+    const half = Math.max(D * Math.tan(theta / 2), IMPOSTOR_MIN_HALF);
+    mesh.scaling.set(half, half, half);
+  }
+
   private _tickMilkyWay() {
     if (!this._bandReady) {
-      if (!this._bandBuf) return;
-      const end = Math.min(
-        MILKY_WAY_HEIGHT,
-        this._bandRow + MILKY_WAY_ROWS_PER_CHUNK,
-      );
-      for (; this._bandRow < end; this._bandRow++) {
-        buildMilkyWayRow(
-          this._bandBuf,
-          this._bandRow,
-          MILKY_WAY_WIDTH,
-          MILKY_WAY_HEIGHT,
-        );
-      }
-      if (this._bandRow >= MILKY_WAY_HEIGHT) {
-        this._bandReady = true;
-        const tex = RawTexture.CreateRGBATexture(
-          this._bandBuf,
-          MILKY_WAY_WIDTH,
-          MILKY_WAY_HEIGHT,
-          this._scene ?? null,
-          true,
-          false,
-          Texture.TRILINEAR_SAMPLINGMODE,
-        );
-        this._bandTex = tex;
-        this._bandMat?.setTexture("uTex", tex);
-        this._bandPlaceholderTex?.dispose();
-        this._bandPlaceholderTex = undefined;
-      }
+      this._buildBandSlice();
       return;
     }
     if (this._bandFadeAmt < 1) {
@@ -3064,7 +3637,18 @@ class BabylonScene extends HTMLElement {
         1,
         this._bandFadeAmt + (this._reduced ? 1 : 0.012),
       );
-      this._bandMat?.setFloat("uFade", this._bandFadeAmt);
+    }
+    // PF-11 D2.2: the band's effective opacity is the boot fade-in modulated by
+    // the extragalactic collapse — it shrinks to nothing at an SDSS/NBG arrival
+    // (`_localFieldFade` → 0) and restores on the way home. The launch ascent
+    // owns `uFade` while it runs (it fades the band in with altitude), so this
+    // must not clobber it. `_localFieldFade` is 1 for every in-galaxy target,
+    // so this is a no-op change everywhere except extragalactic travel.
+    if (this.warp.mode !== "ascent") {
+      this._bandMat?.setFloat(
+        "uFade",
+        this._bandFadeAmt * this._localFieldFade,
+      );
     }
   }
 
@@ -3604,6 +4188,9 @@ class BabylonScene extends HTMLElement {
     // with it.
     try {
       this._starMat?.setFloat("uHaloAmp", budget.haloAmp);
+      // PF-11 D2: keep the frame-ladder clones' halo budget in lockstep.
+      this._localMat?.setFloat("uHaloAmp", budget.haloAmp);
+      this._beltMat?.setFloat("uHaloAmp", budget.haloAmp);
     } catch (e) {
       console.warn("[babylon-engine] GAP-21: halo uniform update failed", e);
     }
@@ -3679,6 +4266,11 @@ class BabylonScene extends HTMLElement {
     // through to its 2.5s grace-timer fallback on every load.
     this.dataset.craftState = "loading";
     emit("cosmos:craft", { state: "loading", tier });
+    // PF-11 D1.1. Declared out here so the `finally` below can close it on every
+    // exit path. Note there is deliberately NO stage when `?craft=off` resolves
+    // above — a download that never happens should not appear in the dossier at
+    // all, rather than appear and instantly complete.
+    const craftStage = new StageAggregator("craft-glb", emitStage);
     try {
       const [{ ImportMeshAsync }, , { MeshoptCompression }] = await Promise.all(
         [
@@ -3696,10 +4288,29 @@ class BabylonScene extends HTMLElement {
       // CSP's existing 'wasm-unsafe-eval' covers its WASM instantiation).
       MeshoptCompression.Configuration.decoder.url =
         "/assets/craft/meshopt_decoder.js";
-      const result = await ImportMeshAsync(
-        `/assets/craft/sci-fi-fighter-${tier}.glb`,
-        scene,
-      );
+      // PF-11 D1.1: ImportMeshAsync has always accepted an `onProgress`; the
+      // loading-stages audit found it simply unused, so the tiered GLB was one
+      // of the assets the old HUD could not report at all. Babylon's own
+      // ISceneLoaderProgressEvent carries the real XHR numbers — no second
+      // fetch, no wrapper — with `lengthComputable` false meaning "no
+      // Content-Length", which maps exactly onto our null total.
+      const craftUrl = `/assets/craft/sci-fi-fighter-${tier}.glb`;
+      const craftSink = craftStage.sink(craftUrl);
+      const result = await ImportMeshAsync(craftUrl, scene, {
+        onProgress: (ev) =>
+          craftSink({
+            stage: "craft-glb",
+            loadedBytes: ev.loaded,
+            totalBytes: ev.lengthComputable ? ev.total : null,
+            done: false,
+            bootCritical: false,
+          }),
+      });
+      // The TRANSFER is complete the moment ImportMeshAsync resolves; the mesh
+      // normalisation, plume and shimmer work below is local. Closing the stage
+      // here rather than at the end of the method keeps the dossier's meaning
+      // exact — it reports downloads, not scene-graph assembly.
+      craftStage.finish();
       if (!this._scene) return; // disposed while loading
 
       // Normalize the hierarchy to a unit box inside a wrapper whose +Z is
@@ -3837,6 +4448,11 @@ class BabylonScene extends HTMLElement {
       this._shipState = "failed";
       this.dataset.craftState = "error";
       emit("cosmos:craft", { state: "error", tier });
+    } finally {
+      // Idempotent safety net for the failure path (a 404 GLB throws before the
+      // finish above ever runs) — a stage left open would sit in the dossier as
+      // permanently streaming while the scene has already flown on camera-only.
+      craftStage.finish();
     }
   }
 
@@ -4192,13 +4808,49 @@ class BabylonScene extends HTMLElement {
           // side-effect: augments Scene with enablePhysics
           import("@babylonjs/core/Physics/joinedPhysicsEngineComponent"),
         ]);
-      // Emscripten factory: point it at the Vite-emitted same-origin wasm —
-      // never a CDN (ADR-0005's stance; CSP wasm-unsafe-eval covers it).
+      // PF-11 D1.1: 2.09 MB, and previously invisible to any progress UI —
+      // Emscripten fetches the .wasm itself, inside the factory, where nothing
+      // could observe it. Streaming it here first and handing over the buffer
+      // via `wasmBinary` makes those bytes real to the dossier.
+      //
+      // This does NOT double-fetch, and that was verified in the vendored
+      // runtime rather than assumed (TR-081's lesson about probing before
+      // building on an assumption): HavokPhysics_es.js reads
+      // `wasmBinary=Module["wasmBinary"]` and its `getBinarySync` returns
+      // `new Uint8Array(wasmBinary)` before any network path is considered, so
+      // the buffer short-circuits the internal fetch entirely.
+      //
+      // `locateFile` is KEPT alongside it, deliberately: if a future Havok bump
+      // ever stops honouring `wasmBinary`, the factory silently falls back to
+      // fetching — which must still resolve to our same-origin Vite-emitted
+      // URL and never a CDN (ADR-0005's stance; CSP wasm-unsafe-eval covers it).
+      // Losing progress reporting is an acceptable degradation; losing the
+      // origin guarantee is not.
+      const havokStage = new StageAggregator("havok-wasm", emitStage);
+      let wasmBinary: ArrayBuffer | undefined;
+      try {
+        const wasmBlob = await fetchWithProgress(
+          havokWasmUrl,
+          "havok-wasm",
+          havokStage.sink(havokWasmUrl),
+        );
+        wasmBinary = await wasmBlob.arrayBuffer();
+      } catch (e) {
+        // Not fatal: dropping the prefetch just returns Havok to fetching the
+        // binary itself through locateFile, exactly as it did before D1.1.
+        console.warn(
+          "[babylon-engine] Havok wasm prefetch failed, falling back to locateFile",
+          e,
+        );
+      } finally {
+        havokStage.finish();
+      }
       const havok = await (
         havokFactory.default as unknown as (o: {
           locateFile: () => string;
+          wasmBinary?: ArrayBuffer;
         }) => Promise<unknown>
-      )({ locateFile: () => havokWasmUrl });
+      )({ locateFile: () => havokWasmUrl, wasmBinary });
       if (!this._scene) return; // disposed while loading
       const plugin = new HavokPlugin(true, havok);
       // zero gravity: space — the belt-pull herding force is applied per
@@ -4234,6 +4886,7 @@ class BabylonScene extends HTMLElement {
         agg.body.setCollisionCallbackEnabled(true);
         agg.body.getCollisionObservable().add((ev) => {
           if (this._reduced) return; // shake is motion — reduced motion opts out
+          if (!this._beltPhysicsAwake) return; // PF-11 D2.1: no phantom shake from a faded belt
           const p = ev.point;
           const dist = p
             ? Math.hypot(
@@ -4280,6 +4933,10 @@ class BabylonScene extends HTMLElement {
     this._warpDirScratch.copyFromFloats(wd[0], wd[1], wd[2]);
     const mats: (ShaderMaterial | undefined)[] = [
       this._starMat,
+      // PF-11 D2: the frame-ladder clones share the same aberration/Doppler
+      // uniforms as the base — they differ only in `uLayerFade`.
+      this._localMat,
+      this._beltMat,
       this._bodyMat,
       this._photoMat,
       this._trailMat,
@@ -4294,14 +4951,25 @@ class BabylonScene extends HTMLElement {
     // Constellation figures fade during relativistic transit — matches
     // space-engine.js's `uColor(..., 0.34 * (1 - beta))` exactly. No
     // aberration/Doppler on this pass (out of GAP-06's scope per the gap
-    // analysis; see _setupConstellations), just the alpha term.
+    // analysis; see _setupConstellations), just the alpha term. PF-11 D2.2:
+    // the figures also collapse with the rest of the local field at an
+    // extragalactic arrival (they are parallax accidents of local stars —
+    // Astra §1), so the alpha is additionally scaled by `_localFieldFade`.
     if (this._conMat) {
-      this._conColorScratch.a = 0.34 * (1 - beta);
+      this._conColorScratch.a = 0.34 * (1 - beta) * this._localFieldFade;
       this._conMat.setColor4("uColor", this._conColorScratch);
     }
   }
 
   private _tickAsteroids() {
+    // PF-11 D2.1: when the belt has faded out (any DSO/extragalactic
+    // destination) its physics sleeps — Astra §2: stepping belt physics while
+    // parked at an SDSS galaxy is pure waste, and the belt is invisible anyway.
+    // Skipping the force loop is the correct, low-risk sleep; the collision
+    // callback is likewise gated (below) so invisible rocks never shake the
+    // camera. Halting Havok integration outright (setMotionType STATIC / a zero
+    // timestep) is D7.5's measured refinement — recorded, not done here.
+    if (!this._beltPhysicsAwake) return;
     if (this._physicsMode === "havok") {
       const f = this._asteroidField;
       if (!f) return;
@@ -4719,7 +5387,13 @@ class BabylonScene extends HTMLElement {
     const b =
       this.bodies.find((x) => x.e.id === id) ??
       this.stations.find((x) => x.e.id === id);
-    if (!b || this.warp.mode === "warp" || this.warp.mode === "aim") return;
+    if (
+      !b ||
+      this.warp.mode === "warp" ||
+      this.warp.mode === "aim" ||
+      this.warp.mode === "ascent"
+    )
+      return;
     if (this.arrivedId === id) {
       emit("cosmos:arrive", { id, quiet: !!quiet }); // already parked — open dossier
       return;
@@ -4735,6 +5409,208 @@ class BabylonScene extends HTMLElement {
     emit("cosmos:select", { id, quiet: !!quiet });
   }
 
+  /** PF-11 D6.4 — is the camera in (or arriving at) the home orbit?
+   *
+   * ONE predicate, deliberately, because the old `|cam| < 1` test appeared in TWO places that had
+   * to agree — `goHome`'s early-return and `_tickWarp`'s idle-drift branch — and redefining home
+   * in only one of them would have made `goHome` re-warp out of its own orbit forever. */
+  private _isAtHomeVantage(): boolean {
+    if (this.arrivedId) return false;
+    // Requires the orbit to be ARMED, not merely "somewhere near the origin", and the difference
+    // is not pedantic: at boot the camera sits at [0,0,0], which is INSIDE a sphere of radius 26.
+    // A radius-only predicate revealed Earth there — camera inside the planet, and ~2.5 MB of
+    // Earth textures fetched during startup on every single page load, competing with the
+    // boot-critical set D1.1 measures. The delivery plan's own wording is "Earth goHome reveal";
+    // arriving home is the trigger, and `_homeOrbit` is exactly that state.
+    if (!this._homeOrbit) return false;
+    const r = Math.hypot(this.cam[0], this.cam[1], this.cam[2]);
+    return r <= HOME_ORBIT_RADIUS + 1;
+  }
+
+  /** Where a `goHome` warp actually lands: the orbit's phase-0 point (the spec'd ra 160 / dec 0
+   * vantage), not the origin — which is now inside the Earth sphere. */
+  private _homeArrivalPoint(): [number, number, number] {
+    return homeOrbitPosition(0);
+  }
+
+  /** PF-11 D1.3 — build the limb-glow shell lazily on the first ascent. A sphere just outside the
+   * Earth sphere, additive, with a fresnel rim (see ascent.ts) so it reads as a thin blue arc on
+   * the silhouette. No sampler, so no TR-059 placeholder concern. */
+  private _setupLimbGlow() {
+    if (this._limbMesh || !this._scene || !this._engine) return;
+    const scene = this._scene;
+    const backend = this.backend === "webgpu" ? "webgpu" : "webgl2";
+    const mesh = new Mesh("ascentLimb", scene);
+    CreateSphereVertexData({
+      diameter: PLANET_SPHERE_RADIUS * LIMB_SHELL_FACTOR * 2,
+      segments: SPHERE_SEGMENTS,
+    }).applyToMesh(mesh, false);
+    mesh.isPickable = false;
+    mesh.alwaysSelectAsActiveMesh = true;
+    mesh.isVisible = false;
+    mesh.position.set(0, 0, 0); // Earth's sphere sits at the origin (the home reveal)
+    const mat = new ShaderMaterial(
+      "ascentLimb",
+      scene,
+      { vertex: "ijLimb", fragment: "ijLimb" },
+      {
+        attributes: ["position", "normal"],
+        uniforms: [
+          "world",
+          "view",
+          "projection",
+          "uCamPos",
+          "uSunDir",
+          "uLimb",
+          "uColor",
+        ],
+        shaderLanguage:
+          backend === "webgpu" ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+      },
+    );
+    mat.backFaceCulling = false;
+    mat.disableDepthWrite = true;
+    mat.alphaMode = Constants.ALPHA_ADD;
+    mat.needAlphaBlending = () => true;
+    const [sr, sg, sb] = raDecToDir(SUN_RA_DEG, SUN_DEC_DEG);
+    mat.setVector3("uSunDir", new Vector3(sr, sg, sb));
+    mat.setVector3("uColor", new Vector3(...LIMB_GLOW_RGB));
+    mat.setFloat("uLimb", 0);
+    mesh.material = mat;
+    this._limbMesh = mesh;
+    this._limbMat = mat;
+  }
+
+  /** PF-11 D1.3 — start the launch-from-Earth ascent (the D6.4 goHome reveal played forward).
+   * Called from `SpaceScene`'s LAUNCH handler. Under reduced motion / no-WebGL this is an INSTANT
+   * cut straight to the home vantage; otherwise it runs the ~8 s rails climb. */
+  beginAscent() {
+    // No-WebGL: nothing to animate — just tell the host the cinematic is "done" so it reveals
+    // the console (the DOM fallback has no scene, mirroring goHome's no-engine branch).
+    if (!this._engine) {
+      emit("cosmos:ascent-done", {});
+      return;
+    }
+    // Never interrupt a real journey with a launch cinematic.
+    if (
+      this.warp.mode === "warp" ||
+      this.warp.mode === "aim" ||
+      this.warp.mode === "ascent"
+    )
+      return;
+    this.arrivedId = null;
+    // Arming the home orbit is what makes `_tickPlanetSphere` reveal Earth at the origin
+    // (`_isAtHomeVantage` gates on it) — the ascent renders that same sphere throughout.
+    this._homeOrbit = true;
+    this._homeOrbitPhase = 0;
+
+    if (this._reduced) {
+      // Instant cut: land at the home vantage, restore the sky/band, no climb (D1-AC6).
+      this.warp = { mode: "idle" };
+      const [hx, hy, hz] = this._homeArrivalPoint();
+      this.cam[0] = hx;
+      this.cam[1] = hy;
+      this.cam[2] = hz;
+      this._endAscentVisuals();
+      emit("cosmos:ascent-done", {});
+      return;
+    }
+
+    this._setupLimbGlow();
+    this._ascentProg = 0;
+    this.warp = { mode: "ascent", ascentProg: 0 };
+  }
+
+  /** Restore the sky colour and band fade to their at-home (space) state. Shared by the reduced-
+   * motion cut, the skip path, and the normal completion. */
+  private _endAscentVisuals() {
+    if (this._scene) {
+      this._scene.clearColor.r = SPACE_BLACK_RGB[0];
+      this._scene.clearColor.g = SPACE_BLACK_RGB[1];
+      this._scene.clearColor.b = SPACE_BLACK_RGB[2];
+    }
+    this._bandFadeAmt = 1;
+    this._bandMat?.setFloat("uFade", 1);
+    if (this._limbMesh) this._limbMesh.isVisible = false;
+    this._limbMat?.setFloat("uLimb", 0);
+  }
+
+  /** PF-11 D1.3 — one ascent frame. Writes `this.cam`/`this._camQuat` (committed by `_tickWarp`'s
+   * tail) and drives the sky colour, band fade and limb glow off the pure `ascent.ts` curves. */
+  private _tickAscent() {
+    const w = this.warp;
+    // Progress on WALL CLOCK, not the clamped physics dt — the D6.4 orbit lesson: a screen-time
+    // quantity clamped to SHIP_MAX_DT stretches on slow devices. `_dtWarpS` is set at the top of
+    // `_tickWarp` this same frame.
+    this._ascentProg = Math.min(
+      1,
+      this._ascentProg + (this._dtWarpS * 1000) / ASCENT_DURATION_MS,
+    );
+    w.ascentProg = this._ascentProg;
+
+    const s = ascentStateAt(this._ascentProg, SPACE_BLACK_RGB);
+
+    // Camera: recede radially along the home-vantage sight-line, always looking at the origin.
+    const [ux, uy, uz] = this._homeArrivalPoint(); // = homeOrbitPosition(0), length HOME_ORBIT_RADIUS
+    const ulen = Math.hypot(ux, uy, uz) || 1;
+    this.cam[0] = (ux / ulen) * s.standoff;
+    this.cam[1] = (uy / ulen) * s.standoff;
+    this.cam[2] = (uz / ulen) * s.standoff;
+    // Aim at the planet: same construction the idle home-orbit driver uses, so the handoff to
+    // idle is seamless (it recomputes _yaw/_pitch from cam every frame anyway).
+    const len = s.standoff || 1;
+    this._pitch = Math.asin(Math.max(-1, Math.min(1, -this.cam[1] / len)));
+    this._yaw = Math.atan2(-this.cam[0] / len, -this.cam[2] / len);
+    this._camQuat = quatFromUnitVectors(
+      BABYLON_FORWARD,
+      freeLookDir(this._yaw, this._pitch),
+    );
+
+    // Sky colour: mutate the existing Color4 (no per-frame allocation).
+    if (this._scene) {
+      this._scene.clearColor.r = s.sky[0];
+      this._scene.clearColor.g = s.sky[1];
+      this._scene.clearColor.b = s.sky[2];
+    }
+    // Band (and, through the darkening background, the additive star field) rise with altitude.
+    this._bandFadeAmt = s.starFade;
+    this._bandMat?.setFloat("uFade", s.starFade);
+    // Limb glow: visible only in the 80-120 km beat.
+    if (this._limbMesh) this._limbMesh.isVisible = s.limb > 0.001;
+    this._limbMat?.setFloat("uLimb", s.limb);
+    this._limbMat?.setVector3(
+      "uCamPos",
+      this._camScratch.set(this.cam[0], this.cam[1], this.cam[2]),
+    );
+
+    if (this._ascentProg >= 1) {
+      // Handoff: become the home orbit at phase 0, seamlessly (standoff already matches). Mirrors
+      // the k>=1 home branch in the warp block.
+      this._endAscentVisuals();
+      w.mode = "idle";
+      this._homeOrbit = true;
+      this._homeOrbitPhase = 0;
+      emit("cosmos:ascent-done", {});
+    }
+  }
+
+  /** PF-11 D1.3 — jump the ascent to its end (the SKIP affordance / any input during the climb).
+   * A snap-to-end, not a fade, so an impatient visitor is never shown a second animation. */
+  skipAscent() {
+    if (this.warp.mode !== "ascent") return;
+    this._ascentProg = 1;
+    // Land exactly where a completed ascent would, and hand off this same tick.
+    const [hx, hy, hz] = this._homeArrivalPoint();
+    this.cam[0] = hx;
+    this.cam[1] = hy;
+    this.cam[2] = hz;
+    this._endAscentVisuals();
+    this.warp = { mode: "idle" };
+    this._homeOrbit = true;
+    this._homeOrbitPhase = 0;
+    emit("cosmos:ascent-done", {});
+  }
+
   goHome(quiet?: boolean) {
     if (!this._engine) {
       // GAP-19: no-WebGL fallback — mirrors space-engine.js:1531-1536.
@@ -4742,10 +5618,18 @@ class BabylonScene extends HTMLElement {
       emit("cosmos:home", {});
       return;
     }
-    if (this.warp.mode === "warp" || this.warp.mode === "aim") return;
-    if (Math.hypot(this.cam[0], this.cam[1], this.cam[2]) < 1) return; // already home
+    if (
+      this.warp.mode === "warp" ||
+      this.warp.mode === "aim" ||
+      this.warp.mode === "ascent"
+    )
+      return;
+    // PF-11 D6.4 / R16: "already home" USED to mean |cam| < 1, i.e. parked at the origin. Home is
+    // now an ORBIT at ARRIVE_STANDOFF, so that test would be false at every point of it and every
+    // press would re-warp out of the orbit and back. The predicate moves with the definition.
+    if (this._isAtHomeVantage()) return; // already home (in the home orbit)
     this.arrivedId = null;
-    this._beginWarp(undefined, [0, 0, 0], true, !!quiet, 0);
+    this._beginWarp(undefined, this._homeArrivalPoint(), true, !!quiet, 0);
   }
 
   randomBody() {
@@ -4762,6 +5646,44 @@ class BabylonScene extends HTMLElement {
   // hover-picking methods — kept together with _pick/_pickField rather than
   // here with the other SpaceEngineElement contract methods.
 
+  /** PF-11 D0.2 — harness-only camera bearing override (delivery plan handoff
+   * B4: "five sessions of engine-state-correct-but-no-pixels"). Root cause:
+   * on arrival the camera lands at the correct standoff (`this.cam = w.to`,
+   * `_beginWarp`/the k>=1 branch above), but `_tickWarp`'s idle branch always
+   * re-derives orientation from `_yaw`/`_pitch` via `freeLookDir` — nothing
+   * ever points those at the body, so the sphere sits outside the frame on
+   * every harness, programmatic or through the real UI. Reuses the exact
+   * free-look state the drag path already writes (`_yaw`/`_pitch` — see
+   * GAP-08/GAP-10 above) rather than inventing a second orientation
+   * mechanism, so the very next render-loop tick picks it up with no new
+   * code path to validate.
+   *
+   * Gated behind `?testhooks` so this can never become a product feature by
+   * accident — the guard is checked here, not by the caller, so the method
+   * is a safe no-op if a spec forgets the query param. Inverts `freeLookDir`
+   * (world-space `[cos(pitch)*sin(yaw), sin(pitch), cos(pitch)*cos(yaw)]`)
+   * for the direction from the camera's current position to the body's
+   * already-computed world position (`this.bodies[].pos` — the same field
+   * `travelTo` reads), rather than assuming the caller already arrived
+   * along the Sun-body line: this also aims correctly mid-aim or from
+   * free-look, not only exactly at rest on arrival. */
+  aimAt(bodyId: string): boolean {
+    if (!new URLSearchParams(window.location.search).has("testhooks"))
+      return false;
+    const b = this.bodies.find((x) => x.e.id === bodyId);
+    if (!b) return false;
+    const dx = b.pos[0] - this.cam[0];
+    const dy = b.pos[1] - this.cam[1];
+    const dz = b.pos[2] - this.cam[2];
+    const len = Math.hypot(dx, dy, dz) || 1;
+    const ux = dx / len,
+      uy = dy / len,
+      uz = dz / len;
+    this._pitch = Math.asin(Math.max(-1, Math.min(1, uy)));
+    this._yaw = Math.atan2(ux, uz);
+    return true;
+  }
+
   private _beginWarp(
     target: BabylonBody | undefined,
     to: [number, number, number],
@@ -4769,6 +5691,9 @@ class BabylonScene extends HTMLElement {
     quiet: boolean,
     lyTotal: number,
   ) {
+    // PF-11 D6.4: leaving home ends the orbit. _beginWarp is the one entry point every
+    // journey passes through, including goHome itself (which re-arms on arrival above).
+    this._homeOrbit = false;
     const from = this.cam;
     const dx = to[0] - from[0],
       dy = to[1] - from[1],
@@ -4802,6 +5727,25 @@ class BabylonScene extends HTMLElement {
     this._warpSlowMin = 1;
     this._dockBase = null;
     this._dockDir = null;
+    // PF-11 D2: capture the frame-ladder fade endpoints for this journey. `from`
+    // is the live value (correct even mid-transition, e.g. a retarget); `to` is
+    // the destination's own visibility. goHome passes lyTotal 0 → both restore
+    // to 1. The schedule (front-loaded out over accel, back-loaded in over
+    // decel) lives in frameLadderFade; `_updateFrameLadder` drives it by `prog`.
+    this._furnitureFadeFrom = this._furnitureFade;
+    this._furnitureFadeTo = furnitureVisibility(lyTotal);
+    this._localFadeFrom = this._localFieldFade;
+    this._localFadeTo = localFieldVisibility(lyTotal);
+    // Remember an extragalactic target so the impostor can sit astern of it,
+    // sized by its real distance, and persist there after arrival.
+    if (this._localFadeTo === 0) {
+      this._farDestDir = [
+        this.warp.dir![0],
+        this.warp.dir![1],
+        this.warp.dir![2],
+      ];
+      this._farDestLy = lyTotal;
+    }
   }
 
   /** Per-frame warp state machine + camera application — the PF-08
@@ -4863,12 +5807,43 @@ class BabylonScene extends HTMLElement {
 
     const w = this.warp;
     if (w.mode === "idle") {
-      // Ambient idle-at-home drift now folds into free-look yaw (rather than
-      // composing a separate axis-angle rotation onto _camQuat directly) so
-      // that a visitor who has already dragged/looked around keeps their own
-      // orientation — drift resumes from wherever they left off, not from a
-      // fixed axis unrelated to free-look.
-      if (
+      // PF-11 D6.4 / owner requirement R16 — THE HOME ORBIT. Home used to mean "parked at the
+      // origin", and the origin is inside the Earth sphere this slice reveals there, so home now
+      // means "in a slow orbit around it" (see _isAtHomeVantage for the predicate both this and
+      // goHome share).
+      //
+      // The orbit axis is the SUN DIRECTION, and that is the load-bearing choice rather than a
+      // convenience: orbiting about the Sun-Earth line moves the camera all the way around the
+      // planet while holding the phase angle at exactly 90°, so the terminator, the twilight
+      // band and the city lights stay in frame for the whole revolution. Orbiting about any
+      // other axis would swing the lighting through full and new phases and lose the one thing
+      // this vantage exists for.
+      if (this._homeOrbit) {
+        // WALL-CLOCK dt, not the SHIP_MAX_DT-clamped one — the same distinction the warp
+        // integration draws twenty lines below, and for the same reason. The orbit phase is a
+        // PROGRESS quantity (a 180 s period the visitor experiences in real seconds), not a
+        // physics step, so clamping it silently stretches the period on any machine running
+        // below 20 fps. Measured before this line existed: 1.5° in 6 s under SwiftShader against
+        // the 12° the declared period calls for — exactly the 8x the clamp implies at ~2.5 fps.
+        if (!this._reduced)
+          this._homeOrbitPhase += HOME_ORBIT_RATE * this._dtWarpS;
+        const [px, py, pz] = homeOrbitPosition(this._homeOrbitPhase);
+        this.cam[0] = px;
+        this.cam[1] = py;
+        this.cam[2] = pz;
+        // Look at the planet, not along a free-look bearing — the camera is in orbit, so its
+        // aim follows its position. Free-look drag still overrides (the branch below).
+        if (!this._dragging) {
+          const len = Math.hypot(px, py, pz) || 1;
+          this._pitch = Math.asin(Math.max(-1, Math.min(1, -py / len)));
+          this._yaw = Math.atan2(-px / len, -pz / len);
+        }
+      } else if (
+        // Ambient idle-at-home drift now folds into free-look yaw (rather than
+        // composing a separate axis-angle rotation onto _camQuat directly) so
+        // that a visitor who has already dragged/looked around keeps their own
+        // orientation — drift resumes from wherever they left off, not from a
+        // fixed axis unrelated to free-look.
         !this._reduced &&
         !this._dragging &&
         Math.hypot(this.cam[0], this.cam[1], this.cam[2]) < 1
@@ -4879,6 +5854,9 @@ class BabylonScene extends HTMLElement {
         BABYLON_FORWARD,
         freeLookDir(this._yaw, this._pitch),
       );
+    }
+    if (w.mode === "ascent") {
+      this._tickAscent();
     }
     if (w.mode === "aim") {
       if (now - (w.start ?? now) >= (w.aimDur ?? AIM_DUR_MS)) {
@@ -4963,6 +5941,11 @@ class BabylonScene extends HTMLElement {
         this.cam = [w.to[0], w.to[1], w.to[2]]; // land exactly on the invariant
         if (w.home) {
           this.arrivedId = null;
+          // PF-11 D6.4 / R16: arm the orbit at phase 0, which is exactly the vantage the warp
+          // just landed on — so the orbit BEGINS at the spec'd ra 160 / dec 0 view rather than
+          // snapping somewhere else on the circle.
+          this._homeOrbit = true;
+          this._homeOrbitPhase = 0;
           emit("cosmos:home", {});
         } else if (w.target) {
           this.arrivedId = w.target.e.id;

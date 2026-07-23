@@ -34,7 +34,18 @@ import {
   sphereIdFor,
   sunDirectionFrom,
   tangentFrame,
+  PLANET_SURGE,
+  exposureTermsFor,
+  homeOrbitPosition,
+  HOME_ORBIT_RADIUS,
+  HOME_ORBIT_PERIOD_S,
+  HOME_VANTAGE_RA_DEG,
+  HOME_VANTAGE_DEC_DEG,
+  SUN_RA_DEG,
+  SUN_DEC_DEG,
 } from "@/lib/planet-sphere";
+import { ARRIVE_STANDOFF } from "@/lib/ship-dynamics";
+import { QUALITY_BUDGETS } from "@/lib/babylon-tiers";
 import { WGSL_RESERVED_IDENTIFIERS } from "@/lib/nebula-field";
 
 describe("real physical constants (Astra's brief is authoritative)", () => {
@@ -352,5 +363,318 @@ describe("geometry budget", () => {
     // The shipped high tier is 4096x2048; the derivative must match its texel size or the
     // derived slopes are silently scaled wrong.
     expect(ELEV_SAMPLE_STEP).toBeCloseTo(1 / 2048, 8);
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------
+ * PF-11 D6.1 / D6.3 — exposure: surge relocation, Reinhard, sRGB decode, self-shadow, tiers.
+ * ------------------------------------------------------------------------------------------- */
+
+describe("PF-11 D6.1 opposition surge relocation", () => {
+  it("reconstructs each body's real GEOMETRIC albedo exactly at zero phase", () => {
+    // THE assertion of this slice. base * surge(0) == base * (1 + B0) must equal the published
+    // geometric albedo, or the surge has been re-graded rather than relocated. Astra's own
+    // construction is B0 = p/A_B - 1, so this identity is what makes the change lossless at the
+    // one geometry where a geometric albedo is defined at all.
+    const published: Record<string, number> = {
+      tethys: 1.229,
+      dione: 0.998,
+      rhea: 0.949,
+      moon: 0.136,
+    };
+    for (const [id, p] of Object.entries(published)) {
+      const { base, b0 } = PLANET_SURGE[id];
+      expect(base * (1 + b0), `${id} zero-phase reconstruction`).toBeCloseTo(
+        p,
+        2,
+      );
+    }
+  });
+
+  it("every surge base is energy-bounded (< 1), which the geometric albedos were not", () => {
+    // The whole reason the surge had to move: three published geometric albedos exceed 1, which
+    // no [0,1] display can show and no energy-conserving BRDF should apply disc-wide.
+    for (const [id, s] of Object.entries(PLANET_SURGE))
+      expect(s.base, `${id} base albedo`).toBeLessThan(1);
+  });
+
+  it("leaves Mars out — its surge coefficient would be NEGATIVE", () => {
+    // Astra, explicitly: Mars's dusty forward-scattering atmosphere makes A_B (0.25) exceed
+    // p (0.17), so B0 = p/A_B - 1 < 0. Adding Mars here would DARKEN it at opposition, the
+    // opposite of what a surge does. "Leave Mars alone."
+    expect(PLANET_SURGE.mars).toBeUndefined();
+    expect(exposureTermsFor("mars", 0.17)).toEqual({
+      baseAlbedo: 0.17,
+      surgeB0: 0,
+    });
+  });
+
+  it("passes non-surge bodies through unchanged, so nothing about them moves", () => {
+    expect(exposureTermsFor("europa", 0.67)).toEqual({
+      baseAlbedo: 0.67,
+      surgeB0: 0,
+    });
+    expect(exposureTermsFor("no-such-body", 0.3)).toEqual({
+      baseAlbedo: 0.3,
+      surgeB0: 0,
+    });
+  });
+
+  it("splits a surge body into base + coefficient rather than its geometric albedo", () => {
+    expect(exposureTermsFor("tethys", 1.229)).toEqual({
+      baseAlbedo: 0.8,
+      surgeB0: 0.536,
+    });
+  });
+});
+
+describe("PF-11 D6.1/D6.3 shader twins carry the exposure pipeline", () => {
+  const twins = [
+    ["GLSL", PLANET_FRAGMENT_GLSL],
+    ["WGSL", PLANET_FRAGMENT_WGSL],
+  ] as const;
+
+  it("decodes the surface sampler to linear in BOTH twins (CLAUDE.md #10)", () => {
+    for (const [name, src] of twins)
+      expect(src, `${name} decodes surfaceTex`).toMatch(
+        /srgbToLinear\(\s*texture/,
+      );
+  });
+
+  it("does NOT decode the coverage/vector samplers in either twin", () => {
+    // These exclusions are load-bearing, not omissions: cloudTex and specularTex are coverage
+    // fractions (Astra validated the cloud map's RAW byte against Earth's real geometric albedo),
+    // and heightTex/normalTex/detailTex carry elevation and vectors. Decoding any of them would
+    // corrupt data that was never a colour.
+    const notColour = [
+      "cloudTex",
+      "specularTex",
+      "heightTex",
+      "normalTex",
+      "detailTex",
+    ];
+    for (const [name, src] of twins)
+      for (const sampler of notColour)
+        expect(
+          new RegExp(`srgbToLinear\\([^)]*${sampler}`).test(src),
+          `${name} must not decode ${sampler}`,
+        ).toBe(false);
+  });
+
+  it("tone-maps with Reinhard and encodes once, in that order, in BOTH twins", () => {
+    for (const [name, src] of twins) {
+      const reinhard = src.indexOf("(1.0 + outLin)");
+      const encode = src.indexOf("linearToSrgb(outLin)");
+      expect(reinhard, `${name} applies Reinhard`).toBeGreaterThan(-1);
+      expect(encode, `${name} encodes to sRGB`).toBeGreaterThan(-1);
+      expect(encode, `${name} encodes AFTER tone mapping`).toBeGreaterThan(
+        reinhard,
+      );
+    }
+  });
+
+  it("applies the surge to refl, not to the albedo, in BOTH twins", () => {
+    for (const [name, src] of twins) {
+      expect(src, `${name} computes a phase angle`).toContain("alphaDeg");
+      expect(src, `${name} folds the surge into refl`).toContain("uSurgeB0");
+    }
+  });
+
+  it("gates relief self-shadowing on a body actually shipping relief, in BOTH twins", () => {
+    for (const [name, src] of twins)
+      expect(src, `${name} gates self-shadow on reliefAmt`).toMatch(
+        /reliefAmt[\s\S]{0,240}SELF_SHADOW_ELEV/,
+      );
+  });
+
+  it("uses the named exposure constants rather than the old 3.6 literal", () => {
+    for (const [name, src] of twins) {
+      expect(src, `${name} still contains a bare 3.6 gain`).not.toContain(
+        "* 3.6",
+      );
+      expect(src, `${name} uses EXPOSURE`).toContain("EXPOSURE");
+    }
+  });
+
+  it("keeps every identifier this slice introduced off the reserved WGSL list (#5)", () => {
+    // TR-045: a reserved WGSL identifier blanks the ENTIRE scene with no compiler error to point
+    // at. Checked rather than eyeballed.
+    // WGSL_RESERVED_IDENTIFIERS is a narrow literal tuple, so widen it here rather than at its
+    // definition — the narrow type is what makes the reserved list self-documenting elsewhere.
+    const reserved: readonly string[] = WGSL_RESERVED_IDENTIFIERS;
+    for (const id of [
+      "srgbToLinear",
+      "linearToSrgb",
+      "outLin",
+      "alphaDeg",
+      "cosAlpha",
+      "reliefAmt",
+      "uSurgeB0",
+    ])
+      expect(reserved.includes(id), `${id} is reserved`).toBe(false);
+  });
+});
+
+describe("PF-11 D6.3.2 tier-aware planet texture ladder", () => {
+  it("gives every tier a ladder ceiling, with lite finally consuming the base tier", () => {
+    expect(QUALITY_BUDGETS.lite.planetTexture).toBe("base");
+    expect(QUALITY_BUDGETS.balanced.planetTexture).toBe("high");
+    expect(QUALITY_BUDGETS.full.planetTexture).toBe("ultra-progressive");
+  });
+
+  it("only the top tier fetches ultra at all — the 4-6 MB upgrade was unconditional before", () => {
+    const fetchesUltra = (t: "lite" | "balanced" | "full") =>
+      QUALITY_BUDGETS[t].planetTexture === "ultra-progressive";
+    expect(fetchesUltra("lite")).toBe(false);
+    expect(fetchesUltra("balanced")).toBe(false);
+    expect(fetchesUltra("full")).toBe(true);
+  });
+});
+
+describe("PF-11 D6.4 the home vantage and its orbit", () => {
+  const d2r = Math.PI / 180;
+  const dir = (ra: number, dec: number): [number, number, number] => [
+    Math.cos(dec * d2r) * Math.cos(ra * d2r),
+    Math.cos(dec * d2r) * Math.sin(ra * d2r),
+    Math.sin(dec * d2r),
+  ];
+  const sun = dir(SUN_RA_DEG, SUN_DEC_DEG);
+  const phaseDegAt = (p: [number, number, number]) => {
+    const r = Math.hypot(...p);
+    const d = (p[0] * sun[0] + p[1] * sun[1] + p[2] * sun[2]) / r;
+    return (Math.acos(Math.max(-1, Math.min(1, d))) * 180) / Math.PI;
+  };
+
+  it("parks at exactly 90° phase — the number the whole reveal rests on", () => {
+    // Every travelTo arrival is pinned to 0.000° phase (V = L, forced), which is why no other
+    // body in this scene can show a terminator. This is the one vantage that escapes it, and the
+    // escape is worth nothing if the number is wrong — so it is computed from the Sun's own
+    // catalog entry rather than quoted.
+    expect(phaseDegAt(homeOrbitPosition(0))).toBeCloseTo(90, 4);
+  });
+
+  it("HOLDS 90° all the way around the orbit — the invariant, not just the start", () => {
+    // This is why the orbit axis is the Sun direction rather than anything more obvious. Orbiting
+    // about any other axis would sweep the lighting through full and new phases and lose the
+    // terminator, the twilight band and the city lights partway round.
+    for (let i = 0; i < 24; i++) {
+      const phase = (i / 24) * 2 * Math.PI;
+      expect(phaseDegAt(homeOrbitPosition(phase)), `phase ${i}/24`).toBeCloseTo(
+        90,
+        4,
+      );
+    }
+  });
+
+  it("keeps the standoff constant and equal to every other arrival's", () => {
+    // The sphere must read at the same size at home as everywhere else — nothing about the home
+    // framing is special-cased.
+    for (let i = 0; i < 8; i++) {
+      const p = homeOrbitPosition((i / 8) * 2 * Math.PI);
+      expect(Math.hypot(...p)).toBeCloseTo(HOME_ORBIT_RADIUS, 6);
+    }
+    expect(HOME_ORBIT_RADIUS).toBe(ARRIVE_STANDOFF);
+  });
+
+  it("starts at the spec'd ra 160 / dec 0 bearing, so reduced motion parks on-spec", () => {
+    // Reduced motion freezes the phase at 0, so phase 0 has to BE the specified vantage rather
+    // than an arbitrary point on the circle.
+    const p = homeOrbitPosition(0);
+    const want = dir(HOME_VANTAGE_RA_DEG, HOME_VANTAGE_DEC_DEG).map(
+      (c) => c * HOME_ORBIT_RADIUS,
+    );
+    for (let i = 0; i < 3; i++) expect(p[i]).toBeCloseTo(want[i], 6);
+    // Astra's brief computes this vantage explicitly as (−35.708, 12.997, 0.000).
+    expect(p[0]).toBeCloseTo(-35.708, 2);
+    expect(p[1]).toBeCloseTo(12.997, 2);
+    expect(p[2]).toBeCloseTo(0, 6);
+  });
+
+  it("declares the orbit period, and it is a compression rather than a real LEO period", () => {
+    // Recorded as a license: a real 400 km orbit is 92.7 min. If this ever silently became
+    // "realistic" the home view would be effectively static.
+    expect(HOME_ORBIT_PERIOD_S).toBe(180);
+    expect(HOME_ORBIT_PERIOD_S).toBeLessThan(92.7 * 60);
+  });
+});
+
+describe("PF-11 D6.4 city lights", () => {
+  const twins = [
+    ["GLSL", PLANET_FRAGMENT_GLSL],
+    ["WGSL", PLANET_FRAGMENT_WGSL],
+  ] as const;
+
+  it("masks the lights on the TRUE N·L in both twins, never on a proxy", () => {
+    // Astra's broken-physics #1 is showing city lights where the Sun can actually reach. The mask
+    // must be the exact complement of the term that lights the day side — anything else (a body
+    // flag, a camera-facing term, an unconditional composite) is the failure mode.
+    for (const [name, src] of twins)
+      expect(src, `${name} masks night on (1 - dayside)`).toContain(
+        "(1.0 - dayside)",
+      );
+  });
+
+  it("subtracts the floor BEFORE applying the gain, in both twins", () => {
+    // Without the subtraction the map's non-zero background is lifted ~14 stops along with the
+    // cities and the night side washes uniformly grey.
+    for (const [name, src] of twins)
+      expect(src, `${name} floor-subtracts`).toMatch(
+        /max\([\s\S]{0,120}NIGHT_FLOOR[\s\S]{0,60}\)/,
+      );
+  });
+
+  it("composites the lights BEFORE the tone map in both twins", () => {
+    // Added after Reinhard they are additive in display space and clip to flat white blobs with
+    // no structure. This ordering is why D6.4 had to follow D6.1 rather than precede it.
+    for (const [name, src] of twins) {
+      const night = src.indexOf("NIGHT_GAIN");
+      const tone = src.indexOf("(1.0 + outLin)");
+      expect(night, `${name} has the night term`).toBeGreaterThan(-1);
+      expect(night, `${name} composites before tone mapping`).toBeLessThan(
+        tone,
+      );
+    }
+  });
+
+  it("does NOT sRGB-decode the night map — measured, not assumed", () => {
+    // In linear space the 0.06 floor sits above the map's 99.9th percentile and erases it. The
+    // floor/gain pair is a declared emissive composite calibrated in the authored space.
+    for (const [name, src] of twins)
+      expect(
+        /srgbToLinear\([^)]*nightTex/.test(src),
+        `${name} must not decode nightTex`,
+      ).toBe(false);
+  });
+
+  it("gates on uHasNight so no other body inherits Earth's cities", () => {
+    for (const [name, src] of twins)
+      expect(src, `${name} gates on uHasNight`).toContain("uHasNight");
+  });
+});
+
+describe("PF-11 D6.3.4 per-body atmosphere flag", () => {
+  const manifest = JSON.parse(
+    readFileSync(
+      resolve(process.cwd(), "public/assets/planets/manifest.json"),
+      "utf8",
+    ),
+  ) as { bodies: Record<string, { atmosphere?: boolean; cloud?: unknown }> };
+
+  it("is declared on Earth and on nothing else", () => {
+    // Narrow ON PURPOSE. The Rayleigh term carries Earth's sea-level optical depths, so Venus,
+    // Titan, Mars, Jupiter and Saturn all have real atmospheres and none may set this flag until
+    // it carries their own tau. A body appearing here is a physics decision, not a data tweak.
+    const flagged = Object.entries(manifest.bodies)
+      .filter(([, b]) => b.atmosphere)
+      .map(([id]) => id);
+    expect(flagged).toEqual(["earth"]);
+  });
+
+  it("is a real declaration rather than the old cloud-map proxy", () => {
+    // The proxy and the flag agree today, which is precisely why the proxy survived so long. This
+    // asserts the flag exists INDEPENDENTLY, so a future cloud-bearing body cannot silently
+    // inherit Earth's atmosphere.
+    expect(manifest.bodies.earth.atmosphere).toBe(true);
+    expect(manifest.bodies.earth.cloud).toBeTruthy();
   });
 });

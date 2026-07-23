@@ -510,6 +510,79 @@ export function bodyWorldPosition(
   };
 }
 
+/* ---------- PF-11 D2: the frame ladder (sky honesty by destination) --------
+ *
+ * Astra's frame-ladder brief (2026-07-22, §1-2): the visible sky is a set of
+ * nested backdrops, each of which only changes when you move a distance
+ * comparable to its own depth. Two backdrop layers must therefore fade by the
+ * DESTINATION's distance, or they are BROKEN PHYSICS:
+ *
+ *  - solar-system furniture (the asteroid belt, its Havok stepping, sun glare
+ *    and planet billboards): gone by ~10 AU-equivalent departure. Astra §2:
+ *    the whole 6.6-AU belt subtends 16 milli-arcsec from M42 — rendering any
+ *    belt pixel at a DSO arrival is wrong by ~7 orders of magnitude.
+ *  - the entire LOCAL Milky Way (the 360° band, the 168,959-star field, the
+ *    constellation figures): at an extragalactic arrival it collapses into ONE
+ *    small external galaxy (Astra §1: a 100,000-ly disc subtends ~10' from
+ *    32.6 Mly). Keeping a 360° band at an SDSS/NBG galaxy is BROKEN PHYSICS.
+ *
+ * These are pure schedulers; the engine owns the per-frame live state and the
+ * material clones/uniforms that consume the result. Fades tie to warp progress
+ * `k` so the transition is part of the cinematic (the brief's own design
+ * recommendation), front-loaded over the acceleration phase when a layer
+ * leaves the frame and back-loaded over deceleration when it returns. */
+
+/** Furniture (belt/glare/planets) fully present below this destination ly,
+ * fading out above it. 0.001 ly ≈ 63 AU — past Neptune (~30 AU ≈ 4.7e-4 ly),
+ * before the nearest star (Proxima, 4.25 ly). */
+export const FURNITURE_FADE_START_LY = 0.001;
+/** Furniture fully gone at/above this destination ly (0.1 ly ≈ 6,300 AU). */
+export const FURNITURE_GONE_LY = 0.1;
+/** Destination ly at/above which the whole local galaxy collapses to an
+ * external impostor. Astra §1: nothing travelable sits between ~2,400 ly (the
+ * star field's linear reach) and the nearest SDSS/NBG galaxy at 32.6 Mly, so
+ * this threshold is effectively binary — 1e6 ly sits comfortably in that void. */
+export const EXTRAGALACTIC_LY = 1e6;
+
+/** Hermite smoothstep (0 below a, 1 above b), clamped. */
+function smoothstep(a: number, b: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+/** Solar-system-furniture visibility (1 present … 0 gone) for a destination at
+ * `ly` light-years. Smooth 1→0 across [FURNITURE_FADE_START_LY,
+ * FURNITURE_GONE_LY]; 1 for every solar-system body, 0 for any star or beyond. */
+export function furnitureVisibility(ly: number): number {
+  return 1 - smoothstep(FURNITURE_FADE_START_LY, FURNITURE_GONE_LY, ly);
+}
+
+/** Local-galaxy (band + star field + constellation figures) visibility for a
+ * destination at `ly`. 1 everywhere inside the galaxy, 0 at extragalactic
+ * arrivals — the discrete collapse Astra §1 describes (there is no travelable
+ * destination in between at which a partial value would ever be observed). */
+export function localFieldVisibility(ly: number): number {
+  return ly >= EXTRAGALACTIC_LY ? 0 : 1;
+}
+
+/** Schedules a layer fade from `from`→`to` across warp progress `k` ∈ [0,1]. A
+ * layer LEAVING the frame (to < from) fades out early, over the acceleration
+ * phase (before the k≈0.5 flip); a layer RETURNING (to > from) fades in late,
+ * over deceleration — so in both directions the change reads as part of the
+ * journey rather than a pop at either endpoint. Reduced motion holds `from` and
+ * swaps to `to` only at arrival — no animated ramp (non-negotiable #24). */
+export function frameLadderFade(
+  from: number,
+  to: number,
+  k: number,
+  reduced: boolean,
+): number {
+  if (reduced) return k >= 1 ? to : from;
+  const kk = Math.max(0, Math.min(1, k));
+  const tt = to < from ? smoothstep(0, 0.35, kk) : smoothstep(0.6, 1, kk);
+  return from + (to - from) * tt;
+}
+
 /** How far short of a body's exact position the camera parks — matches
  * space-engine.js's travelTo (arriving exactly at the point sprite would clip
  * through it). */

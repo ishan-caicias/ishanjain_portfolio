@@ -180,6 +180,30 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
     expect(Number((await readStats(page)).gd1TrailSegments)).toBe(1364);
     expect((await readStats(page)).gd1TrailMeshReady).toBe(true);
 
+    // PF-11 D2.2: the external-galaxy impostor's WGSL twin (ijImpostor) only
+    // COMPILES/DRAWS once the local field collapses — i.e. only after an
+    // extragalactic arrival, when the mesh is un-hidden. Force that here so real
+    // hardware validates it: its sampler+fade shader mirrors the proven band
+    // pattern, but no compiler cross-checks the twins, and a hidden mesh never
+    // exercises its pipeline. The console assertion below is what would catch a
+    // reserved id or bad sampler bind in it (the TR-045/TR-059 class).
+    await page
+      .locator("babylon-scene")
+      .evaluate((el) =>
+        (el as HTMLElement & { travelTo(id: string): void }).travelTo(
+          "nbg-a0554-07",
+        ),
+      );
+    await expect
+      .poll(async () => (await readStats(page)).impostorVisible, {
+        timeout: 30000,
+      })
+      .toBe(true);
+    expect((await readStats(page)).impostorTextureReady).toBe(true);
+    // Let the impostor pipeline submit at least once — the uncaptured-error
+    // event fires on first submission, not at shader-module creation.
+    await page.waitForTimeout(500);
+
     // The check that actually catches TR-045's class of bug: no WebGPU
     // validation errors, no reserved-keyword/parse errors, nothing async that
     // materialReady's synchronous check can't see.
@@ -193,9 +217,12 @@ test("WGSL twin runs the real WebGPU backend on real GPU hardware", async () => 
 
 test("TR-059 regression: the default scene keeps producing frames through the Milky Way band's chunked texture build", async () => {
   // TR-059: _setupMilkyWay's ShaderMaterial declares a `uTex` sampler, but
-  // the real equirect texture isn't built until _tickMilkyWay's chunked loop
-  // finishes — ~26 frames later (20 rows/frame against a 512-row grid). For
-  // that whole window, no texture object was bound to `uTex` at all.
+  // the real equirect texture isn't built until the progressive row build
+  // finishes — many frames later. For that whole window, no texture object
+  // was bound to `uTex` at all. (PF-11 D0.1 changed the PACING of that build
+  // — time-budgeted slices driven by the render loop AND a setTimeout chain,
+  // instead of a fixed 20 rows per rendered frame — but not the window this
+  // test guards: the placeholder must still be bound for its whole duration.)
   // material.isReady() returned true regardless (it checks shader
   // compilation, not whether every sampler has a resource), so the mesh drew
   // anyway. On WebGPU, building a bind group with no resource for a declared

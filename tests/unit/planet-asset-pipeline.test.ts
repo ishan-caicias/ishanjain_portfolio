@@ -30,6 +30,7 @@ import {
   PLANET_SOURCES,
   TIERS,
   ULTRA_SOURCES,
+  MAP_TIER_CAP,
   plannedFiles,
 } from "../../scripts/build-planet-textures.mjs";
 import {
@@ -37,7 +38,14 @@ import {
   directionToFace,
   equirectDirection,
 } from "../../scripts/lib/cubemap-equirect.mjs";
-import { NEVER_SPHERE } from "@/lib/planet-sphere";
+import {
+  NEVER_SPHERE,
+  SUN_RA_DEG,
+  SUN_DEC_DEG,
+  HOME_VANTAGE_RA_DEG,
+  HOME_VANTAGE_DEC_DEG,
+} from "@/lib/planet-sphere";
+import { raDecToDir } from "@/lib/ship-dynamics";
 
 describe("NEVER_SPHERE parity across the .mjs/.ts boundary", () => {
   it("the build script and the renderer block exactly the same bodies", () => {
@@ -153,20 +161,51 @@ describe("declared outputs", () => {
     expect(earth!.specular).toBeTruthy();
   });
 
-  it("does NOT ship Earth's night lights, and records why", () => {
-    // Astra's broken-physics #1. The arrival phase angle is exactly zero for every body, so the
-    // night hemisphere is 100% occluded and no exposure or mask can put a city light on screen —
-    // the map is real data but the VIEW would be invented, which is precisely the Venus failure
-    // mode. This is the highest-value assertion in the file: the map is the most beautiful asset
-    // in the pack and the pressure to ship it will recur.
+  /* NAMED TEST CHANGE (CLAUDE.md #15), PF-11 D6.4, 2026-07-23 — TR-088.
+   *
+   * This assertion was inverted, and the justification has to be better than "the feature wants
+   * it", because the original was the highest-value assertion in this file and said so.
+   *
+   * The original pinned Astra's broken-physics #1: at `travelTo`'s arrival geometry the phase
+   * angle is exactly 0.000°, the night hemisphere is 100% occluded, and shipping the map would
+   * mean the data is real while the VIEW is invented. **Every word of that is still true, and
+   * this change does not contradict it** — it satisfies the precondition the original reasoning
+   * itself named, in PACK_RECKONING's own last sentence: "Ship it if the arrival geometry ever
+   * changes."
+   *
+   * D6.4 is that change. Earth is not a `travelTo` destination and must never become one (the
+   * frame is geocentric — `UNREACHABLE_BY_DESIGN` below still enforces that). It is revealed by
+   * `goHome` at the world origin, parked at ra 160 / dec 0, which is phase angle **90.0000°** —
+   * verified independently in the assertion below rather than asserted from the brief. At that
+   * vantage the night hemisphere is ~50% of the frame.
+   *
+   * So the test now pins the thing that actually protects the physics: not "no night map", but
+   * "no night map WITHOUT the 90° vantage that earns it", plus the preserved reckoning entry so
+   * the original reasoning cannot be lost. */
+  it("ships Earth's night lights ONLY because the reveal geometry earns them", () => {
     const earth = PLANET_SOURCES.find((b) => b.id === "earth")!;
-    expect(
-      "night" in earth,
-      "night lights must not be in the pipeline — see PACK_RECKONING",
-    ).toBe(false);
+    expect("night" in earth).toBe(true);
+    // Base + high only — the ultra tier is deliberately capped (owner decision, ADR-0009 raise).
+    expect(MAP_TIER_CAP["earth:night"]).toBe("high");
+
+    // The reckoning entry is PRESERVED, not deleted: it is the record of why this was refused for
+    // two phases, and its own escape clause is what licenses shipping now.
     const reason = PACK_RECKONING["cubemap/earth-night-ultra"];
     expect(reason).toBeDefined();
     expect(reason).toContain("BROKEN PHYSICS");
+    expect(reason).toContain("Ship it if the arrival geometry ever changes");
+  });
+
+  it("the home vantage really is 90° phase — computed, not taken on trust", () => {
+    // The entire justification above rests on this one number, so it is derived here from the
+    // Sun's own catalog entry rather than quoted from the brief. If either the Sun's ra/dec or
+    // the parked bearing ever moves, this fails and the night lights lose their license.
+    const sun = raDecToDir(SUN_RA_DEG, SUN_DEC_DEG);
+    const cam = raDecToDir(HOME_VANTAGE_RA_DEG, HOME_VANTAGE_DEC_DEG);
+    const cosPhase = sun[0] * cam[0] + sun[1] * cam[1] + sun[2] * cam[2];
+    const phaseDeg =
+      (Math.acos(Math.max(-1, Math.min(1, cosPhase))) * 180) / Math.PI;
+    expect(phaseDeg).toBeCloseTo(90, 3);
   });
 });
 

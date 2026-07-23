@@ -103,6 +103,11 @@ test.describe("Space Scene", () => {
   });
 
   test("RNG mission control button travels somewhere", async ({ page }) => {
+    // PF-11 D1.2 named test change (CLAUDE.md #15): the mission control bar (and its RNG
+    // button) is hidden under body.ij-loading until a real visitor action, same as the
+    // hero copy — dismiss the PRE-FLIGHT gate first, as a real visitor would before ever
+    // seeing this button. Assertion below unchanged.
+    await page.getByRole("button", { name: "SKIP INTRO" }).click();
     await page.getByRole("button", { name: "RNG" }).click();
 
     // A random body was targeted - the HUD status line moves off its idle

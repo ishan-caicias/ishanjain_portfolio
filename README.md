@@ -13,23 +13,28 @@ npm run dev        # Start dev server at localhost:4321
 
 ## Scripts
 
-| Command                 | Description                                    |
-| ----------------------- | ---------------------------------------------- |
-| `npm run dev`           | Start development server                       |
-| `npm run build`         | Lint + typecheck + production build to `dist/` |
-| `npm run preview`       | Preview production build locally               |
-| `npm run check`         | Run Astro type checking                        |
-| `npm run lint`          | Run ESLint + Prettier check                    |
-| `npm run lint:fix`      | Auto-fix lint and formatting issues            |
-| `npm run format`        | Format all files with Prettier                 |
-| `npm run test`          | Run unit tests (Vitest)                        |
-| `npm run test:watch`    | Run unit tests in watch mode                   |
-| `npm run test:coverage` | Unit tests with coverage thresholds            |
-| `npm run test:e2e`      | Run E2E tests (Playwright; build first)        |
-| `npm run test:e2e:ui`   | Run E2E tests with Playwright UI               |
-| `npm run assets:craft`  | Rebuild the tiered ship GLB assets             |
-| `npm run budget:check`  | CI bundle-size gate (needs `dist/`)            |
-| `npm run docs:check`    | Documentation-drift gate (indexes, links)      |
+| Command                     | Description                                                        |
+| --------------------------- | ------------------------------------------------------------------ |
+| `npm run dev`               | Start development server                                           |
+| `npm run build`             | Lint + typecheck + production build to `dist/`                     |
+| `npm run preview`           | Preview production build locally                                   |
+| `npm run check`             | Run Astro type checking                                            |
+| `npm run lint`              | Run ESLint + Prettier check                                        |
+| `npm run lint:fix`          | Auto-fix lint and formatting issues                                |
+| `npm run format`            | Format all files with Prettier                                     |
+| `npm run test`              | Run unit tests (Vitest)                                            |
+| `npm run test:watch`        | Run unit tests in watch mode                                       |
+| `npm run test:coverage`     | Unit tests with coverage thresholds                                |
+| `npm run test:e2e`          | Run E2E tests (Playwright; build first)                            |
+| `npm run test:e2e:ui`       | Run E2E tests with Playwright UI                                   |
+| `npm run assets:craft`      | Rebuild the tiered ship GLB assets                                 |
+| `npm run assets:planets`    | Rebuild planet surface textures (needs source pack)                |
+| `npm run assets:planets:vt` | Rebuild the virtual-texture tile pyramids                          |
+| `npm run assets:sync`       | Regenerate stale planet/VT assets (auto via `predev`/`prepreview`) |
+| `npm run assets:verify`     | Source-free asset gate (auto via `prebuild`, CI)                   |
+| `npm run gaia:pipeline`     | Gaia Sky dataset → site-format conversion                          |
+| `npm run budget:check`      | CI bundle + asset weight gate (needs `dist/`)                      |
+| `npm run docs:check`        | Documentation-drift gate (indexes, links)                          |
 
 ## Tech Stack
 
@@ -37,9 +42,12 @@ npm run dev        # Start dev server at localhost:4321
 - **Interactive Islands**: [React](https://react.dev) 19 (hydrated on demand)
 - **Styling**: [TailwindCSS](https://tailwindcss.com) v4 (CSS-first `@theme` tokens)
 - **3D — shipping default**: [Babylon.js](https://www.babylonjs.com) 8 on **WebGPU** (WebGL2
-  fallback) — 168,959 real Hipparcos/Gaia/SDSS objects as photometric billboards, volumetric
-  compute-raymarched nebulae, GLB ship with thruster/shimmer FX, and a
-  [Havok](https://www.havok.com) physics asteroid field (lazy WASM)
+  fallback) — a 168,959-star photometric field plus real-catalog bulk layers (SDSS DR18's
+  3.64M-galaxy deep field, 359K eDR3 white dwarfs, CNS5, cluster background), a 154,662-object
+  Gaia DR3 asteroid belt with Keplerian orbital motion and a
+  [Havok](https://www.havok.com) rigid-body physics subset (lazy WASM), volumetric
+  compute-raymarched nebulae (NGC2000 catalog), real textured planet spheres with
+  virtual-texture topography streaming, and a GLB ship with thruster/shimmer FX
 - **3D — archived legacy**: bespoke WebGL1 engine (`src/lib/space-engine.js` custom element),
   still shipped behind `?engine=webgl` as the cutover rollback lever
 - **Animation**: CSS animations + [Motion](https://motion.dev) (React islands)
@@ -73,7 +81,8 @@ src/
 │   │   └── space/       # Space scene chrome (HUD, dossiers, station sprites, etc.)
 │   └── ui/              # Reusable components (Badge, Card, etc.)
 ├── content/             # Typed data (experience, skills, etc.)
-├── data/celestial/      # PNG-packed Hipparcos/Gaia/SDSS catalog data (generated)
+├── data/celestial/      # Curated celestial catalogs (generated JS modules — never hand-edited;
+│                        #   bulk layers ship as PNG-packed assets in public/assets/)
 ├── lib/                 # Engines + pure modules:
 │   │                    #   babylon-engine.ts (Babylon/WebGPU — the default)
 │   │                    #   space-engine.js (WebGL1 — archived, ?engine=webgl)
@@ -97,15 +106,19 @@ project's source of truth for decisions and verification history.
 - **Cinematic flight** (default Babylon path): chase-camera journeys with accel/flip/decel
   burns, a GLB fighter with layered thruster plume + heat shimmer, volumetric nebulae that
   reveal on approach, and a rigid-body asteroid belt with idle collisions (Havok).
-- **Curated destinations**: every catalog body renders as a type-shaded beacon (star, planet,
-  nebula, galaxy, cluster, deep field), with real NASA/ESA photographic imagery and lit rotating
-  globes for the 267-body atlas-mapped subset.
+- **Curated destinations**: 4,800+ charted bodies render as type-shaded beacons (star, planet,
+  nebula, galaxy, cluster, deep field), with real NASA/ESA photographic imagery for the
+  267-body atlas-mapped subset and real textured, sun-lit, rotating planet spheres (with real
+  MOLA/LOLA topography and a Venus cloud-deck descent) for the arrival views of 16 bodies.
+- **Real-data sky**: the star field, asteroid belt, galaxy deep field, star clusters, white
+  dwarfs, GD-1 stellar stream, and NGC2000 nebulae all derive from real Gaia/SDSS/survey
+  catalogs — real positions, real photometry, real orbital mechanics (the belt's Kirkwood gaps
+  emerge from the data, not from a noise function).
 - **Sky backdrop**: a procedural Milky Way band, constellation figures for named star patterns,
   and radial star-streak trails during warp.
-- **Known post-cutover deltas**: the Babylon path still has no field-star hover, station sprite
-  markers, or free-look drag — tracked in
-  [the cutover gap analysis](docs/analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md).
-  `?engine=webgl` still has them.
+- **Engine parity**: any remaining Babylon-vs-legacy deltas are tracked in
+  [the cutover gap analysis](docs/analysis/2026-07-19-webgl-babylon-cutover-gap-analysis.md);
+  `?engine=webgl` remains the archived rollback lever.
 - **Classic View Toggle**: switch between travel mode and a traditional scrolling page.
 - **Astronaut Mascot**: floating SVG that drifts toward active sections (desktop only).
 - **Mission Control**: footer panel with quick links (Resume, LinkedIn, GitHub, Copy Bio).

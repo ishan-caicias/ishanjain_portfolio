@@ -13,6 +13,10 @@ interface HUDProps {
   onOpenCredits: () => void;
   isTravel: boolean;
   onToggleNavMode: () => void;
+  /** PF-11 D2.2: true when parked at an extragalactic destination, where the
+   * whole Milky Way has collapsed to a distant smudge. Drives the legibility
+   * line so the collapse reads as physics, not a rendering bug. */
+  farField: boolean;
 }
 
 /**
@@ -33,6 +37,7 @@ export default function HUD({
   onOpenCredits,
   isTravel,
   onToggleNavMode,
+  farField,
 }: HUDProps) {
   const streamLine = ready
     ? "ONLINE · " +
@@ -104,6 +109,11 @@ export default function HUD({
           <div>{bearingLine}</div>
           <div className="text-[#ffd54f]">{sectorLine}</div>
           <div className="text-[#3f51b5]">{statusLine}</div>
+          {farField && (
+            <div className="mt-1 max-w-[210px] whitespace-normal text-[10px] leading-snug text-[#ffab91]">
+              LOCAL FIELD BELOW RESOLUTION · MILKY WAY ASTERN
+            </div>
+          )}
         </div>
         <button
           onClick={onToggleNavMode}

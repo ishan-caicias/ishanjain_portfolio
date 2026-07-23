@@ -51,6 +51,11 @@ export interface SpaceEngineElement extends HTMLElement {
   travelTo(id: string, quiet?: boolean): void;
   goHome(quiet?: boolean): void;
   randomBody(): void;
+  /** PF-11 D1.3: start the launch-from-Earth ascent (Babylon engine only; the archived WebGL
+   * engine has no such method — callers null-check). Reduced motion / no-WebGL cut instantly. */
+  beginAscent?(): void;
+  /** PF-11 D1.3: snap the ascent to its end (the SKIP affordance). */
+  skipAscent?(): void;
   setStations(
     list: { id: string; ra: number; dec: number; ly: number }[],
   ): void;

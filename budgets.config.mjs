@@ -93,14 +93,42 @@ export const assets = {
    * celestial catalogs reference, plus venus-cloud.jpg — and the "high-water mark" was taken
    * while they were missing. Restoring them added back 1.77 MB and the gate immediately failed
    * again, which is the third time in one session it has done its job: a measurement is only as
-   * trustworthy as the state it was taken in. */
-  totalMB: 256.5,
+   * trustworthy as the state it was taken in.
+   *
+   * RAISED 256.5 -> 257.0, 2026-07-23 (PF-11 D6.4, TR-088) — and note this line RETRACTS the
+   * ratchet-down recorded two paragraphs above. That entry dropped the night-lights map because
+   * "it cannot produce a single visible pixel at this scene's zero arrival phase", which was
+   * exactly right about `travelTo` and is now moot: D6.4 reveals Earth via `goHome` at the world
+   * origin, parked at phase angle 90.0000°, where the night hemisphere is ~50% of the frame. The
+   * payload came back, so the ceiling follows it back up — the same rule working in the other
+   * direction. The measured cost is far smaller than budgeted for: **0.25 MB**, because the map
+   * is mostly black and JPEG compresses it to almost nothing. Owner approved up to ~2 MB for
+   * this; it needed 0.5. Base + high only (MAP_TIER_CAP in build-planet-textures.mjs). */
+  totalMB: 257.0,
 
   /** The largest single file. Attribution, not a second total: a 45 MB asset appearing where the
    * previous maximum was 8 MB is a different kind of event from the total drifting up by 45 MB
    * across a thousand tiles, and the two want different conversations. Currently `sdss18.png` at
    * 44.94 MB (C2's full 3,637,862-record galaxy field). */
   perFileMB: 45.0,
+
+  /** NEW IN PF-11 D1.1 (2026-07-22) — the only ceiling here measured in what a VISITOR WAITS FOR
+   * rather than what the repo weighs, in RAW kilobytes.
+   *
+   * Every other number in this file gates shipped bytes. This one gates the bytes a default
+   * visitor must download before the pre-flight dossier's LAUNCH button can arm — the sum of
+   * `BOOT_CRITICAL_ASSETS` in `src/lib/load-progress.ts` (stars-hip.png + deep.png +
+   * atlas-map.json), asserted against their real on-disk sizes by a unit test rather than
+   * restated here. `engine-init` and `first-frame` are boot-critical stages that download
+   * nothing, so they contribute zero.
+   *
+   * This is the number ADR-0010's "boot-critical download budget" calls for and the one D9.3's
+   * Render Console reads: once heavy layers become opt-in fetch-on-enable, the total repo weight
+   * above stops being the thing that determines time-to-interactive, and THIS does. Measured
+   * 2835.5 KB (1971.1 + 853.0 + 11.4); pinned at 2900 with ~2% slack for encoder noise on a
+   * catalog regen, following this file's ratchet rule — anything that genuinely lengthens the
+   * pre-LAUNCH wait must raise this line deliberately, with a why. */
+  bootCriticalDownloadKB: 2900,
 
   /** Per-directory ceilings, so a regression is attributable to a feature rather than to
    * "assets". A group absent from this map is unbudgeted and only counts toward `totalMB`;
@@ -116,7 +144,10 @@ export const assets = {
     // RAISED 122.0 -> 169.5, 2026-07-21 (TR-079) — the pack completion above, plus the 1.77 MB
     // of restored assets described in `totalMB`. Breakdown, so a future trim has somewhere to
     // start: base 6.6 / high 28.6 / ultra 69.1 / VT tiles 62.9 / catalog dossier images 1.8.
-    planets: 169.5,
+    // RAISED 169.5 -> 170.0, 2026-07-23 (PF-11 D6.4, TR-088) — Earth's night lights returning at
+    // base + high, measured 0.25 MB total (0.05 + 0.20). See `totalMB` for why the earlier
+    // ratchet-down that removed them no longer applies.
+    planets: 170.0,
     "(root)": 59.7,
     dso3: 15.0,
     dso2: 7.2,

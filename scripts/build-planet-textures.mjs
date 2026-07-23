@@ -167,16 +167,40 @@ export const PLANET_SOURCES = [
   // and the reason it was wrong is instructive: the pipeline only ever globbed `tex/base/`, and
   // Earth's surface lives in `tex/cubemap/` — 6 faces at 8192x8192, plus night lights and a
   // cloud deck. Re-projected to this pipeline's equirect convention by lib/cubemap-equirect.mjs.
-  // NO `night` map — see PACK_RECKONING. Astra ranks shipping it as broken-physics #1.
+  // PF-11 D6.4 (2026-07-23): the `night` map SHIPS now. Its own PACK_RECKONING entry named the
+  // precondition — "Ship it if the arrival geometry ever changes" — and D6.4 is that change:
+  // Earth is revealed by `goHome` at the origin, parked at ra 160 / dec 0, which is phase angle
+  // 90.0000° rather than the 0.000° every `travelTo` arrival is pinned to. At that vantage the
+  // night hemisphere is ~50% of the frame instead of 100% occluded. Base + high only —
+  // MAP_TIER_CAP explains why. See the superseding note in PACK_RECKONING.
   {
     id: "earth",
     cubemap: "earth-day-ultra/earth-day",
     normal: "earth-normal-high",
+    // Face prefix is `earth_night`, not `earth-night` — the pack is inconsistent between the day
+    // cubemap (`earth-day_rt.jpg`) and the night one (`earth_night_rt.jpg`). Verified against the
+    // real directory listing rather than assumed from the folder name, which is what the first
+    // attempt did and why it failed loudly on a missing face.
+    night: "earth-night-ultra/earth_night",
     cloud: "earth-cloud-high/earth-cloud",
     specular: "earth-specular-high",
     dossier: true,
+    atmosphere: true,
   },
 ];
+
+/* PF-11 D6.3.4 — `atmosphere` is a REAL per-body declaration, replacing the cloud-map-presence
+ * proxy the engine used to infer it from (`uAtmosphere = entry.cloud ? 1 : 0`). The old proxy was
+ * correct only by the accident that Earth is the one body in the pack shipping a cloud map; the
+ * call site's own comment said so and asked for this flag.
+ *
+ * WHAT THE FLAG ACTUALLY MEANS, stated narrowly because a wider reading would be wrong: "the
+ * shader's Rayleigh + aerosol term describes this body's atmosphere." That term is parameterised
+ * with EARTH's sea-level optical depths (RAYLEIGH_TAU_RGB, Bodhaine et al. 1999) and Earth's
+ * maritime aerosol. Venus, Titan, Mars, Jupiter and Saturn all have atmospheres and NONE of them
+ * may set this flag until it carries their own tau — a CO2 atmosphere at 92 bar is not a thin N2/O2
+ * one scaled down. So the honest value set today is exactly {earth}, and the flag exists to make
+ * that a decision on the record rather than a side effect of which maps happen to ship. */
 
 /** Assets copied VERBATIM into the planets directory from a source pack, rather than resized
  * into tiers.
@@ -282,6 +306,14 @@ export const PACK_RECKONING = {
   "cubemap/earth-day-high": "superseded by earth-day-ultra (8192 faces)",
 
   // -- real data that CANNOT BE SEEN at this scene's arrival geometry --
+  //
+  // SUPERSEDED 2026-07-23 (PF-11 D6.4), and left in place rather than rewritten because the
+  // reasoning below is still exactly right about `travelTo` — it was never wrong, its
+  // PRECONDITION changed, which is the condition its own last sentence names. Earth is now
+  // revealed by `goHome` at the world origin, parked at ra 160 / dec 0 = phase angle 90.0000°,
+  // where the night hemisphere is ~50% of the frame. The map is real data and the view is now
+  // real too, so the broken-physics ranking no longer applies to the shipped geometry. The
+  // `night` entry moved into PLANET_SOURCES above; base + high only (MAP_TIER_CAP).
   "cubemap/earth-night-ultra":
     "Earth's real city lights, and the single most beautiful asset in this pack — NOT SHIPPED, " +
     "because Astra measured that this scene's arrival phase angle is exactly ZERO for every " +
@@ -301,15 +333,43 @@ export const PACK_RECKONING = {
 /** The complete set of output files a body is expected to produce, derived from the same
  * declarations the builder uses. Shared by build and --verify so the gate cannot drift from the
  * pipeline: there is exactly one definition of "correct". */
+/** Per-map tier ceilings, `"<bodyId>:<map>"` -> highest tier that map ships.
+ *
+ * PF-11 D6.4 (owner decision, 2026-07-23). Earth's night lights ship **base + high only**, not
+ * ultra. The reason is specific to what the map IS rather than a general economy: it is a mostly
+ * black frame carrying isolated point sources, composited under a declared ~14-stop exposure lift
+ * (Astra §2.3). Resolution buys far less on that than on a daylit surface, while the ultra tier
+ * alone would cost 4.89 MB against 0.19 MB of remaining `assets/planets` headroom — an ADR-0009
+ * ceiling decision that is the owner's, not this script's. The `full` tier is also the only
+ * quality tier that would ever fetch it after D6.3.2's ladder gating.
+ *
+ * Applied in ONE place used by both the builder and `--verify`, so the gate cannot disagree with
+ * what is emitted — the same single-definition discipline `plannedFiles` already exists for. */
+export const MAP_TIER_CAP = {
+  "earth:night": "high",
+};
+
+/** The tiers one map of one body actually ships, after both the ULTRA_SOURCES rule and any
+ * per-map ceiling above. */
+export function tiersForMap(body, map, tierNames) {
+  const cap = MAP_TIER_CAP[`${body.id}:${map}`];
+  if (!cap) return tierNames;
+  const order = Object.keys(TIERS);
+  const maxIdx = order.indexOf(cap);
+  return tierNames.filter((t) => order.indexOf(t) <= maxIdx);
+}
+
 export function plannedFiles(body) {
   const tierNames = Object.keys(TIERS).filter(
     (n) => n !== "ultra" || ULTRA_SOURCES.has(body.id),
   );
   const files = [];
-  for (const t of tierNames) files.push(`${body.id}-surface-${t}.jpg`);
+  for (const t of tiersForMap(body, "surface", tierNames))
+    files.push(`${body.id}-surface-${t}.jpg`);
   for (const map of ["height", "normal", "night", "cloud", "specular"]) {
     if (!body[map]) continue;
-    for (const t of tierNames) files.push(`${body.id}-${map}-${t}.jpg`);
+    for (const t of tiersForMap(body, map, tierNames))
+      files.push(`${body.id}-${map}-${t}.jpg`);
   }
   // The catalog's per-body dossier image, `<id>.jpg` — see DOSSIER_PX.
   if (body.dossier) files.push(`${body.id}.jpg`);
@@ -570,6 +630,43 @@ function isStale(body, outDir) {
   return false;
 }
 
+/** Declaration-derived manifest fields that describe a body rather than name a file.
+ *
+ * Kept as ONE list with one writer so the full-build path and the metadata-only reconcile path
+ * below cannot drift — the class of bug where `--if-stale` and a full rebuild produce different
+ * manifests is exactly what this pipeline's three-mode convention exists to prevent. Emitted only
+ * when truthy, so the manifest records what a body HAS rather than a wall of `false`. */
+const METADATA_FIELDS = ["atmosphere"];
+
+function applyMetadata(body, entry) {
+  for (const f of METADATA_FIELDS) {
+    if (body[f]) entry[f] = body[f];
+    else delete entry[f];
+  }
+}
+
+/** Reconcile metadata on an existing manifest without re-emitting a single image. */
+function syncManifestMetadata(bodies, outDir) {
+  const manifestPath = join(outDir, "manifest.json");
+  if (!existsSync(manifestPath)) return;
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  let changed = 0;
+  for (const body of bodies) {
+    const entry = manifest.bodies?.[body.id];
+    if (!entry) continue;
+    const before = JSON.stringify(METADATA_FIELDS.map((f) => entry[f] ?? null));
+    applyMetadata(body, entry);
+    if (JSON.stringify(METADATA_FIELDS.map((f) => entry[f] ?? null)) !== before)
+      changed++;
+  }
+  if (changed) {
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+    console.log(
+      `planet-textures: reconciled manifest metadata on ${changed} bod${changed === 1 ? "y" : "ies"}.`,
+    );
+  }
+}
+
 async function build(bodies, outDir) {
   mkdirSync(outDir, { recursive: true });
   const manifestPath = join(outDir, "manifest.json");
@@ -597,7 +694,7 @@ async function build(bodies, outDir) {
       if (map !== "surface" && !body[map]) continue;
       const src = sourceFor(body, map);
       entry[map] = {};
-      for (const t of tierNames) {
+      for (const t of tiersForMap(body, map, tierNames)) {
         const file = `${body.id}-${map}-${t}.jpg`;
         const bytes = await emit(src, join(outDir, file), TIERS[t], map);
         entry[map][t] = file;
@@ -622,6 +719,7 @@ async function build(bodies, outDir) {
           `${(bytes / 1048576).toFixed(2)} MB  (catalog dossier)`,
       );
     }
+    applyMetadata(body, entry);
     manifest.bodies[body.id] = entry;
   }
 
@@ -767,6 +865,13 @@ async function main() {
     const stale = bodies.filter((b) => isStale(b, args.out));
     if (stale.length === 0) {
       console.log("planet-textures: all bodies up to date.");
+      // PF-11 D6.3.4: reconcile declaration-derived METADATA even when no image is stale.
+      // `isStale` compares image mtimes against their sources, so it is structurally blind to a
+      // change that adds or removes a manifest field without touching a pixel — exactly what
+      // adding `atmosphere: true` to Earth was. Without this the flag would have needed either a
+      // full re-emit of all 88 images or a hand-edit of a generated file (CLAUDE.md #22), and the
+      // next metadata field would have hit the same wall.
+      syncManifestMetadata(bodies, args.out);
       copyPassthrough(args.out);
       reportUnrecognised(args.out);
       if (verify(args.out)) process.exitCode = 1;

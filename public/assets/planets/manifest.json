@@ -194,6 +194,10 @@
         "high": "earth-normal-high.jpg",
         "ultra": "earth-normal-ultra.jpg"
       },
+      "night": {
+        "base": "earth-night-base.jpg",
+        "high": "earth-night-high.jpg"
+      },
       "cloud": {
         "base": "earth-cloud-base.jpg",
         "high": "earth-cloud-high.jpg",
@@ -203,7 +207,8 @@
         "base": "earth-specular-base.jpg",
         "high": "earth-specular-high.jpg",
         "ultra": "earth-specular-ultra.jpg"
-      }
+      },
+      "atmosphere": true
     }
   }
 }

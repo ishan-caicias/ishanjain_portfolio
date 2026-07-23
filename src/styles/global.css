@@ -327,7 +327,8 @@ body.ij-warping #ij-hero-copy {
    (with grace/fallback timers). The hero copy and WHERE-TO bar fade in. */
 #ij-mission-bar {
   transition:
-    opacity 0.7s ease,
+    opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.6s cubic-bezier(0.16, 1, 0.3, 1),
     top 0.6s ease,
     bottom 0.6s ease;
 }
@@ -336,10 +337,28 @@ body.ij-loading #ij-mission-bar {
   opacity: 0;
   pointer-events: none;
 }
-/* WHERE-TO docks between the ship and the title at the home vista */
+/* PF-11 D1.3: the WHERE-TO console REVEALS into its dock with a small rise (fade + 12px, 0.6s,
+   the same "arrival" easing the vista uses) — the settle the launch ascent hands off to. The
+   rise lives only on the console; the hero copy just fades. The `arrival` easing overshoot-free
+   settle is quiet on purpose: the ascent was the spectacle, the console is the tool. */
+body.ij-loading #ij-mission-bar {
+  transform: translateY(12px);
+}
+/* WHERE-TO docks between the ship and the title at the home vista.
+   PF-11 D1.3: formalized to the clamped band the experience review specified
+   (`top: clamp(45vh, 54vh, calc(66vh - <bar height>))`) so the D1.3 ascent reveal and a later
+   `goHome` land the console in the IDENTICAL place — post-launch and post-goHome are one frame. */
 body.ij-travel.ij-at-home #ij-mission-bar {
   bottom: auto;
-  top: 54vh;
+  top: clamp(45vh, 54vh, calc(66vh - 56px));
+}
+/* Mobile travel mode: bottom-docked (a mid-screen input collides with the virtual keyboard).
+   "second third" is a desktop/tablet spec — experience review §D1.6. */
+@media (max-width: 767px) {
+  body.ij-travel.ij-at-home #ij-mission-bar {
+    top: auto;
+    bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   #ij-mission-bar {
@@ -355,14 +374,29 @@ body.ij-travel #ij-hero-badge {
 }
 
 /* No-JS/failed-hydration failsafe: even if SpaceScene never clears ij-loading,
-   the content self-reveals after 9s via CSS animation alone. */
+   the content self-reveals after 9s via CSS animation alone.
+
+   PF-11 D1.2: scoped to :not(.ij-preflight-mounted) — the 9s VALUE is
+   preserved verbatim (per the implementation plan) as the no-JS/hydration-
+   failure timing, but the CONDITION was widened by measurement, not guessed
+   at. PreFlight.tsx now gates the reveal behind a real visitor action
+   (LAUNCH/SKIP INTRO), which can legitimately take longer than 9s under
+   completely normal operation (craft alone is calibrated up to 45s in this
+   repo's own E2E ceilings) — an E2E regression this exact CSS rule caused
+   (craft-ship.spec.ts's warp-travel test: #ij-hero-copy read opacity 1
+   during warp because the failsafe had already force-revealed it out from
+   under a still-showing PreFlight). Scoping to the body class PreFlight sets
+   on mount makes the rule mean what its own comment always claimed: it now
+   fires ONLY when the JS-driven gate never mounted at all (a genuine
+   hydration failure), never merely because a working visitor hasn't chosen
+   LAUNCH yet. */
 @keyframes ij-unhide {
   to {
     opacity: 1;
     pointer-events: auto;
   }
 }
-body.ij-loading #ij-hero-copy,
-body.ij-loading #ij-mission-bar {
+body.ij-loading:not(.ij-preflight-mounted) #ij-hero-copy,
+body.ij-loading:not(.ij-preflight-mounted) #ij-mission-bar {
   animation: ij-unhide 0.6s ease 9s forwards;
 }

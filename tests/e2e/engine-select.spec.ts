@@ -317,6 +317,21 @@ test("babylon: GAP-02 photographic bodies — travelling to a real atlas-mapped 
 test("babylon: GAP-03/04/05 — galactic band, constellation figures, and warp trails all build console-clean", async ({
   page,
 }) => {
+  // PF-10 scale (declared test change, same reasoning as the B5 tiers test
+  // above): this test's own workload grew — boot now competes with the SDSS
+  // DR18 fetch/decode/mesh-build, the DR3 belt, and the bonus star layers,
+  // and the band's 20-rows-per-frame progressive build is FRAME-coupled, so
+  // its wall-clock cost scales inversely with fps under SwiftShader software
+  // rendering. The owner's 2026-07-22 run failed at 30.2s against the default
+  // 30s ceiling with every assertion up to the final readStats already green.
+  // Correctness assertions below are unchanged; the ceiling stops enforcing a
+  // CI-renderer performance floor this suite was never meant to enforce. The
+  // frame-coupled band build itself is a named PF-11 investigation item.
+  // PF-11 D0.1 (2026-07-22) closed that item: the band build is no longer
+  // frame-coupled (time-budgeted slices + a setTimeout chain between frames).
+  // The widened ceiling STAYS — the rest of this test's workload still grew
+  // with PF-10 — but the band is no longer the mechanism it was widened for.
+  test.setTimeout(90000);
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   page.on("console", (m) => {
@@ -345,10 +360,17 @@ test("babylon: GAP-03/04/05 — galactic band, constellation figures, and warp t
         (el as HTMLElement & { sceneStats(): GapStats }).sceneStats(),
       );
 
-  // GAP-03: the band's 1024x512 grid is built progressively (20 rows/frame),
-  // so poll rather than assume it lands by the first read.
+  // GAP-03: the band's 1024x512 grid is built progressively, so poll rather
+  // than assume it lands by the first read. The 45s (not 20s) ceiling dates
+  // from when the build was 20 rows per RENDERED frame — ~26 frames, and
+  // frame delivery under a loaded SwiftShader run can drop near 1 fps
+  // (TR-067 measured ~3 fps on an idle CI machine), which was the C7
+  // "bandReady never true" full-suite failure mode. PF-11 D0.1 decoupled the
+  // build from frame delivery (time-budgeted slices, plus a setTimeout chain
+  // running between frames), so this poll should now land in CPU-bounded
+  // time; the ceiling is kept as headroom, not as the mechanism's budget.
   await expect
-    .poll(async () => (await readStats()).bandReady, { timeout: 20000 })
+    .poll(async () => (await readStats()).bandReady, { timeout: 45000 })
     .toBe(true);
   const idle = await readStats();
   expect(idle.bandMeshReady).toBe(true);
@@ -659,6 +681,16 @@ test("babylon: Havok asteroid field — WASM boots, bodies exist, and rocks actu
 test("babylon: nebula gas is destination-gated — hidden at idle and through accel, revealed at arrival", async ({
   page,
 }) => {
+  // PF-11 D0.1 (named test change, no assertion touched): this test had no
+  // explicit ceiling, so it ran against Playwright's 30s default — and under
+  // PF-10 scene scale it now sits ON that line. Measured under a moderate
+  // 4-worker CPU load, three passes per arm: 29.6s / TIMEOUT / 37.0s on the
+  // current build and 30.5s / 33.5s / 27.8s on the pre-D0.1 build (stashed
+  // and rebuilt) — i.e. the margin was already gone before this slice, the
+  // same near-zero-margin class TR-080 fixed for GAP-03/04/05, the
+  // distance-scaled travel test, and (in this slice) the craft specs. 90s
+  // matches those; every assertion below is unchanged.
+  test.setTimeout(90000);
   // Owner-reported defect (2026-07-19): the gas appeared the instant a nebula
   // destination was selected, during the ACCELERATION burn. The fix gates each
   // volume behind a reveal envelope: 0 until the decel burn (warp k > 0.53),
@@ -790,6 +822,12 @@ test("babylon: RNG mission control button drives real travel through the real UI
   await expect
     .poll(async () => (await readStats()).starSource, { timeout: 20000 })
     .toBe("catalog");
+
+  // PF-11 D1.2 named test change (CLAUDE.md #15): the mission control bar (and its RNG
+  // button) is hidden under body.ij-loading until a real visitor action, same as the hero
+  // copy — dismiss the PRE-FLIGHT gate first, as a real visitor would before ever seeing
+  // this button. Assertions below unchanged.
+  await page.getByRole("button", { name: "SKIP INTRO" }).click();
 
   await page.getByRole("button", { name: "RNG" }).click();
 
@@ -997,6 +1035,15 @@ test("babylon: GAP-17/GAP-08 — free-look drag stays authoritative over the cha
   // pointed at the wrong engine since the B6 cutover). `_yaw`/`_dragging` are
   // babylon-engine.ts's private fields — still readable at runtime, same
   // pattern this suite already uses for other private-field reads.
+  //
+  // PF-11 D1.2 named test change (CLAUDE.md #15): this test had no explicit
+  // ceiling and ran on Playwright's 30s default — measured at 27-31s across
+  // repeated runs even before this slice, near-zero margin (TR-080's exact
+  // signature). The added SKIP INTRO step below tips it over that margin
+  // often enough to be a real flake, not a one-off; 60s matches the budget
+  // this file's other multi-step real-interaction tests already carry.
+  // Assertions unchanged.
+  test.setTimeout(60000);
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
   await page.goto("/?engine=babylon");
@@ -1015,6 +1062,13 @@ test("babylon: GAP-17/GAP-08 — free-look drag stays authoritative over the cha
       { timeout: 20000 },
     )
     .toBe("catalog");
+
+  // PF-11 D1.2 named test change (CLAUDE.md #15): the PRE-FLIGHT dossier now covers the
+  // lower hero region until a real visitor action (LAUNCH/SKIP INTRO), including its
+  // pointer-events over the viewport-center coordinate this test drags at — dismissing it
+  // is what a real visitor would do before ever reaching free-look, so this test does the
+  // same rather than fighting the gate. Assertion below (drag pins yaw) is unchanged.
+  await page.getByRole("button", { name: "SKIP INTRO" }).click();
 
   await page
     .getByRole("navigation", { name: "Main navigation" })
@@ -1096,16 +1150,24 @@ test("babylon: distance-scaled travel — a near body warps faster than a far on
     e.travelTo("sun"); // ly = 0.0000158 — solar system
     return e.warp.warpDur;
   });
-  await page
-    .locator("babylon-scene")
-    .evaluate((el) => (el as TravelEl).goHome(true)); // reset for a clean second launch
+  // Declared test change (owner's 2026-07-22 failing run, root-caused): the
+  // goHome(true) "reset" that used to sit here was DEAD CODE — goHome() is a
+  // guarded no-op while warp.mode is "aim"/"warp" (babylon-engine.ts), and it
+  // was always called ~1ms into the sun warp's aim phase. The poll below only
+  // ever passed because the short sun journey itself finished and set mode
+  // back to "idle". Removed rather than kept as false reassurance. 15s not
+  // 4s: warp progress is per-frame-dt-clamped, so a ~1.5s-configured journey
+  // stretches multiple-fold under SwiftShader at PF-10 scene scale — the same
+  // investigated mechanism the reduced-motion test below documents (TR-066).
+  // The second launch needs no position reset anyway: warpDur derives from
+  // the target's catalog ly (warpDurationForLy), not the camera's position.
   await expect
     .poll(
       () =>
         page
           .locator("babylon-scene")
           .evaluate((el) => (el as TravelEl).warp.mode),
-      { timeout: 4000 },
+      { timeout: 15000 },
     )
     .toBe("idle");
 
