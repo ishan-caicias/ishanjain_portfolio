@@ -329,6 +329,16 @@ gate (hallway ×5, dossier-vs-spinner) is owner-run and flagged, not blocking th
 the plan's sequencing is "D6.4 must precede D1.3", and D6.4 (TR-088) is what actually unblocked
 this. D1.3 now completes Phase D1's cinematic arc.
 
+**✅ ESCALATION CLOSED 2026-07-24 — [TR-092](../test-reports/TR-092.md).** The carried-forward
+α=90° Earth photometry (the one open item above) is computed and fixed: Astra's disc integration
+of the shipped shader math found Earth rendering **×1.50 too bright at quadrature** (Φ(90°)=0.354
+vs the measured 0.236, Mallama 2017's EPOXI-fitted phase curve). The surface constants both stand
+(L=0 mechanism-correct at all phases; 0.213's α=0 anchor corroborated) — the gap was the cloud
+slab's missing Mie forward-scattering deficit, closed with one solved constant
+(`CLOUD_QUAD_DEFICIT = 0.539`, exactly 1 at α=0 so every travelTo arrival is bit-identical; ledger
+L18; derivation in the [Earth brief Addendum 3](../analysis/2026-07-21-earth-sphere-science-brief.md)).
+**Phase D1 now has no open items.**
+
 ## Phase D2 — The frame ladder: sky honesty by destination (owner R3/R4/R5)
 
 **Audited baseline:** the band is a camera-locked `infiniteDistance` skybox with **zero**

@@ -1946,3 +1946,89 @@ Enceladus–Saturn spacing.
 | 11  | Albedo assignment in the request               | **permuted**                       | Shipped `PLANET_ALBEDO` is right (tethys **1.229**); the permutation misses photometry by **0.51 mag**                    |
 | 12  | `c` as photometry                              | **it never was**                   | Real B−V 0.71–0.78 (near-white); ramp by albedo instead, and **never** give these three Callisto's `#9fa8da` (_p_ = 0.17) |
 | 13  | `sunDirectionFrom`'s "Sol at the world origin" | **SIMPLIFIED, comment overstates** | Frame is geocentric; agreement is to the real phase angle (≤ 6° beyond Jupiter, 90–150° at Venus)                         |
+
+---
+
+## Addendum 3 (2026-07-24, Astra + Procyon) — the α = 90° photometry, computed and closed
+
+Closes the item §1 of this brief predicted, the D6.4 realism review carried forward, and the D1.3
+review **escalated**: `PLANET_LUNAR_L.earth = 0` and `PLANET_ALBEDO.earth = 0.213` were fitted at
+α = 0, and two shipped features (the goHome reveal, the launch ascent) now render Earth at
+α = 90.0000°. The two concrete asks were (1) the surface's effective Lunar-Lambert coefficient at
+90° phase for a water/land composite, and (2) a re-check of the 0.213 clear-sky split at a
+geometry where the visible hemisphere is half terminator-adjacent.
+
+### The measured target
+
+Mallama et al. (2017)'s Earth phase polynomial —
+`Δm(α) = −1.060×10⁻³·α + 2.054×10⁻⁴·α²`, fitted to EPOXI spectrophotometry taken **near
+quadrature**, i.e. at exactly the geometry this scene shows — gives `Δm(90°) = 1.568 mag`:
+
+> **Φ_E(90°) = 0.236** — real Earth at quadrature is 23.6 % of its full-phase brightness.
+
+### What the shipped shader does (numerical integration of the actual shader math)
+
+A 400,000-sample Fibonacci-sphere disc integration of the shipped fragment-shader formulas
+(surface Lambert × 0.213, cloud L = 0.9 slab at map fraction 0.2428, Cox-Munk glint, Rayleigh +
+aerosol, all with the shader's own clamps; instrument validated by reproducing the analytic
+Lambert Φ(90°) = 0.3183 exactly — solver: `scripts/solve-earth-quadrature.mjs`):
+
+| Quantity                              | Value                     |
+| ------------------------------------- | ------------------------- |
+| Shipped composite Φ(90°)              | **0.354**                 |
+| Measured target Φ_E(90°)              | **0.236**                 |
+| Over-brightness at quadrature         | **×1.50 (+0.44 mag)**     |
+| Surface (Lambert) component Φ(90°)    | 0.3183                    |
+| Cloud (L = 0.9 slab) component Φ(90°) | **0.3727 — the offender** |
+
+### Verdicts on the two asks
+
+1. **Surface L = 0: CONFIRMED at all phases.** The mechanism argument is phase-independent —
+   there is no regolith on water or vegetated land, so there is no shadow-hiding term to gain at
+   any α. The residual non-Lambert behaviour of the real surface at 90° (vegetation hot-spot is an
+   α ≈ 0 phenomenon; ocean anisotropy beyond the separately-modelled glint is small) is a few
+   percent — below the terms already declared. **No change.**
+2. **0.213: CONFIRMED as the α = 0-anchored base.** Its anchor was corroborated two independent
+   ways at α = 0 and is not the source of the quadrature deficit. **No change.**
+3. **The gap is the CLOUD term.** Chandrasekhar's conservative-slab form (L = 0.9) has no
+   forward-scattering deficit: real Mie droplets (asymmetry g ≈ 0.85) scatter strongly forward, so
+   a real cloud deck viewed at 90° scattering angle is far darker than the slab form predicts —
+   this is the dominant reason Earth's measured phase curve (Φ(90°) = 0.236, phase integral
+   q ≈ 0.7) is so much steeper than Lambert (Φ(90°) = 0.318, q = 1.5).
+
+### The fix — solved, not tuned (the `EXPOSURE_GAIN` method)
+
+One constant, applied to the cloud reflectance in both shader twins:
+
+```
+cloudRefl *= 1 − CLOUD_QUAD_DEFICIT · min(α/90°, 1),   CLOUD_QUAD_DEFICIT = 0.539
+```
+
+solved by bisection on the disc integral so the composite lands on the measured curve
+**exactly**: `Φ_shader(90°) = 0.2360`. The factor is exactly 1 at α = 0, so **every `travelTo`
+arrival (all at α = 0.000°) and Venus are bit-identical** — only the two Earth-at-quadrature
+features change. The cloud component's own ratio becomes 0.172, physically sensible for a
+forward-scattering deck. Domain: the scene shows Earth only at α ≈ 90°; the factor clamps beyond
+(real crescent Earth would show forward-scatter _excess_ — outside the scene's domain, noted so
+nobody extrapolates this form there).
+
+**Ledger L18 — two-point measured-curve calibration of the cloud term.** DECLARED LICENSE: the
+linear-in-α interpolation is calibrated exactly at α = 0 (budget) and α = 90 (Mallama curve); the
+real curve between is convex, so intermediate phases (which the scene never shows) would read a
+few percent bright. The endpoints — the only geometries rendered — are measured-exact.
+
+### Frontier note (date-stamped 2026-07-24)
+
+A July 2025 paper (PSJ, arXiv:2507.22258) infers Earth's visual geometric albedo as
+**0.242 ± 0.005**, against Mallama et al. 2017's 0.434 — a live dispute about the **full-phase
+extrapolation** (EPOXI measured near quadrature; full phase is model-dependent). This addendum's
+calibration is a **ratio** and both analyses fit the same quadrature-region data, so the fix is
+robust to the dispute. WATCH-LIST: if the scene ever rebases absolute albedos, that is a fresh
+brief, not a constant edit.
+
+### Observation, recorded not relitigated
+
+The shader adds its Rayleigh/aerosol term on top of the 0.213 base, which was defined as Earth's
+_clear-sky_ geometric albedo (nominally surface + atmosphere). Any modest double-count at α = 0
+was absorbed when `EXPOSURE_GAIN` was re-solved (TR-087) and appears consistently at both phases
+here, so the ratio calibration is unaffected. Flagged for whoever next rebases the Earth budget.

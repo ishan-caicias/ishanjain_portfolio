@@ -627,6 +627,26 @@ export const OCEAN_F0 = 0.02101;
  * different physics, and the coefficient that fits is ~0.9. */
 export const CLOUD_LUNAR_L = 0.9;
 
+/** Forward-scattering deficit of the cloud deck at quadrature — PF-11 D1.3 closeout,
+ * closing the α = 90° photometry escalation (Earth brief Addendum 3).
+ *
+ * NOT a taste value — SOLVED for, the `EXPOSURE_GAIN` method. The L = 0.9 conservative-slab
+ * form above has no forward-scattering deficit, but real Mie droplets (g ≈ 0.85) scatter
+ * strongly forward, so a real cloud deck viewed at 90° scattering angle is far darker than the
+ * slab predicts. Disc-integrating this shader's own math (scripts/solve-earth-quadrature.mjs,
+ * instrument validated against the analytic Lambert Φ(90°) = 0.3183) the shipped composite gave
+ * Φ(90°) = 0.354 against Earth's MEASURED 0.236 (Mallama et al. 2017 phase polynomial, fitted
+ * to EPOXI data taken near quadrature — exactly this scene's geometry): Earth rendered ×1.50
+ * too bright at the only phase it is ever shown. Applying
+ *   cloudRefl *= 1 − CLOUD_QUAD_DEFICIT · min(α/90°, 1)
+ * lands the composite on the measured curve exactly (0.2360). The factor is exactly 1 at
+ * α = 0, so every travelTo arrival (all 0.000°) and Venus are bit-identical — only the goHome
+ * reveal and the launch ascent change. Ledger L18: the linear-in-α interpolation between the
+ * two calibrated endpoints is a declared license (the real curve between is convex; the scene
+ * renders only the endpoints). Do NOT extrapolate past 90° — real crescent Earth shows
+ * forward-scatter EXCESS, which this form cannot represent; the min() clamp guards that. */
+export const CLOUD_QUAD_DEFICIT = 0.539;
+
 /** Cloud shell altitude as a fraction of Earth's radius — 5 km / 6371 km.
  *
  * TRUE SCALE, and this is where Venus's precedent must NOT be copied. TR-078 declared the Venus
@@ -653,6 +673,7 @@ const float AEROSOL_TAU = ${AEROSOL_TAU.toFixed(4)};
 const float OCEAN_SIGMA2 = ${OCEAN_SIGMA2.toFixed(6)};
 const float OCEAN_F0 = ${OCEAN_F0.toFixed(6)};
 const float CLOUD_L = ${CLOUD_LUNAR_L.toFixed(3)};
+const float CLOUD_QUAD_DEFICIT = ${CLOUD_QUAD_DEFICIT.toFixed(3)};
 const float NIGHT_GAIN = ${NIGHT_LIGHT_GAIN.toFixed(4)};
 const float NIGHT_FLOOR = ${NIGHT_LIGHT_FLOOR.toFixed(4)};
 const float EXPOSURE = ${EXPOSURE_GAIN.toFixed(3)};
@@ -868,7 +889,11 @@ void main(){
   // so an independently spinning shell would be broken physics (Astra's #3) however alive it looks.
   // Compositing over the surface also masks the glint exactly as real DSCOVR imagery shows.
   float cloudA = texture2D(cloudTex, tUV).r * uHasCloud;
-  float cloudRefl = 2.0 * CLOUD_L * mu0 / max(mu0 + mu, 1e-4) + (1.0 - CLOUD_L) * mu0;
+  // PF-11 D1.3 closeout: forward-scattering deficit at quadrature (CLOUD_QUAD_DEFICIT — solved
+  // against Mallama 2017's measured phase curve; exactly 1 at alpha = 0, so every travelTo
+  // arrival is bit-identical and only the alpha = 90 home reveal / ascent geometry darkens).
+  float cloudRefl = (2.0 * CLOUD_L * mu0 / max(mu0 + mu, 1e-4) + (1.0 - CLOUD_L) * mu0)
+    * (1.0 - CLOUD_QUAD_DEFICIT * min(alphaDeg / 90.0, 1.0));
   vec3 cloudLit = vec3(cloudRefl * dayside * EXPOSURE + AMBIENT);
   lit = mix(lit, cloudLit, cloudA);
 
@@ -999,6 +1024,7 @@ const AEROSOL_TAU : f32 = ${AEROSOL_TAU.toFixed(4)};
 const OCEAN_SIGMA2 : f32 = ${OCEAN_SIGMA2.toFixed(6)};
 const OCEAN_F0 : f32 = ${OCEAN_F0.toFixed(6)};
 const CLOUD_L : f32 = ${CLOUD_LUNAR_L.toFixed(3)};
+const CLOUD_QUAD_DEFICIT : f32 = ${CLOUD_QUAD_DEFICIT.toFixed(3)};
 const NIGHT_GAIN : f32 = ${NIGHT_LIGHT_GAIN.toFixed(4)};
 const NIGHT_FLOOR : f32 = ${NIGHT_LIGHT_FLOOR.toFixed(4)};
 const EXPOSURE : f32 = ${EXPOSURE_GAIN.toFixed(3)};
@@ -1107,8 +1133,10 @@ fn main(input : FragmentInputs) -> FragmentOutputs {
 
   let cloudA : f32 =
     textureSample(cloudTex, cloudTexSampler, tUV).r * uniforms.uHasCloud;
+  // PF-11 D1.3 closeout — line-for-line twin of the GLSL quadrature-deficit block above.
   let cloudRefl : f32 =
-    2.0 * CLOUD_L * mu0 / max(mu0 + mu, 1e-4) + (1.0 - CLOUD_L) * mu0;
+    (2.0 * CLOUD_L * mu0 / max(mu0 + mu, 1e-4) + (1.0 - CLOUD_L) * mu0)
+    * (1.0 - CLOUD_QUAD_DEFICIT * min(alphaDeg / 90.0, 1.0));
   let cloudLit : vec3<f32> = vec3<f32>(cloudRefl * dayside * EXPOSURE + AMBIENT);
   lit = mix(lit, cloudLit, cloudA);
 

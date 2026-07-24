@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CLOUD_QUAD_DEFICIT,
   ELEV_SAMPLE_STEP,
   OCEAN_F0,
   OCEAN_SIGMA2,
@@ -649,6 +650,47 @@ describe("PF-11 D6.4 city lights", () => {
   it("gates on uHasNight so no other body inherits Earth's cities", () => {
     for (const [name, src] of twins)
       expect(src, `${name} gates on uHasNight`).toContain("uHasNight");
+  });
+});
+
+describe("PF-11 D1.3 closeout — cloud quadrature deficit (α = 90° photometry)", () => {
+  it("pins the solved constant against the Mallama-curve calibration", () => {
+    // SOLVED, not tuned (scripts/solve-earth-quadrature.mjs, Earth brief Addendum 3): the
+    // shipped composite integrated to Φ(90°) = 0.354 against Earth's measured 0.236 — ×1.50
+    // too bright at the only phase Earth is ever shown. 0.539 lands it on the measured curve
+    // exactly. A "tidied" value here is a silent photometry change.
+    expect(CLOUD_QUAD_DEFICIT).toBe(0.539);
+  });
+
+  it("applies the deficit to the cloud term in BOTH twins, clamped at 90°", () => {
+    // Line-parallel per #4/#5. The min(α/90, 1) form guarantees factor = 1 at α = 0
+    // analytically — every travelTo arrival (all at 0.000°) and Venus are bit-identical;
+    // only the goHome reveal / ascent geometry (α = 90) changes. The clamp also stops
+    // anyone extrapolating this form past quadrature, where real crescent Earth shows
+    // forward-scatter EXCESS instead.
+    expect(PLANET_FRAGMENT_GLSL).toContain(
+      "* (1.0 - CLOUD_QUAD_DEFICIT * min(alphaDeg / 90.0, 1.0));",
+    );
+    expect(PLANET_FRAGMENT_WGSL).toContain(
+      "* (1.0 - CLOUD_QUAD_DEFICIT * min(alphaDeg / 90.0, 1.0));",
+    );
+    // And both const blocks carry the same baked value.
+    expect(PLANET_FRAGMENT_GLSL).toContain(
+      "const float CLOUD_QUAD_DEFICIT = 0.539;",
+    );
+    expect(PLANET_FRAGMENT_WGSL).toContain(
+      "const CLOUD_QUAD_DEFICIT : f32 = 0.539;",
+    );
+  });
+
+  it("Earth's surface constants stand — the α = 90 fix lands on the cloud term only", () => {
+    // Astra's verdicts (Earth brief Addendum 3): L = 0 is mechanism-correct at ALL phases
+    // (no regolith on water or vegetated land) and 0.213's α = 0 anchor was independently
+    // corroborated. The quadrature deficit belongs to Mie forward scattering, which is a
+    // CLOUD property. Moving either surface constant to "fix" brightness would be the wrong
+    // knob wearing the right units.
+    expect(PLANET_LUNAR_L.earth).toBe(0.0);
+    expect(PLANET_ALBEDO.earth).toBe(0.213);
   });
 });
 
