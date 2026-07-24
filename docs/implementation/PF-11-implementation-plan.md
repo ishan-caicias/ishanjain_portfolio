@@ -1030,6 +1030,42 @@ at α = 0. D6.4 renders Earth at α = 90°, and the Lunar-Lambert constant's own
 that choice "becomes a 37-67% error the moment the arrival phase ever changes." Wants Astra's
 numbers before D1.3 builds the ascent on the same geometry.
 
+#### Two owner-reported bug fixes (2026-07-24, [TR-097](../test-reports/TR-097.md))
+
+1. **The drag-reset bug was a one-line consequence of point 2's own fix.** The orbit-phase tick
+   already correctly separated "position" (advances every frame, wall-clock, per point 2 above)
+   from "aim" (recomputed from position each frame) — but the aim recompute's guard was only
+   `!this._dragging`, never accounting for what happens on the FIRST frame after a drag ends.
+   Every release re-ran the recompute once more and snapped straight back to facing the planet.
+   Fix: `_homeLookOverridden`, latched true on the first real drag since the orbit was last
+   armed (four arming sites: `beginAscent`'s two paths, `skipAscent`, the regular
+   `goHome`-via-warp arrival), gates the recompute permanently off for the rest of that orbit.
+   Position tracking (point 2's fix) is completely unaffected — this is purely about which
+   direction the camera FACES, never where it IS.
+2. **The occlusion bug was never a D6.4 defect in isolation — it's a pre-existing gap in the
+   picker that D6.4 was the first slice to expose.** `_pick`/`_pickField` are screen-space
+   nearest-point search, not depth-aware, and were written before anything solid and
+   freely-lookable-around ever existed in the idle scene. Fixed with `raySphereDist`/
+   `cursorRayDir` (new pure functions, ship-dynamics.ts, unit-tested) — a ray/sphere test run
+   once per pick against the shared planet sphere, gated on its own visibility flag. Read-across
+   for any future solid, camera-adjacent object: the picker will need the same treatment again
+   unless this occlusion check is generalized to a mesh list rather than the single planet
+   sphere it's written against today.
+3. **Test-instrument finding, not a code defect:** `page.mouse.move()` (Playwright's OS-level
+   input simulation) hung indefinitely against the idle home-orbit scene specifically — proven,
+   via a direct `_pick()` call and via `canvas.dispatchEvent(new PointerEvent(...))`, that the
+   application code was never at fault. All pointer interaction in the new spec now dispatches
+   real `PointerEvent`s directly rather than routing through `page.mouse`. The existing
+   `engine-select.spec.ts` drag test that DOES use `page.mouse` successfully only ever does so
+   mid-warp, while the scene is continuously animating — worth knowing before writing the next
+   spec that needs to drag against a quiet/idle scene state.
+
+**D5.1 (console renames) shipped alongside these** — approved 2026-07-22, still unimplemented
+when the owner flagged the still-live `RNG`/`SOL` labels two days later. `SectionOverlay.tsx`
+carried the same `◂ RETURN TO SOL` string as CollectorCard and was updated too, though the
+delivery plan's D5.1 entry only named CollectorCard explicitly — the underlying rationale
+(one-phrase-per-action) applies uniformly.
+
 ### D6.5 (resolved into D9) · D6.6 atlas cells + Jupiter moons · D6.7 header correction
 
 - D6.6a: atlas is vendored (no build script) — new `scripts/patch-atlas.mjs`: composites

@@ -559,6 +559,71 @@ export function bodyWorldPosition(
   };
 }
 
+/* ---------- PF-11 D6.4 bug fix: planet-sphere pick occlusion ---------------
+ *
+ * The hover/click picker (`_pick`/`_pickField` in babylon-engine.ts) is a screen-space
+ * nearest-projected-point search over `this.bodies` and a cone-angle sweep over the star
+ * field — neither ever consulted real scene depth, because before the D6.4 home reveal
+ * nothing solid was ever on screen to occlude anything (an arrival's planet sphere fills
+ * most of the frame and the camera is pinned to look at it; nobody could drag away to
+ * expose something "behind" it). D6.4 put a 26-world-unit-radius opaque sphere at a fixed
+ * point the visitor can now freely look past — and the picker kept working exactly as
+ * before, screen-space-nearest, oblivious to the sphere sitting in front of whatever it
+ * found. Reported by the owner as: hover cards for background DSOs while looking AT
+ * Earth's rendered surface, and (via `_click`'s reliance on the same hover pick) a click
+ * there could travel to a body the sphere visibly hides.
+ *
+ * The fix is a simple ray/sphere test along the SAME cursor ray the picker already
+ * computes, reused rather than duplicated. */
+
+/** World-space unit ray direction for a screen-space point, given the camera's own
+ * right/up/forward basis and FOV/aspect. This is the exact NDC→world construction
+ * `_pickField` already builds inline — factored out so `_pick`'s new occlusion check uses
+ * the identical ray rather than a second, silently-driftable copy of the same math. */
+export function cursorRayDir(
+  x: number,
+  y: number,
+  rectW: number,
+  rectH: number,
+  right: readonly [number, number, number],
+  up: readonly [number, number, number],
+  fwd: readonly [number, number, number],
+  tanFov: number,
+  aspect: number,
+): [number, number, number] {
+  const ndcX = ((x / rectW) * 2 - 1) * tanFov * aspect;
+  const ndcY = -((y / rectH) * 2 - 1) * tanFov;
+  const ux = right[0] * ndcX + up[0] * ndcY + fwd[0];
+  const uy = right[1] * ndcX + up[1] * ndcY + fwd[1];
+  const uz = right[2] * ndcX + up[2] * ndcY + fwd[2];
+  const rl = Math.hypot(ux, uy, uz) || 1;
+  return [ux / rl, uy / rl, uz / rl];
+}
+
+/** Nearest ray/sphere intersection distance along `dir` from `camPos`, or `Infinity` if the
+ * ray misses the sphere (or the sphere is entirely behind the camera). A camera already
+ * inside the sphere returns 0 — everything ahead is occluded, which cannot arise for the
+ * planet sphere in practice (the camera never enters it) but is the mathematically correct
+ * answer and costs nothing extra to handle. */
+export function raySphereDist(
+  camPos: readonly [number, number, number],
+  dir: readonly [number, number, number],
+  center: readonly [number, number, number],
+  radius: number,
+): number {
+  const cx = center[0] - camPos[0];
+  const cy = center[1] - camPos[1];
+  const cz = center[2] - camPos[2];
+  const tca = cx * dir[0] + cy * dir[1] + cz * dir[2];
+  if (tca < 0) return Infinity; // sphere centre is behind the camera
+  const d2 = cx * cx + cy * cy + cz * cz - tca * tca;
+  const r2 = radius * radius;
+  if (d2 > r2) return Infinity; // ray misses the sphere entirely
+  const thc = Math.sqrt(r2 - d2);
+  const near = tca - thc;
+  return near < 0 ? 0 : near;
+}
+
 /* ---------- PF-11 D2: the frame ladder (sky honesty by destination) --------
  *
  * Astra's frame-ladder brief (2026-07-22, §1-2): the visible sky is a set of

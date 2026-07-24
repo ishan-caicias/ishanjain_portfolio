@@ -11,7 +11,9 @@ import {
   bodyDepth,
   bodyWorldPosition,
   raDecToDir,
+  cursorRayDir,
   flightInputPolicy,
+  raySphereDist,
   warpDurationForLy,
   warpEase,
   WARP_MAX_MS,
@@ -904,5 +906,101 @@ describe("PF-11 D3.3 — mid-journey input policy (ADR-0010)", () => {
         expect(flightInputPolicy(mode, request)).toBe(a);
       }
     }
+  });
+});
+
+describe("PF-11 D6.4 bug fix — planet-sphere pick occlusion", () => {
+  describe("raySphereDist", () => {
+    it("hits a sphere dead ahead at (distance - radius)", () => {
+      const camPos: [number, number, number] = [0, 0, 0];
+      const dir: [number, number, number] = [0, 0, 1];
+      const center: [number, number, number] = [0, 0, 100];
+      expect(raySphereDist(camPos, dir, center, 26)).toBeCloseTo(74, 9);
+    });
+
+    it("returns Infinity when the ray misses the sphere entirely", () => {
+      const camPos: [number, number, number] = [0, 0, 0];
+      const dir: [number, number, number] = [0, 0, 1];
+      // Offset far enough perpendicular that a radius-26 sphere can't reach the ray.
+      const center: [number, number, number] = [100, 0, 100];
+      expect(raySphereDist(camPos, dir, center, 26)).toBe(Infinity);
+    });
+
+    it("returns Infinity when the sphere is entirely behind the camera", () => {
+      const camPos: [number, number, number] = [0, 0, 0];
+      const dir: [number, number, number] = [0, 0, 1];
+      const center: [number, number, number] = [0, 0, -100];
+      expect(raySphereDist(camPos, dir, center, 26)).toBe(Infinity);
+    });
+
+    it("is tangent-correct at the sphere's edge (glancing hit)", () => {
+      const camPos: [number, number, number] = [0, 0, 0];
+      const dir: [number, number, number] = [0, 0, 1];
+      // Perpendicular offset exactly equal to the radius: a single tangent point.
+      const center: [number, number, number] = [26, 0, 100];
+      const d = raySphereDist(camPos, dir, center, 26);
+      expect(d).toBeCloseTo(100, 6); // thc ~ 0, near ~ tca
+    });
+
+    it("returns 0 when the camera is already inside the sphere", () => {
+      const camPos: [number, number, number] = [0, 0, 0];
+      const dir: [number, number, number] = [0, 0, 1];
+      const center: [number, number, number] = [0, 0, 5]; // within a radius-26 sphere
+      expect(raySphereDist(camPos, dir, center, 26)).toBe(0);
+    });
+
+    it("matches the Earth-at-home geometry: a body far past the sphere is occluded, one just past ARRIVE_STANDOFF is not", () => {
+      // Earth's sphere sits at the origin, radius 26 (planet-sphere.ts). A ray straight
+      // out from a home-orbit-radius camera position toward the sphere centre must
+      // occlude anything materially beyond the sphere's far edge from that vantage.
+      const camPos: [number, number, number] = [0, 0, -80];
+      const dir: [number, number, number] = [0, 0, 1];
+      const occDist = raySphereDist(camPos, dir, [0, 0, 0], 26);
+      expect(occDist).toBeCloseTo(80 - 26, 9); // near edge of the sphere
+      const farBodyDist = 80 + 500; // something well behind the sphere
+      expect(farBodyDist).toBeGreaterThan(occDist); // -> occluded, per the caller's own compare
+    });
+  });
+
+  describe("cursorRayDir", () => {
+    const RIGHT: [number, number, number] = [1, 0, 0];
+    const UP: [number, number, number] = [0, 1, 0];
+    const FWD: [number, number, number] = [0, 0, 1];
+
+    it("points straight down the forward axis for a screen-centre pick", () => {
+      const [x, y, z] = cursorRayDir(50, 50, 100, 100, RIGHT, UP, FWD, 1, 1);
+      expect(x).toBeCloseTo(0, 9);
+      expect(y).toBeCloseTo(0, 9);
+      expect(z).toBeCloseTo(1, 9);
+    });
+
+    it("is always a unit vector across the screen", () => {
+      for (const x of [0, 25, 50, 75, 100]) {
+        for (const y of [0, 25, 50, 75, 100]) {
+          const [ux, uy, uz] = cursorRayDir(
+            x,
+            y,
+            100,
+            100,
+            RIGHT,
+            UP,
+            FWD,
+            1,
+            1,
+          );
+          expect(Math.hypot(ux, uy, uz)).toBeCloseTo(1, 9);
+        }
+      }
+    });
+
+    it("leans toward +right for a screen point right of centre", () => {
+      const [x] = cursorRayDir(90, 50, 100, 100, RIGHT, UP, FWD, 1, 1);
+      expect(x).toBeGreaterThan(0);
+    });
+
+    it("leans toward +up for a screen point above centre (screen Y inverted)", () => {
+      const [, y] = cursorRayDir(50, 10, 100, 100, RIGHT, UP, FWD, 1, 1);
+      expect(y).toBeGreaterThan(0);
+    });
   });
 });

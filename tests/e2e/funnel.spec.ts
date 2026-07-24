@@ -107,7 +107,11 @@ test.describe("PF-11 D1.4 funnel instrumentation", () => {
       .toBe("catalog");
 
     await page.getByRole("button", { name: "SKIP INTRO" }).click();
-    await page.getByRole("button", { name: "RNG" }).click();
+    // PF-11 D5.1 (ADR-0010) named test change: RNG → RANDOM JUMP ▸ (aria-label "Jump to a
+    // random destination").
+    await page
+      .getByRole("button", { name: "Jump to a random destination" })
+      .click();
 
     // Click OPEN COLLECTOR CARD the moment it appears — the vista's own 5.5s auto-timeout
     // (today's ONLY other dismissal path, pending D4.1) is a real race here: waiting on

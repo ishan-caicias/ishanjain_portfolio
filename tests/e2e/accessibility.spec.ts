@@ -109,7 +109,11 @@ test.describe("Accessibility — Babylon path (PF-09 B6 re-audit)", () => {
     const whereTo = page.getByRole("combobox").or(page.getByRole("textbox"));
     await whereTo.first().focus();
     await expect(whereTo.first()).toBeFocused();
-    const rng = page.getByRole("button", { name: "RNG" });
+    // PF-11 D5.1 (ADR-0010): RNG renamed to RANDOM JUMP ▸ (aria-label "Jump to a random
+    // destination"), named test change.
+    const rng = page.getByRole("button", {
+      name: "Jump to a random destination",
+    });
     await rng.focus();
     await expect(rng).toBeFocused();
     // classic-view toggle remains operable too

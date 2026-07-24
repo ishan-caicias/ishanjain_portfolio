@@ -361,6 +361,7 @@ import {
   CHASE_LOOK_LAMBDA,
   CHASE_OFFSET_REST,
   chaseOffsetAt,
+  cursorRayDir,
   flightInputPolicy,
   PLUME_ENGINES,
   PLUME_VERTEX_COUNT,
@@ -375,6 +376,7 @@ import {
   quatMultiply,
   QUAT_IDENTITY,
   raDecToDir,
+  raySphereDist,
   frameLadderFade,
   figureVisibility,
   furnitureVisibility,
@@ -1828,6 +1830,16 @@ class BabylonScene extends HTMLElement {
   /** PF-11 D6.4 / R16: armed on arriving home, cleared on any departure. */
   private _homeOrbit = false;
   private _homeOrbitPhase = 0;
+  /** Bug fix (owner-reported, post-D6.4): the home orbit's per-frame "aim at the planet"
+   * driver used to run every frame the visitor wasn't actively mid-drag — including the
+   * very next frame after a drag ENDED — so releasing a drag snapped the view straight
+   * back to Earth, making it look like dragging did nothing. `true` once the visitor has
+   * looked around at all since the orbit was last (re)armed; from then on the auto-aim
+   * stays off for the rest of this orbit, matching how free-look already behaves
+   * everywhere else in the scene (drag persists after release). The camera's ORBITAL
+   * POSITION is unaffected either way — R16 only asked for the ship to keep moving around
+   * Earth, never for the view to be locked onto it. */
+  private _homeLookOverridden = false;
   /** PF-11 D1.3: the launch ascent's own progress (0..1 raw wall-clock fraction), mirrored on
    * `warp.ascentProg`; kept as a field too so `sceneStats` and the skip path can read it. */
   private _ascentProg = 0;
@@ -2560,6 +2572,10 @@ class BabylonScene extends HTMLElement {
       homeOrbit: this._homeOrbit,
       homeOrbitPhaseDeg:
         Math.round(((this._homeOrbitPhase * 180) / Math.PI) * 10) / 10,
+      // Bug fix regression guard, for E2E: true once the visitor has dragged since the
+      // orbit was armed, at which point the auto-aim-at-planet driver permanently stops
+      // overriding their look for the rest of this orbit.
+      homeLookOverridden: this._homeLookOverridden,
       // PF-11 D1.3 — the launch ascent, for E2E.
       ascentMode: this.warp.mode === "ascent",
       ascentProg: Math.round(this._ascentProg * 1000) / 1000,
@@ -5241,6 +5257,10 @@ class BabylonScene extends HTMLElement {
         );
         this._velYaw = 0;
         this._velPitch = 0;
+        // Bug fix: once the visitor has actually looked around, the home orbit's
+        // automatic aim-at-planet driver must stop overriding them on release — see the
+        // field's own doc comment for why this exists.
+        this._homeLookOverridden = true;
       } else {
         this._pick(ev.clientX, ev.clientY, canvas);
       }
@@ -5455,25 +5475,28 @@ class BabylonScene extends HTMLElement {
     };
   }
 
+  /** PF-11 D6.4 bug fix: the planet sphere occludes ray-based picking, or `Infinity` when
+   * nothing is currently rendered there. See ship-dynamics.ts's header comment for why this
+   * exists — the picker below is screen-space-nearest, not depth-aware, so without this a
+   * solid sphere on screen was invisible to hit-testing and DSOs "behind" it stayed
+   * hoverable/clickable through it. */
+  private _planetOcclusionDist(
+    camPos: readonly [number, number, number],
+    dir: readonly [number, number, number],
+  ): number {
+    const mesh = this._planetMesh;
+    if (!mesh || !mesh.isVisible) return Infinity;
+    const p = mesh.position;
+    return raySphereDist(camPos, dir, [p.x, p.y, p.z], PLANET_SPHERE_RADIUS);
+  }
+
   private _pickField(
-    x: number,
-    y: number,
-    rectW: number,
-    rectH: number,
-    basis: ReturnType<BabylonScene["_cameraBasis"]>,
+    dir: readonly [number, number, number],
+    camPos: readonly [number, number, number],
   ): number {
     const f = this._field;
     if (!f || !f.count) return -1;
-    const { camPos, right, up, fwd, tanFov, aspect } = basis;
-    const ndcX = ((x / rectW) * 2 - 1) * tanFov * aspect;
-    const ndcY = -((y / rectH) * 2 - 1) * tanFov;
-    let ux = right[0] * ndcX + up[0] * ndcY + fwd[0];
-    let uy = right[1] * ndcX + up[1] * ndcY + fwd[1];
-    let uz = right[2] * ndcX + up[2] * ndcY + fwd[2];
-    const rl = Math.hypot(ux, uy, uz) || 1;
-    ux /= rl;
-    uy /= rl;
-    uz /= rl;
+    const [ux, uy, uz] = dir;
     const [cx, cy, cz] = camPos;
     let best = -1,
       bestScore = 0.99989; // ~0.6 deg cone, matches space-engine.js exactly
@@ -5502,6 +5525,20 @@ class BabylonScene extends HTMLElement {
     const rectW = engine.getRenderWidth() / (window.devicePixelRatio || 1);
     const rectH = engine.getRenderHeight() / (window.devicePixelRatio || 1);
     const basis = this._cameraBasis(camera, engine);
+    const dir = cursorRayDir(
+      x,
+      y,
+      rectW,
+      rectH,
+      basis.right,
+      basis.up,
+      basis.fwd,
+      basis.tanFov,
+      basis.aspect,
+    );
+    // PF-11 D6.4 bug fix: the same cursor ray the field pick below uses, tested against
+    // the planet sphere once per pick rather than once per candidate.
+    const occDist = this._planetOcclusionDist(basis.camPos, dir);
     let best: BabylonBody | null = null;
     let bd2 = 34 * 34;
     for (const b of this.bodies) {
@@ -5520,11 +5557,26 @@ class BabylonScene extends HTMLElement {
         best = b;
       }
     }
+    if (best) {
+      // The sphere occludes this candidate only if it's genuinely further away than the
+      // sphere's near surface along (approximately) the same ray — a body within the 34px
+      // hit radius is close enough in screen space that the cursor's own ray is a fair
+      // proxy for the body's, at a 26-world-unit sphere's scale.
+      const dx = best.pos[0] - basis.camPos[0],
+        dy = best.pos[1] - basis.camPos[1],
+        dz = best.pos[2] - basis.camPos[2];
+      if (Math.hypot(dx, dy, dz) > occDist) best = null;
+    }
     let id: string | null = best ? best.e.id : null;
     if (!id) {
       this._fp = (this._fp + 1) | 0;
       if (this._fp % 2 === 0) {
-        const fi = this._pickField(x, y, rectW, rectH, basis);
+        // Field stars sit at real catalog distances, always far beyond the 26-unit
+        // sphere — any finite occlusion distance means the sphere is nearer than any
+        // star could be, so skip the field pick outright rather than compute it and
+        // then discard it.
+        const fi =
+          occDist === Infinity ? this._pickField(dir, basis.camPos) : -1;
         if (fi >= 0) id = "fs-" + fi;
       } else if (this._hoverId && String(this._hoverId).indexOf("fs-") === 0) {
         id = this._hoverId; // hold between throttled picks
@@ -5690,6 +5742,7 @@ class BabylonScene extends HTMLElement {
     // (`_isAtHomeVantage` gates on it) — the ascent renders that same sphere throughout.
     this._homeOrbit = true;
     this._homeOrbitPhase = 0;
+    this._homeLookOverridden = false;
 
     if (this._reduced) {
       // Instant cut: land at the home vantage, restore the sky/band, no climb (D1-AC6).
@@ -5777,6 +5830,7 @@ class BabylonScene extends HTMLElement {
       w.mode = "idle";
       this._homeOrbit = true;
       this._homeOrbitPhase = 0;
+      this._homeLookOverridden = false;
       emit("cosmos:ascent-done", {});
     }
   }
@@ -5795,6 +5849,7 @@ class BabylonScene extends HTMLElement {
     this.warp = { mode: "idle" };
     this._homeOrbit = true;
     this._homeOrbitPhase = 0;
+    this._homeLookOverridden = false;
     emit("cosmos:ascent-done", {});
   }
 
@@ -6055,9 +6110,16 @@ class BabylonScene extends HTMLElement {
         this.cam[0] = px;
         this.cam[1] = py;
         this.cam[2] = pz;
-        // Look at the planet, not along a free-look bearing — the camera is in orbit, so its
-        // aim follows its position. Free-look drag still overrides (the branch below).
-        if (!this._dragging) {
+        // Look at the planet, not along a free-look bearing — the camera is in orbit, so
+        // its aim follows its position, UNTIL the visitor actually looks around: bug fix
+        // (owner-reported) — this used to re-aim at the planet on the very first
+        // non-dragging frame after EVERY drag release, so releasing a drag snapped the
+        // view straight back to Earth and made free-look look broken. `_homeLookOverridden`
+        // latches true on the first real drag since the orbit was (re)armed and this
+        // block simply stops running for the rest of that orbit — the ORBIT ITSELF (the
+        // position update above) is unaffected, matching R16 (the ship keeps moving
+        // around Earth) without also locking the view to it.
+        if (!this._dragging && !this._homeLookOverridden) {
           const len = Math.hypot(px, py, pz) || 1;
           this._pitch = Math.asin(Math.max(-1, Math.min(1, -py / len)));
           this._yaw = Math.atan2(-px / len, -pz / len);
@@ -6209,6 +6271,7 @@ class BabylonScene extends HTMLElement {
           // snapping somewhere else on the circle.
           this._homeOrbit = true;
           this._homeOrbitPhase = 0;
+          this._homeLookOverridden = false;
           emit("cosmos:home", {});
         } else if (w.target) {
           this.arrivedId = w.target.e.id;

@@ -549,7 +549,7 @@ export default function SectionOverlay({
             onClick={onReturnSol}
             className="inline-flex items-center gap-1.5 rounded-lg border border-[#2e7d32]/45 bg-[#1b5e20]/15 px-3.5 py-1.5 font-mono text-[11px] tracking-wider text-[#43a047] hover:bg-[#1b5e20]/30"
           >
-            ◂ RETURN TO SOL
+            ◂ RETURN HOME
           </button>
         </div>
       </div>

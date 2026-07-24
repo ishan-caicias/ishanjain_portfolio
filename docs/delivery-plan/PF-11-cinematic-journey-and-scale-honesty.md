@@ -596,7 +596,7 @@ Charon); ids aren't matched ("ngc7293" fails where "ngc 7293" works); matching i
 substring with a hard `.slice(0,6)` — exact full-name matches can be buried; RNG =
 `randomBody()` (uniform over 4,829), SOL = `goHome()`.
 
-### D5.1 Meaningful controls — ✅ NAMES APPROVED (owner, 2026-07-22, ADR-0010)
+### D5.1 Meaningful controls — ✅ DELIVERED 2026-07-24 ([TR-097](../test-reports/TR-097.md))
 
 **`RANDOM JUMP ▸` / `◂ RETURN HOME` approved** (the card's `◂ RETURN TO SOL` converges to
 `◂ RETURN HOME` for one-phrase-per-action). The label-comprehension test (D5-AC5) still runs
@@ -607,6 +607,15 @@ text in `aria-label`/`title`; E2E updates are named test changes.
 park** — the home state becomes a slow orbit around the revealed Earth sphere (implemented
 with D6.4's reveal; orbital spec and constants in the
 [implementation plan](../implementation/PF-11-implementation-plan.md#d64-earth-gohome-reveal--home-orbit-r16)).
+
+**Approved 2026-07-22, implemented 2026-07-24** — the owner flagged the still-live `RNG`/`SOL`
+labels a full two days after ADR-0010 recorded the decision; the gap was a delivery miss, not a
+re-litigation. Shipped exactly the approved names, plus the compressed sub-400px variants and
+the CollectorCard convergence as specced. **`SectionOverlay.tsx` carried the identical
+`◂ RETURN TO SOL` string and was updated too** — not named in this entry originally, but the
+same "one-phrase-per-action" rationale applies uniformly; leaving it would have shipped a new
+inconsistency in the act of fixing an old one. D5-AC5 (the post-approval label-comprehension
+check) has not run yet — recorded open in the TR, not silently skipped.
 
 ### D5.2 Search v2: index = catalog bodies + **stations (badged `STATION`, ranked above sky
 
@@ -679,6 +688,20 @@ orbit from the clamped `dt`; a CLAUDE.md #23 tabindex violation now closed with 
 **One item carried forward, flagged by the realism audit:** Earth's `PLANET_LUNAR_L` and albedo were
 both fitted at α = 0 and are now rendered at α = 90°, which the Earth brief predicts is a 37-67%
 error — Astra's numbers wanted before D1.3 builds the ascent on this same geometry.
+
+**⚠ TWO OWNER-REPORTED BUGS FOUND AND FIXED 2026-07-24 — [TR-097](../test-reports/TR-097.md).**
+TR-088's own verification carried no drag or occlusion assertion, and both bugs were latent from
+delivery: (1) the home-orbit's per-frame auto-aim re-derived the camera's look direction on every
+non-dragging frame — including the frame immediately after a drag ENDED — so releasing a drag
+snapped the view straight back to Earth (R16's orbital _position_ was always correct; only the
+forced re-_aim_ was the bug). Fixed with `_homeLookOverridden`, latched on the first real drag
+per orbit. (2) The hover/click picker (`_pick`/`_pickField`) is a screen-space nearest-point
+search with no real depth test — harmless before D6.4 put a solid, freely-lookable-around sphere
+on screen. Fixed with a ray/sphere occlusion test (`raySphereDist`, ship-dynamics.ts, unit-tested)
+run once per pick. Both confirmed via new E2E coverage
+(`tests/e2e/d64-owner-bugfixes.spec.ts`) — see the TR for a genuine test-harness finding
+(Playwright's `page.mouse` API hangs against this specific idle scene state; fixed by dispatching
+real `PointerEvent`s directly rather than working around it).
 
 **Still open in D6:** D6.2 (belt frame), D6.6, D6.7.
 

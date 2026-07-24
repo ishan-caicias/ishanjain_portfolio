@@ -829,7 +829,11 @@ test("babylon: RNG mission control button drives real travel through the real UI
   // this button. Assertions below unchanged.
   await page.getByRole("button", { name: "SKIP INTRO" }).click();
 
-  await page.getByRole("button", { name: "RNG" }).click();
+  // PF-11 D5.1 (ADR-0010) named test change: RNG → RANDOM JUMP ▸ (aria-label "Jump to a
+  // random destination").
+  await page
+    .getByRole("button", { name: "Jump to a random destination" })
+    .click();
 
   // Same HUD assertion space-scene.spec.ts uses for the live engine — proves
   // the UI layer is engine-agnostic, driven by cosmos:* events either engine

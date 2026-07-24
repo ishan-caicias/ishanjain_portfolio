@@ -67,17 +67,25 @@ export default function MissionControlBar({
           />
           <button
             onClick={onRandom}
-            title="Random destination"
-            className="rounded-md border border-[#283593]/70 bg-[#1a237e]/35 px-2.5 py-1 font-mono text-[11px] tracking-wider text-[#9fa8da] hover:border-[#ffc107]/40 hover:text-[#ffd54f]"
+            title="Jump to a random destination"
+            aria-label="Jump to a random destination"
+            className="flex-shrink-0 rounded-md border border-[#283593]/70 bg-[#1a237e]/35 px-2.5 py-1 font-mono text-[11px] tracking-wider text-[#9fa8da] hover:border-[#ffc107]/40 hover:text-[#ffd54f]"
           >
-            RNG
+            {/* PF-11 D5.1 (ADR-0010) — RNG → RANDOM JUMP ▸, compressed to JUMP ▸ under
+                400px. Both strings render (one hidden by the breakpoint) so aria-label
+                stays the single source of truth for the accessible name at every width. */}
+            <span className="max-[399px]:hidden">RANDOM JUMP ▸</span>
+            <span className="hidden max-[399px]:inline">JUMP ▸</span>
           </button>
           <button
             onClick={onHome}
-            title="Return to Sol"
-            className="rounded-md border border-[#283593]/70 bg-[#1a237e]/35 px-2.5 py-1 font-mono text-[11px] tracking-wider text-[#9fa8da] hover:border-[#ffc107]/40 hover:text-[#ffd54f]"
+            title="Return home to Earth orbit"
+            aria-label="Return home to Earth orbit"
+            className="flex-shrink-0 rounded-md border border-[#283593]/70 bg-[#1a237e]/35 px-2.5 py-1 font-mono text-[11px] tracking-wider text-[#9fa8da] hover:border-[#ffc107]/40 hover:text-[#ffd54f]"
           >
-            SOL
+            {/* PF-11 D5.1 (ADR-0010) — SOL → ◂ RETURN HOME, compressed to ◂ HOME. */}
+            <span className="max-[399px]:hidden">◂ RETURN HOME</span>
+            <span className="hidden max-[399px]:inline">◂ HOME</span>
           </button>
         </div>
 
