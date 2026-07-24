@@ -676,6 +676,93 @@ duration table and blast radius in ADR-0011):
    home with `arrivedId === null` + abort event seen; mid-warp travelTo queues then arrives
    at the queued body.
 
+#### D3.3 notes as built (2026-07-24, [TR-095](../test-reports/TR-095.md))
+
+1. **The decision became a pure module** — `flightInputPolicy(mode, request)` in
+   ship-dynamics.ts, returning `proceed` / `queue` / `abort` / `ignore`. Steps 1 and 2 above
+   describe the two behaviours; what they don't say is that the pre-D3.3 shape of this decision
+   was the same `mode === "warp" || "aim" || "ascent"` disjunction copy-pasted into three
+   methods, and that three surfaces (engine, HUD badge, D5.2 console) now have to agree about it.
+   Pure module → unit-testable off-GPU (`babylon-engine.ts` cannot be imported in jsdom) and one
+   import for the console instead of a rule to re-derive.
+2. **`ascent` is the ONE surviving no-op and is named `"ignore"`.** The launch cinematic owns the
+   camera and fires before the console exists. A unit test asserts exhaustively that it is the
+   only (mode, request) pair yielding `ignore` — that property _is_ the slice.
+3. **Step 1's "this mostly works by construction" is confirmed.** `_beginWarp` reads `this.cam`,
+   `_tickWarp` keeps it integrated, so the abort launches from the live position with no new
+   bookkeeping. The hull re-choreographs cleanly: `k=0` gives a fresh D3.2 accel/flip/brake home.
+4. **Step 2's queue is PUBLIC (`queuedTargetId`) and optional on the contract** —
+   `queuedTargetId?: string | null` in space-engine.d.ts, the same shape as `beginAscent?()`.
+   Readers must treat `undefined` as "this engine has no queue", not "the queue is empty".
+   Cleared by `goHome` (both paths), `beginAscent`, and `disconnectedCallback`.
+5. **Drain guard the step didn't specify:** if the queued id equals the id just arrived at,
+   clearing it IS the action — re-flying is a zero-length warp that re-fires `cosmos:arrive` over
+   the dossier that just opened. The `setTimeout(0)` handle is cancelled on disconnect (D0.1's
+   band-timer hazard class).
+6. **A pre-existing UI defect this slice would have made worse, fixed at the seam.**
+   `goSection` set `sectionTravelRef.current = sec` unconditionally and the `cosmos:arrive`
+   handler consumed it on the NEXT arrival whatever it was — already the wrong body under the old
+   no-op, and under queuing the interrupted journey's arrival would consume the intent so the
+   section opened early at the wrong body and never at the right one. The ref now carries
+   `{id, sec}` and matches on id; `cosmos:home` clears it. No test modified. `dispatchRoute`
+   needed nothing — it already guards `warp.mode !== "idle"`.
+7. **Test-instrument lesson (design-time, cost nothing this time — recorded so it stays free).**
+   Interrupts are driven inside ONE `page.evaluate` off the page's own rAF, because a
+   Playwright-side poll round-trips between "we saw k=0.2" and "we called goHome" and TR-094
+   measured whole journeys rendering in ~10 frames under SwiftShader — the interrupt would land
+   after the ship parked and every assertion would pass for the wrong reason. Related: the
+   interrupted journey's arrival is asserted from the captured `cosmos:arrive` **event**, never
+   from polling `arrivedId`, because the queue drains one task later and that state is true for
+   only a few milliseconds. **Read-across: never poll for a state a deferred drain makes
+   transient — capture the event.** Same family as D3.2's `warpSlowMin` per-frame-sample defect.
+8. **Two items left open, both deliberately.** HUD strings (owner handed them to a separate
+   pass — the policy is correct but still visually silent until then), and the abort's velocity
+   discontinuity: restarting at `k=0` drops world speed to zero at the press and opens with a
+   900 ms `aim` hold. Step 1 pre-accepted this ("acceptable and cinematic") and it shipped exactly
+   as specified, but it is the same class as R6, so it is flagged for a Vega SHOT-BRIEF in a D3
+   polish pass rather than tuned silently here. Levers: shortened `aim` for aborts, or a retro-burn
+   blend from the live velocity.
+
+#### D3.3 HUD/console strings — notes as built (2026-07-24, [TR-096](../test-reports/TR-096.md), Sonnet 5)
+
+1. **Two pieces of state, not one, because the notice and the badge answer different
+   questions.** `SceneState.notice: NavNotice | null` — "did my press register?" — is transient
+   (auto-clears after `NAV_NOTICE_MS` = 2200 ms) and fires for both an abort and a queued
+   retarget. `SceneState.queuedTargetId: string | null` mirrors the engine's own field and is
+   persistent — it outlives the notice, because a queue with no visible trace once the toast
+   fades would just be a slower version of the silent no-op this whole slice exists to remove.
+2. **Clearing the persistent badge needed three listener sites, not one**, because the DOM event
+   stream gives no single "the queue is gone" signal: `cosmos:select` (the queued journey
+   launching — checked by id match), `cosmos:arrive` (the same-id no-op case from step 2 of the
+   engine notes, where no `cosmos:select` ever fires — added to ALL FOUR of that handler's
+   branches, not only the common one), and `cosmos:abort` (discards it immediately, matching the
+   engine's own timing). `cosmos:home` clears it defensively too.
+3. **`bodyDisplayName` factored out of `warpDestName`'s inline IIFE** — the queued badge and the
+   console label both need the same "catalog entry, else station" lookup for an id that may not
+   be `state.warp.id`. One behavioural difference: falls back to the raw id instead of `""` for
+   an unresolvable id (never observed for any real body/station this site ships).
+4. **Console strings are the minimal acknowledgement, not D5.2.** `MissionControlBar.tsx` has no
+   mid-warp branching today — building the plan's fuller "console reflects the queue" would mean
+   implementing D5.2's own combobox rewrite ahead of its design pass. What shipped: submitting a
+   destination mid-warp already queued correctly (TR-095's engine change), and the label now
+   swaps `WHERE TO ▸` → `QUEUED ▸ {NAME}` for the badge's own duration so the console stops
+   looking idle while something is actually pending.
+5. **Test disambiguation the isolation run caught, not a design decision made up front.** The
+   first draft of the two new specs matched `page.getByText("RETARGET QUEUED · Procyon")` —
+   ambiguous for the ~2.2s both the notice and the badge render that identical string.
+   Playwright's strict mode failed the run rather than guessing. Fixed with
+   `data-testid="nav-notice"` / `data-testid="queued-badge"` — permanent hooks, not a
+   looser-matching workaround, since the ambiguity is real and by design.
+6. **No engine code changed.** This pass is `SceneState`/`WarpOverlay.tsx`/`MissionControlBar.tsx`
+   only; `flightInputPolicy` and the engine's own state machine (TR-095) are untouched.
+7. **Owner-eyes confirmation still didn't happen, and is named as such rather than implied
+   done.** The harness's Browser pane never composites a frame in this environment regardless of
+   whether the tab is fronted (`document.visibilityState` reports `"hidden"`; confirmed via the
+   PreFlight dossier's own `FIRST FRAME: STALLED`). What was verified instead: synthetic
+   `cosmos:*` events dispatched on `window` (the same transport `emit()` uses) produce the
+   correct DOM text, at the correct times, against the real built bundle — proof the React wiring
+   is correct, not proof of how it looks.
+
 **Astra REALISM-AUDIT after D3:** full-journey choreography vs brief §3.2.
 
 ---

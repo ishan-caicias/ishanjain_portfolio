@@ -361,6 +361,7 @@ import {
   CHASE_LOOK_LAMBDA,
   CHASE_OFFSET_REST,
   chaseOffsetAt,
+  flightInputPolicy,
   PLUME_ENGINES,
   PLUME_VERTEX_COUNT,
   PLUME_VERTEX_FLOATS,
@@ -1616,6 +1617,9 @@ class BabylonScene extends HTMLElement {
   /** Pending `setTimeout(0)` build slice — the between-frames driver that
    * decouples total build wall-time from frame delivery. Cleared on dispose. */
   private _bandBuildTimer?: ReturnType<typeof setTimeout>;
+  /** PF-11 D3.3: pending `setTimeout(0)` that launches a queued retarget one
+   * task after arrival. Cleared on dispose, same reason as the band timer. */
+  private _retargetTimer?: ReturnType<typeof setTimeout>;
   private _bandReady = false;
   private _bandFadeAmt = 0;
   // --- GAP-04: constellation figures ---
@@ -1878,6 +1882,12 @@ class BabylonScene extends HTMLElement {
   stations: BabylonBody[] = [];
   cam: [number, number, number] = [0, 0, 0];
   arrivedId: string | null = null;
+  /** PF-11 D3.3 (ADR-0010) — the destination picked DURING a journey, launched
+   * the moment that journey lands. Public because it is display state: the HUD
+   * badge and the Where-To console's mid-warp row both render from it, and a
+   * queue nobody can see would be the silent no-op this slice exists to kill.
+   * Last selection wins; `goHome` (abort or otherwise) clears it. */
+  queuedTargetId: string | null = null;
   warp: BabylonWarp = { mode: "idle" };
   backend: "webgpu" | "webgl2" | null = null;
   starCount = 0;
@@ -2369,6 +2379,13 @@ class BabylonScene extends HTMLElement {
       this._bandBuildTimer = undefined;
     }
     this._bandBuilder = undefined;
+    // PF-11 D3.3: same class of hazard — a queued retarget must not launch a
+    // warp into a scene that has been disposed.
+    if (this._retargetTimer !== undefined) {
+      clearTimeout(this._retargetTimer);
+      this._retargetTimer = undefined;
+    }
+    this.queuedTargetId = null;
     this._engine?.dispose();
   }
 
@@ -5551,13 +5568,18 @@ class BabylonScene extends HTMLElement {
     const b =
       this.bodies.find((x) => x.e.id === id) ??
       this.stations.find((x) => x.e.id === id);
-    if (
-      !b ||
-      this.warp.mode === "warp" ||
-      this.warp.mode === "aim" ||
-      this.warp.mode === "ascent"
-    )
+    if (!b) return; // unknown id — nothing to queue or fly to
+    // PF-11 D3.3 (ADR-0010): picking a destination mid-journey used to be a
+    // silent no-op. It now QUEUES — the pick is remembered, announced, and
+    // launched on arrival. Last selection wins, so a visitor who changes their
+    // mind three times mid-warp gets the third body, not the first.
+    const policy = flightInputPolicy(this.warp.mode, "travel");
+    if (policy === "ignore") return; // ascent: the cinematic owns the camera
+    if (policy === "queue") {
+      this.queuedTargetId = id;
+      emit("cosmos:retarget-queued", { id, quiet: !!quiet });
       return;
+    }
     if (this.arrivedId === id) {
       emit("cosmos:arrive", { id, quiet: !!quiet }); // already parked — open dossier
       return;
@@ -5663,6 +5685,7 @@ class BabylonScene extends HTMLElement {
     )
       return;
     this.arrivedId = null;
+    this.queuedTargetId = null; // D3.3: a launch cinematic starts from a clean slate
     // Arming the home orbit is what makes `_tickPlanetSphere` reveal Earth at the origin
     // (`_isAtHomeVantage` gates on it) — the ascent renders that same sphere throughout.
     this._homeOrbit = true;
@@ -5779,20 +5802,33 @@ class BabylonScene extends HTMLElement {
     if (!this._engine) {
       // GAP-19: no-WebGL fallback — mirrors space-engine.js:1531-1536.
       this.arrivedId = null;
+      this.queuedTargetId = null;
       emit("cosmos:home", {});
       return;
     }
-    if (
-      this.warp.mode === "warp" ||
-      this.warp.mode === "aim" ||
-      this.warp.mode === "ascent"
-    )
+    // PF-11 D3.3 (ADR-0010): HOME mid-journey is an ABORT, not a no-op. The
+    // journey under way is abandoned where the ship currently is and a fresh
+    // home-bound warp launches from that exact point — `_beginWarp` reads
+    // `this.cam`, which `_tickWarp` keeps integrated every frame, so the abort
+    // inherits the live position by construction rather than by bookkeeping.
+    // The new warp resets k=0, so the ship plays a full accel/flip/brake home
+    // (D3.2's choreography) instead of a cut.
+    const policy = flightInputPolicy(this.warp.mode, "home");
+    if (policy === "ignore") return; // ascent: never interrupt the launch cinematic
+    if (policy === "abort") {
+      const abandonedId = this.warp.target?.e.id ?? null;
+      this.queuedTargetId = null; // an abort discards the queue, it doesn't inherit it
+      this.arrivedId = null;
+      emit("cosmos:abort", { toHome: true, abandonedId, quiet: !!quiet });
+      this._beginWarp(undefined, this._homeArrivalPoint(), true, !!quiet, 0);
       return;
+    }
     // PF-11 D6.4 / R16: "already home" USED to mean |cam| < 1, i.e. parked at the origin. Home is
     // now an ORBIT at ARRIVE_STANDOFF, so that test would be false at every point of it and every
     // press would re-warp out of the orbit and back. The predicate moves with the definition.
     if (this._isAtHomeVantage()) return; // already home (in the home orbit)
     this.arrivedId = null;
+    this.queuedTargetId = null;
     this._beginWarp(undefined, this._homeArrivalPoint(), true, !!quiet, 0);
   }
 
@@ -6187,6 +6223,28 @@ class BabylonScene extends HTMLElement {
             this._dockDir = [w.dir[0], w.dir[1], w.dir[2]];
           }
           emit("cosmos:arrive", { id: w.target.e.id, quiet: !!w.quiet });
+        }
+        // PF-11 D3.3 (ADR-0010): drain a retarget queued mid-journey. Deferred
+        // by a task and NEVER called inline: `travelTo` replaces `this.warp`
+        // wholesale, while the rest of this tick still reads the local `w` for
+        // β, aberration and the camera write below — launching here would run
+        // the tail of an old frame against a brand-new journey's state. The
+        // handle is cancelled in `disconnectedCallback` for the same reason the
+        // band-build timer is (D0.1): a callback that outlives the engine.
+        if (this.queuedTargetId) {
+          const next = this.queuedTargetId;
+          this.queuedTargetId = null;
+          // Already here — the queue asked for the body this journey just
+          // landed on (a retarget back to the original destination). Clearing
+          // it IS the whole action; re-flying would be a no-op warp and would
+          // re-fire cosmos:arrive over the dossier that just opened.
+          if (next !== this.arrivedId) {
+            clearTimeout(this._retargetTimer);
+            this._retargetTimer = setTimeout(() => {
+              this._retargetTimer = undefined;
+              this.travelTo(next);
+            }, 0);
+          }
         }
       } else {
         // brachistochrone accel/flip/decel readout — matches the live

@@ -18,6 +18,16 @@ export interface HoverState {
   y: number;
 }
 
+/** PF-11 D3.3 — a transient HUD acknowledgement for a mid-journey input that would
+ * otherwise be silent (ADR-0010): an aborted journey, or a destination queued to launch
+ * on arrival. Auto-clears itself (SpaceScene owns the timeout); `queuedTargetId` below is
+ * the separate PERSISTENT half — it lives for as long as the queue itself does, not just
+ * for the few seconds the acknowledgement banner shows. */
+export interface NavNotice {
+  kind: "abort" | "retarget-queued";
+  text: string;
+}
+
 export type NavMode = "travel" | "scroll";
 export type SectionDisplayMode = "dossier" | "console" | "holo";
 export type CardStyleMode = "holo" | "dossier" | "plate";
@@ -27,6 +37,13 @@ export interface SceneState {
   cardId: string | null;
   warp: WarpState | null;
   arrivedId: string | null;
+  /** PF-11 D3.3 — mirrors the engine's public `queuedTargetId` (space-engine.d.ts):
+   * non-null for exactly as long as a mid-journey retarget is pending. Cleared when that
+   * journey actually launches (`cosmos:select` for this id), when it turns out to already
+   * be the arrival just reached (the engine's same-id no-op case), or when an abort
+   * discards it. */
+  queuedTargetId: string | null;
+  notice: NavNotice | null;
   vista: { id: string } | null;
   sector: string;
   sectionOpen: string | null;
@@ -49,6 +66,8 @@ export const INITIAL_SCENE_STATE: SceneState = {
   cardId: null,
   warp: null,
   arrivedId: null,
+  queuedTargetId: null,
+  notice: null,
   vista: null,
   sector: "hero",
   sectionOpen: null,

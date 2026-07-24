@@ -494,6 +494,48 @@ console's mid-warp state (D5.2) reflects the queue.
 **Exit for D3:** E2E flight-sequence specs updated (named test changes); Astra REALISM-AUDIT
 of the full journey; manual regression near+far; reduced-motion parity.
 
+**✅ ENGINE STATE MACHINE DELIVERED 2026-07-24 — [TR-095](../test-reports/TR-095.md).** The
+decision is one pure module (`flightInputPolicy(mode, request)` → proceed/queue/abort/ignore) so
+the engine, the HUD badge and the D5.2 console read the same verdict instead of re-deriving three
+copies of a mode disjunction. Abort inherits the ship's live position by construction
+(`_beginWarp` already reads the integrated `this.cam`) and replays a full D3.2 accel/flip/brake
+home; `queuedTargetId` is public display state on the element (optional on the
+`SpaceEngineElement` contract — the archived engine has no queue and keeps its no-op by design);
+the queue drains one task after arrival, never inline. `ascent` is now the **only** surviving
+no-op, and it is named `"ignore"` rather than left to fall through a mode list. The slice also
+fixed a pre-existing UI defect it would have made worse: `sectionTravelRef` was consumed by the
+next arrival whatever it was, so a nav click during a warp opened the section over the wrong body
+— it now carries `{id, sec}` and matches.
+
+**⚠ NOT the phase exit on its own — two D3.3 items remain open.** (1) **HUD strings are
+deliberately not in this slice** (owner direction): the engine emits `cosmos:abort` /
+`cosmos:retarget-queued` and exposes the queue, but nothing listens yet, so the policy is correct
+and still **visually silent** — `ABORTING · RETURNING HOME` and `RETARGET QUEUED · {name}` land in
+the follow-up pass, and only then is "never a silent no-op" actually met. (2) The abort's
+**velocity discontinuity** — restarting the profile at `k=0` drops world speed to zero at the
+press and opens with a 900 ms `aim` hold — is implemented exactly as the implementation plan
+specified and pre-accepted, but it is the same class as R6 and is flagged for a Vega SHOT-BRIEF in
+a D3 polish pass rather than tuned silently. The Astra REALISM-AUDIT of the full journey is still
+outstanding.
+
+**✅ HUD/CONSOLE STRINGS DELIVERED 2026-07-24 (Sonnet 5 follow-up) — [TR-096](../test-reports/TR-096.md).**
+Item (1) above is closed: `ABORTING · RETURNING HOME` renders as a one-shot pill
+(`NavNotice`/`SceneState.notice`, auto-clears after 2.2s) and `RETARGET QUEUED · {name}` as a
+persistent badge (`SceneState.queuedTargetId`) independent of the notice's own lifetime — the
+two answer different questions ("did my press register?" vs "is something still queued?") and
+needed two separate pieces of state, not one. The mission console's `WHERE TO ▸` label swaps to
+`QUEUED ▸ {NAME}` for the same duration as the badge — a minimal string-level acknowledgement,
+**not** the D5.2 combobox rewrite the console's own richer mid-warp reflection is scoped to
+(that surface doesn't exist yet). Clearing the persistent badge needed three separate listener
+sites, because the DOM event stream doesn't give one signal for "the queue is gone" — the queued
+journey launching (`cosmos:select`), the same-id no-op arrival case TR-095 introduced, and an
+abort discarding it. "Never a silent no-op" is now actually true end to end.
+**Still open:** item (2) (the abort's velocity discontinuity, unrelated to strings), the Astra
+REALISM-AUDIT, and — new, named honestly rather than left implicit — **owner-eyes visual
+confirmation**, which this harness could not perform in either pass (TR-096: the Browser-pane
+harness never composites a frame in this environment; confirmed via real DOM-state assertions
+instead, which is not the same as a human looking at it).
+
 ## Phase D4 — Arrival & cards (owner R7/R8)
 
 **Audited baseline (settles R8):** three cards exist and are **not** content-mixed —

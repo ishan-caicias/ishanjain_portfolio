@@ -93,6 +93,12 @@ function isFarField(id: string | null): boolean {
   return farFieldCache.far;
 }
 
+/** PF-11 D3.3 — how long the transient abort/retarget-queued acknowledgement stays on screen.
+ * Deliberately shorter than the arrival vista's 5.5s: this is a "received" acknowledgement,
+ * not content to read, and the ongoing warp-transit overlay keeps communicating the journey
+ * (destination, phase, home-bound framing) long after this banner clears itself. */
+const NAV_NOTICE_MS = 2200;
+
 /** Extracted so PF-11 D1.4 can compute an accurate result count for the value a keystroke is
  * ABOUT to produce, synchronously inside the `onCmdChange` callback — a `useEffect` reacting
  * to `state.cmd` would sit after this component's `if (!engineReady) return null` early exit
@@ -129,6 +135,20 @@ function entryFor(id: string | null): CelestialEntry | null {
   const fi = en.fieldInfo(idx);
   if (!fi) return null;
   return entryForFieldStar(id, idx, fi);
+}
+
+/** Catalog body or station id -> its display name, for anywhere the HUD names a
+ * destination outside a live `state.warp` (PF-11 D3.3's queued-retarget notice; the
+ * warp-transit overlay below reuses the same two-step lookup). Falls back to the raw id
+ * rather than an empty string — a notice that names nothing reads as broken, and every
+ * real caller's id already resolves through one of the two lookups. */
+function bodyDisplayName(id: string): string {
+  const e = entryFor(id);
+  if (e) return e.n;
+  const stW = id.startsWith("st-")
+    ? STATIONS.find((x) => "st-" + x.sec === id)
+    : null;
+  return stW ? stW.label : id;
 }
 
 /**
@@ -231,11 +251,24 @@ export default function SpaceScene({
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  const sectionTravelRef = useRef<string | null>(null);
+  /** A nav-click journey in flight: which station id it is heading for, and the
+   * section to open when it lands. PF-11 D3.3 made the id load-bearing — before
+   * the mid-journey policy this ref was a bare section name consumed by the NEXT
+   * arrival whatever it was, so a nav click during a warp opened the section over
+   * the wrong body (the interrupted journey's). Now that such a click QUEUES, the
+   * section must wait for ITS station to arrive, which is exactly what matching
+   * the id gives. */
+  const sectionTravelRef = useRef<{ id: string; sec: string } | null>(null);
   const desiredBodyRef = useRef<string | null>(null);
   const spriteElsRef = useRef<SpriteRefMap>({});
   const bodyCacheRef = useRef<Record<string, SpaceEngineBody | undefined>>({});
   const vistaTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  /** PF-11 D3.3: auto-clears the transient abort/retarget-queued notice banner. Separate
+   * from `vistaTimeoutRef` — the two overlays are unrelated and can be live at once (a
+   * notice fires mid-warp; the vista only ever opens at rest). */
+  const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
 
@@ -524,7 +557,7 @@ export default function SpaceScene({
         patch({ sectionOpen: sec, sector: sec, vista: null, cardId: null });
         return;
       }
-      sectionTravelRef.current = sec;
+      sectionTravelRef.current = { id, sec };
       en.travelTo(id);
     },
     [patch],
@@ -590,8 +623,16 @@ export default function SpaceScene({
     }) as EventListener);
     on("cosmos:select", ((e: CustomEvent) => {
       const detail = e.detail;
+      // PF-11 D3.3: this IS the queued retarget launching if its id matches — the engine
+      // already cleared its own `queuedTargetId` before emitting this, so the badge has to
+      // clear here too rather than wait for an arrival that (for THIS journey) hasn't
+      // started yet.
+      const queuedTargetId =
+        stateRef.current.queuedTargetId === detail.id
+          ? null
+          : stateRef.current.queuedTargetId;
       if (detail.quiet) {
-        patch({ hover: null, vista: null });
+        patch({ hover: null, vista: null, queuedTargetId });
         return;
       }
       // PF-11 D1.4: cosmos:select — not cosmos:warp — is the one-shot "a journey started"
@@ -604,6 +645,7 @@ export default function SpaceScene({
         hover: null,
         cardId: null,
         vista: null,
+        queuedTargetId,
       });
     }) as EventListener);
     on("cosmos:warp", ((e: CustomEvent) => {
@@ -624,8 +666,21 @@ export default function SpaceScene({
     on("cosmos:arrive", ((e: CustomEvent) => {
       const detail = e.detail;
       const id = detail.id;
-      if (sectionTravelRef.current) {
-        const sec = sectionTravelRef.current;
+      // PF-11 D3.3: the engine's same-id no-op case — a retarget was queued back to the
+      // body a journey was ALREADY flying to, so the queue drains with no `cosmos:select`
+      // ever firing for it. This is the only place that arrival is observable from the DOM
+      // event stream, so it is the only place this particular clear can happen.
+      const queuedTargetId =
+        stateRef.current.queuedTargetId === id
+          ? null
+          : stateRef.current.queuedTargetId;
+      // Only THIS station's arrival opens the section (D3.3): an unrelated
+      // arrival in between — the journey a nav click interrupted, or one queued
+      // ahead of it — must leave the intent standing rather than consume it.
+      const pendingSection = sectionTravelRef.current;
+      // `id` is `any` off the CustomEvent detail, so `?.` alone does not narrow.
+      if (pendingSection && pendingSection.id === id) {
+        const sec = pendingSection.sec;
         sectionTravelRef.current = null;
         funnelRef.current?.record("arrival", { id });
         patch({
@@ -634,11 +689,12 @@ export default function SpaceScene({
           vista: null,
           sector: sec,
           sectionOpen: sec,
+          queuedTargetId,
         });
         return;
       }
       if (detail.quiet) {
-        patch({ warp: null, arrivedId: id, vista: null });
+        patch({ warp: null, arrivedId: id, vista: null, queuedTargetId });
         setTimeout(() => dispatchRoute(), 80);
         return;
       }
@@ -649,11 +705,18 @@ export default function SpaceScene({
           vista: null,
           cardId: id,
           tilt: { rx: 0, ry: 0, mx: 50, my: 50 },
+          queuedTargetId,
         });
         return;
       }
       funnelRef.current?.record("arrival", { id });
-      patch({ warp: null, arrivedId: id, vista: { id }, hover: null });
+      patch({
+        warp: null,
+        arrivedId: id,
+        vista: { id },
+        hover: null,
+        queuedTargetId,
+      });
       clearTimeout(vistaTimeoutRef.current);
       vistaTimeoutRef.current = setTimeout(() => {
         // PF-11 D1.4: the 5.5s auto-timeout is today's only "vista dismissed" path pending
@@ -664,8 +727,64 @@ export default function SpaceScene({
       }, 5500);
     }) as EventListener);
     on("cosmos:home", (() => {
-      patch({ warp: null, arrivedId: null, vista: null });
+      // D3.3: going home — including as an ABORT — discards a pending nav-click
+      // section intent, so it can't reopen on some unrelated later arrival.
+      sectionTravelRef.current = null;
+      // The engine has already discarded any queue by the time a journey lands home (on
+      // the abort path, at the press itself; on the plain path, it was never set) — mirrored
+      // here defensively so a stale badge can never survive into an idle scene.
+      patch({ warp: null, arrivedId: null, vista: null, queuedTargetId: null });
       setTimeout(() => dispatchRoute(), 80);
+    }) as EventListener);
+    // PF-11 D3.3 (ADR-0010): HOME mid-journey is an ABORT, never a silent no-op. This fires
+    // the instant the press lands — well before the new home-bound warp completes — so the
+    // acknowledgement is immediate rather than deferred to arrival. `state.warp` is set here
+    // (not left to the next `cosmos:warp` tick) for the same reason `cosmos:select` sets it:
+    // the very next rendered frame already carries the new journey's data, so a null check
+    // there could never observe the transition either.
+    on("cosmos:abort", ((e: CustomEvent) => {
+      const detail = e.detail;
+      sectionTravelRef.current = null;
+      if (detail.quiet) {
+        patch({ hover: null, cardId: null, vista: null, queuedTargetId: null });
+        return;
+      }
+      clearTimeout(noticeTimeoutRef.current);
+      patch({
+        warp: { id: "__home", t: 0, ly: null, phase: "aim", home: true },
+        hover: null,
+        cardId: null,
+        vista: null,
+        queuedTargetId: null,
+        notice: { kind: "abort", text: "ABORTING · RETURNING HOME" },
+      });
+      noticeTimeoutRef.current = setTimeout(
+        () => patch({ notice: null }),
+        NAV_NOTICE_MS,
+      );
+    }) as EventListener);
+    // PF-11 D3.3 (ADR-0010): a destination picked mid-journey queues rather than no-ops.
+    // `queuedTargetId` is the PERSISTENT half (drives the console badge below and lives
+    // until the queue drains or is discarded); `notice` is the one-shot acknowledgement that
+    // the pick registered at all.
+    on("cosmos:retarget-queued", ((e: CustomEvent) => {
+      const detail = e.detail;
+      if (detail.quiet) {
+        patch({ queuedTargetId: detail.id });
+        return;
+      }
+      clearTimeout(noticeTimeoutRef.current);
+      patch({
+        queuedTargetId: detail.id,
+        notice: {
+          kind: "retarget-queued",
+          text: `RETARGET QUEUED · ${bodyDisplayName(detail.id)}`,
+        },
+      });
+      noticeTimeoutRef.current = setTimeout(
+        () => patch({ notice: null }),
+        NAV_NOTICE_MS,
+      );
     }) as EventListener);
     // PF-11 D1.3: the ascent hands off here — reveal the console into its dock, end the skip
     // overlay, record the funnel milestone. Fires ~8s after LAUNCH, or synchronously under
@@ -887,12 +1006,7 @@ export default function SpaceScene({
   const warpDestName = (() => {
     if (!state.warp) return "";
     if (state.warp.home) return "Sol · Home";
-    const e = entryFor(state.warp.id);
-    if (e) return e.n;
-    const stW = state.warp.id.startsWith("st-")
-      ? STATIONS.find((x) => "st-" + x.sec === state.warp!.id)
-      : null;
-    return stW ? stW.label : "";
+    return bodyDisplayName(state.warp.id);
   })();
 
   const vistaEntry = state.vista ? entryFor(state.vista.id) : null;
@@ -1023,12 +1137,22 @@ export default function SpaceScene({
           }}
           onRandom={() => engineEl()?.randomBody()}
           onHome={() => engineEl()?.goHome()}
+          queuedName={
+            state.queuedTargetId ? bodyDisplayName(state.queuedTargetId) : null
+          }
         />
       )}
 
       <HoverTooltip data={hoverTooltip} />
 
-      <WarpOverlay warp={state.warp} destName={warpDestName} />
+      <WarpOverlay
+        warp={state.warp}
+        destName={warpDestName}
+        notice={state.notice}
+        queuedName={
+          state.queuedTargetId ? bodyDisplayName(state.queuedTargetId) : null
+        }
+      />
 
       {vistaEntry && (
         <ArrivalVista

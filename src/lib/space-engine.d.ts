@@ -65,6 +65,11 @@ export interface SpaceEngineElement extends HTMLElement {
   cam: [number, number, number];
   ship: SpaceEngineShip;
   arrivedId: string | null;
+  /** PF-11 D3.3 (ADR-0010): destination picked mid-journey, launched on arrival.
+   * Babylon engine only — the archived WebGL engine keeps its silent-no-op
+   * behaviour by design (it is a rollback lever, not a feature target), so
+   * readers must treat `undefined` as "this engine has no queue". */
+  queuedTargetId?: string | null;
   warp: { mode: "idle" | "aim" | "warp" };
   _buildBodies?: () => void;
   _ijStSig?: string;

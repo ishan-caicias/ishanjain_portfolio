@@ -14,6 +14,13 @@ interface MissionControlBarProps {
   onSuggestionSelect: (s: CommandSuggestion) => void;
   onRandom: () => void;
   onHome: () => void;
+  /** PF-11 D3.3 (ADR-0010) — non-null for as long as a mid-journey retarget is queued.
+   * This is a minimal console acknowledgement, not the D5.2 rewrite: the delivery plan
+   * scopes "the Where-To console's mid-warp state reflects the queue" to D5.2's own
+   * combobox/matching build, which doesn't exist yet. Submitting here already queues
+   * correctly today (the engine change is orthogonal to this UI); this prop only makes
+   * that visible where the visitor is looking when they pressed Enter. */
+  queuedName?: string | null;
 }
 
 /**
@@ -30,6 +37,7 @@ export default function MissionControlBar({
   onSuggestionSelect,
   onRandom,
   onHome,
+  queuedName,
 }: MissionControlBarProps) {
   return (
     <div
@@ -38,8 +46,16 @@ export default function MissionControlBar({
     >
       <div className="relative">
         <div className="flex items-center gap-2.5 rounded-xl border border-[#2e7d32]/40 bg-[#070914]/85 px-3.5 py-2.5 backdrop-blur-md">
-          <span className="flex-shrink-0 font-mono text-xs tracking-wider text-[#43a047]">
-            WHERE&nbsp;TO&nbsp;▸
+          <span
+            className={`max-w-[45%] flex-shrink truncate font-mono text-xs tracking-wider ${
+              queuedName ? "text-[#ffd54f]" : "flex-shrink-0 text-[#43a047]"
+            }`}
+          >
+            {queuedName ? (
+              <>QUEUED&nbsp;▸&nbsp;{queuedName.toUpperCase()}</>
+            ) : (
+              <>WHERE&nbsp;TO&nbsp;▸</>
+            )}
           </span>
           <input
             value={cmd}

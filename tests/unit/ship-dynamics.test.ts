@@ -11,6 +11,7 @@ import {
   bodyDepth,
   bodyWorldPosition,
   raDecToDir,
+  flightInputPolicy,
   warpDurationForLy,
   warpEase,
   WARP_MAX_MS,
@@ -857,5 +858,51 @@ describe("PF-09 B2 step 5 — warpDurationForLy (new formula, not a port)", () =
     const sirius = warpDurationForLy(8.6);
     const orionNebula = warpDurationForLy(1344);
     expect(orionNebula).toBeGreaterThan(sirius + 500);
+  });
+});
+
+describe("PF-11 D3.3 — mid-journey input policy (ADR-0010)", () => {
+  const MODES = ["idle", "aim", "warp", "ascent"] as const;
+  const REQUESTS = ["travel", "home"] as const;
+
+  it("idle proceeds for both requests — the pre-D3.3 behaviour is untouched", () => {
+    expect(flightInputPolicy("idle", "travel")).toBe("proceed");
+    expect(flightInputPolicy("idle", "home")).toBe("proceed");
+  });
+
+  it("HOME mid-journey aborts, in the turn as well as in the burn", () => {
+    expect(flightInputPolicy("aim", "home")).toBe("abort");
+    expect(flightInputPolicy("warp", "home")).toBe("abort");
+  });
+
+  it("a destination pick mid-journey queues, in the turn as well as in the burn", () => {
+    expect(flightInputPolicy("aim", "travel")).toBe("queue");
+    expect(flightInputPolicy("warp", "travel")).toBe("queue");
+  });
+
+  it("the ascent cinematic ignores everything — the ONLY surviving no-op", () => {
+    expect(flightInputPolicy("ascent", "travel")).toBe("ignore");
+    expect(flightInputPolicy("ascent", "home")).toBe("ignore");
+    // And it is the only one: every other combination does something the HUD
+    // can announce. This is the property D3.3 exists to establish, so it is
+    // asserted exhaustively rather than case by case.
+    for (const mode of MODES) {
+      for (const request of REQUESTS) {
+        const p = flightInputPolicy(mode, request);
+        if (mode === "ascent") expect(p).toBe("ignore");
+        else expect(p).not.toBe("ignore");
+      }
+    }
+  });
+
+  it("is total and pure — every (mode, request) pair returns a known verdict, stably", () => {
+    const known = ["proceed", "queue", "abort", "ignore"];
+    for (const mode of MODES) {
+      for (const request of REQUESTS) {
+        const a = flightInputPolicy(mode, request);
+        expect(known).toContain(a);
+        expect(flightInputPolicy(mode, request)).toBe(a);
+      }
+    }
   });
 });

@@ -852,6 +852,49 @@ export function warpDurationForLy(ly: number): number {
   return WARP_MIN_MS + (WARP_MAX_MS - WARP_MIN_MS) * frac;
 }
 
+/* ---------- PF-11 D3.3: mid-journey input policy (ADR-0010) ---------- */
+
+/** The engine's warp modes, restated here as a plain union so the policy stays a
+ * pure module (`babylon-engine.ts` cannot be imported off-GPU, and this decision
+ * has to be unit-testable — it is the one place three surfaces must agree). */
+export type FlightMode = "idle" | "aim" | "warp" | "ascent";
+
+/** What the visitor asked for: `travel` = pick a destination (`travelTo`,
+ * `randomBody`, a canvas click, the Where-To console); `home` = the home key /
+ * HOME control (`goHome`). */
+export type FlightRequest = "travel" | "home";
+
+/** What the engine does about it.
+ * - `proceed` — start the journey now (the idle case).
+ * - `queue`   — remember it and launch on arrival (mid-journey retarget).
+ * - `abort`   — abandon the current journey and fly home instead.
+ * - `ignore`  — genuinely nothing (the launch cinematic owns the camera). */
+export type FlightInputPolicy = "proceed" | "queue" | "abort" | "ignore";
+
+/** PF-11 D3.3 — what a navigation input does given the flight state it lands in.
+ *
+ * Before this, `travelTo`/`goHome` both early-returned mid-journey: a press
+ * during a warp was a **silent no-op**, which is how it survived unnoticed until
+ * TR-080's dead-code reset. Owner decision (ADR-0010): `goHome` mid-journey is
+ * an ABORT (fly home from wherever the ship is), a destination pick mid-journey
+ * QUEUES a retarget that launches on arrival (last selection wins), and neither
+ * is ever silent — both have HUD feedback.
+ *
+ * The one exception is `ascent`: the launch-from-Earth cinematic (D1.3) is a
+ * rails climb that owns the camera and the console isn't even revealed yet, so
+ * there is no input to honour and nothing to say about it. It stays a no-op —
+ * deliberately, and named `ignore` so the distinction is legible at the call
+ * site rather than hidden in a mode list. */
+export function flightInputPolicy(
+  mode: FlightMode,
+  request: FlightRequest,
+): FlightInputPolicy {
+  if (mode === "ascent") return "ignore";
+  if (mode === "idle") return "proceed";
+  // "aim" and "warp" — a journey is under way, in its turn or in its burn.
+  return request === "home" ? "abort" : "queue";
+}
+
 /** Engine-glow intensity cast onto the rear hull, by plume phase (PF-08 F0). */
 export function engineGlowIntensity(p: PlumeParams): number {
   if (p.burning) return 1.3;
