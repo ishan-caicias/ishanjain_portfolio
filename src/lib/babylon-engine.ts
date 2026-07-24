@@ -371,6 +371,7 @@ import {
   QUAT_IDENTITY,
   raDecToDir,
   frameLadderFade,
+  figureVisibility,
   furnitureVisibility,
   localFieldVisibility,
   SHIP_MAX_DT,
@@ -583,6 +584,14 @@ const KEY_LOOK_DAMP = 0.9;
  * shooting-stars.ts). Long enough that particles don't feel synchronized,
  * short enough that the sky doesn't read as empty for long stretches. */
 const SHOOTING_STAR_CYCLE_S = 5;
+
+/** PF-11 D2.2 — the external-galaxy impostor's CONSTANT distance from the
+ * CAMERA (see _updateImpostor's header for why camera-relative: the band
+ * skybox is an opaque depth-writing shell at 2000 from the camera, so any
+ * world-fixed placement can drift beyond it and depth-fail). 1500 keeps it
+ * inside the shell with margin while sitting beyond every world object the
+ * camera can park at (deepest curated/SDSS placements ≈ 1360). */
+const IMPOSTOR_DIST = 1500;
 
 /** idle: parked. aim: launch-turn preview before the burn (position holds).
  * warp: the eased chase-camera flight itself. ascent (PF-11 D1.3): the
@@ -1424,6 +1433,12 @@ class BabylonScene extends HTMLElement {
   private _furnitureFadeTo = 1;
   private _localFadeFrom = 1;
   private _localFadeTo = 1;
+  /** Constellation-figure dissolve (D2.3) — separate, nearer threshold
+   * (ly 50→500) than `_localFieldFade`'s extragalactic collapse; multiplies
+   * into `_conMat`'s alpha alongside it in `_pushAberration`. */
+  private _figureFade = 1;
+  private _figureFadeFrom = 1;
+  private _figureFadeTo = 1;
   /** False once the belt has faded out — belt Havok forces/shake sleep (D2.1). */
   private _beltPhysicsAwake = true;
   /** External-galaxy impostor (D2.2): a license-clean procedural disc that
@@ -2452,10 +2467,13 @@ class BabylonScene extends HTMLElement {
       // PF-11 D2: the frame ladder — destination-keyed layer fades. `furnitureFade`
       // (belt/glare) is ~1 in the solar system, 0 at any DSO; `localFieldFade`
       // (band/star field/figures) is 1 inside the galaxy, 0 at extragalactic
-      // arrivals; `impostorVisible` flips true when the external-galaxy sprite
-      // shows; `beltPhysicsAwake` is the Havok sleep signal (D2.1/D7.5).
+      // arrivals; `figureFade` (D2.3) is the figures' own nearer ly 50→500
+      // dissolve, independent of `localFieldFade`; `impostorVisible` flips
+      // true when the external-galaxy sprite shows; `beltPhysicsAwake` is the
+      // Havok sleep signal (D2.1/D7.5).
       furnitureFade: Math.round(this._furnitureFade * 1000) / 1000,
       localFieldFade: Math.round(this._localFieldFade * 1000) / 1000,
+      figureFade: Math.round(this._figureFade * 1000) / 1000,
       beltPhysicsAwake: this._beltPhysicsAwake,
       impostorVisible: this._impostorVisible,
       impostorTextureReady: this._impostorTex?.isReady() ?? false,
@@ -3586,11 +3604,19 @@ class BabylonScene extends HTMLElement {
       k,
       this._reduced,
     );
+    // D2.3: the figure dissolve (ly 50→500) — a separate, nearer schedule
+    // than the local-field collapse above; both are read by _pushAberration.
+    this._figureFade = frameLadderFade(
+      this._figureFadeFrom,
+      this._figureFadeTo,
+      k,
+      this._reduced,
+    );
     this._beltMat?.setFloat("uLayerFade", this._furnitureFade);
     this._localMat?.setFloat("uLayerFade", this._localFieldFade);
     // Belt Havok sleeps once the belt is gone (D2.1). The band's own uFade is
     // handled in _tickMilkyWay, the constellation alpha in _pushAberration —
-    // both read `_localFieldFade` directly.
+    // both read `_localFieldFade` (and, for the figures, `_figureFade`) directly.
     this._beltPhysicsAwake = this._furnitureFade > 0;
     this._updateImpostor();
   }
@@ -3599,7 +3625,20 @@ class BabylonScene extends HTMLElement {
    * `_localFieldFade`. It fades in as the local field collapses, sits astern of
    * the extragalactic target, and is sized by that target's real angular
    * subtense (Astra §1/§5: a 30-kpc disc → ~10' from 32.6 Mly), floored to a
-   * visible minimum — the same declared-license overbrightness the belt carries. */
+   * visible minimum — the same declared-license overbrightness the belt carries.
+   *
+   * POSITION IS CAMERA-RELATIVE, at a constant `IMPOSTOR_DIST` from the camera
+   * each frame (Fable-5 review fix, TR-090 addendum). The first implementation
+   * parked it at 0.9 × the band radius from the WORLD ORIGIN — but the band
+   * skybox is CAMERA-centred (`infiniteDistance`, an opaque depth-writing shell
+   * at a constant 2000 from the camera), and at an nbg arrival the camera sits
+   * ~1040 units out on the destination side, putting the impostor ~2840 from
+   * the camera: beyond the shell, so every fragment DEPTH-FAILED behind the
+   * band. State said visible; zero pixels — the B4 class. Camera-anchoring is
+   * also the honest physics: an object tens of Mly away has zero parallax
+   * across any in-scene camera motion, the same reasoning as the band's own
+   * infiniteDistance. The E2E now asserts PIXELS (aimAt("impostor") +
+   * screenshot), not just the state flag, so this class cannot recur silently. */
   private _updateImpostor() {
     const mesh = this._impostorMesh;
     const mat = this._impostorMat;
@@ -3610,12 +3649,13 @@ class BabylonScene extends HTMLElement {
     if (mesh.isVisible !== visible) mesh.isVisible = visible;
     if (!visible) return;
     mat.setFloat("uFade", appear);
-    // Astern of the target, at a fixed far depth just inside the band radius.
-    const D = MILKY_WAY_SPHERE_RADIUS * 0.9;
+    // Astern of the target, a fixed distance from the CAMERA — always inside
+    // the band shell (2000) and the far plane (6000), never occluded.
+    const D = IMPOSTOR_DIST;
     mesh.position.set(
-      -this._farDestDir[0] * D,
-      -this._farDestDir[1] * D,
-      -this._farDestDir[2] * D,
+      this.cam[0] - this._farDestDir[0] * D,
+      this.cam[1] - this._farDestDir[1] * D,
+      this.cam[2] - this._farDestDir[2] * D,
     );
     // 2·atan(R_MW / d), R_MW ≈ 15 kpc = 48,930 ly, floored so the honest ~10'
     // subtense still reads on screen (declared license, like the belt exposure).
@@ -4955,8 +4995,12 @@ class BabylonScene extends HTMLElement {
     // the figures also collapse with the rest of the local field at an
     // extragalactic arrival (they are parallax accidents of local stars —
     // Astra §1), so the alpha is additionally scaled by `_localFieldFade`.
+    // D2.3: a SEPARATE, much nearer dissolve (ly 50→500, `_figureFade`) —
+    // the figures stop being honest for an in-galaxy destination long
+    // before the whole local field collapses at EXTRAGALACTIC_LY.
     if (this._conMat) {
-      this._conColorScratch.a = 0.34 * (1 - beta) * this._localFieldFade;
+      this._conColorScratch.a =
+        0.34 * (1 - beta) * this._localFieldFade * this._figureFade;
       this._conMat.setColor4("uColor", this._conColorScratch);
     }
   }
@@ -5670,11 +5714,23 @@ class BabylonScene extends HTMLElement {
   aimAt(bodyId: string): boolean {
     if (!new URLSearchParams(window.location.search).has("testhooks"))
       return false;
-    const b = this.bodies.find((x) => x.e.id === bodyId);
-    if (!b) return false;
-    const dx = b.pos[0] - this.cam[0];
-    const dy = b.pos[1] - this.cam[1];
-    const dz = b.pos[2] - this.cam[2];
+    // PF-11 D2.2 (review addendum): "impostor" aims at the external-galaxy
+    // sprite's live world position — the pixel-proof hook for the depth-
+    // occlusion class this slice's review caught (state said visible, every
+    // fragment depth-failed behind the band shell). Same guard, same fields.
+    let pos: readonly [number, number, number];
+    if (bodyId === "impostor") {
+      const m = this._impostorMesh;
+      if (!m || !m.isVisible) return false;
+      pos = [m.position.x, m.position.y, m.position.z];
+    } else {
+      const b = this.bodies.find((x) => x.e.id === bodyId);
+      if (!b) return false;
+      pos = b.pos;
+    }
+    const dx = pos[0] - this.cam[0];
+    const dy = pos[1] - this.cam[1];
+    const dz = pos[2] - this.cam[2];
     const len = Math.hypot(dx, dy, dz) || 1;
     const ux = dx / len,
       uy = dy / len,
@@ -5736,6 +5792,8 @@ class BabylonScene extends HTMLElement {
     this._furnitureFadeTo = furnitureVisibility(lyTotal);
     this._localFadeFrom = this._localFieldFade;
     this._localFadeTo = localFieldVisibility(lyTotal);
+    this._figureFadeFrom = this._figureFade;
+    this._figureFadeTo = figureVisibility(lyTotal);
     // Remember an extragalactic target so the impostor can sit astern of it,
     // sized by its real distance, and persist there after arrival.
     if (this._localFadeTo === 0) {

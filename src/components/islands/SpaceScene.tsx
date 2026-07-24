@@ -74,6 +74,25 @@ function catalog(): CelestialEntry[] {
   return window.CELESTIAL || [];
 }
 
+/** PF-11 D2.2 — is the parked body extragalactic (drives the HUD's
+ * `MILKY WAY ASTERN` line)? One-entry cache because SpaceScene re-renders
+ * ~7.5×/s while idle (the GAP-14 aim readout), and an O(4,829) `find` per
+ * render for a value that changes once per arrival is waste. A module-level
+ * closure, NOT a useMemo — a hook here would sit below the component's
+ * `if (!engineReady) return null` early exit, the exact Rules-of-Hooks
+ * crash (#310) D1.4 already hit (TR-086). */
+let farFieldCache: { id: string; far: boolean } | undefined;
+function isFarField(id: string | null): boolean {
+  if (!id) return false;
+  if (farFieldCache?.id !== id) {
+    farFieldCache = {
+      id,
+      far: (catalog().find((e) => e.id === id)?.ly ?? 0) >= EXTRAGALACTIC_LY,
+    };
+  }
+  return farFieldCache.far;
+}
+
 /** Extracted so PF-11 D1.4 can compute an accurate result count for the value a keystroke is
  * ABOUT to produce, synchronously inside the `onCmdChange` callback — a `useEffect` reacting
  * to `state.cmd` would sit after this component's `if (!engineReady) return null` early exit
@@ -947,12 +966,7 @@ export default function SpaceScene({
         onOpenCredits={openCredits}
         isTravel={isTravel}
         onToggleNavMode={toggleNavMode}
-        farField={
-          !state.warp &&
-          !!state.arrivedId &&
-          (catalog().find((e) => e.id === state.arrivedId)?.ly ?? 0) >=
-            EXTRAGALACTIC_LY
-        }
+        farField={!state.warp && isFarField(state.arrivedId)}
       />
 
       <PreFlight

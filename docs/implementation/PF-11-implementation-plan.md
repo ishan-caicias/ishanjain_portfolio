@@ -462,6 +462,17 @@ note above); one combined slice, one gate, one TR — the same way D6.1+D6.3 lan
    ramp out; fade-settle polls use a 15s budget (the same SwiftShader-load settle the D0.2/craft
    specs budget for). The impostor WGSL twin's real-hardware draw is added to `webgpu-hardware.spec`
    (an extragalactic hop → `impostorVisible` → console-clean), which fails-open without a real GPU.
+8. **REVIEW fix (same day, TR-090 addendum): the impostor is CAMERA-RELATIVE, at a constant
+   `IMPOSTOR_DIST = 1500`.** The first placement (world-fixed, 0.9 × band radius from the ORIGIN)
+   depth-failed behind the band skybox — an opaque depth-writing shell at a constant 2000 from the
+   CAMERA — whenever the camera parked far out on the destination side (~2840 camera-to-impostor at
+   nbg): state said visible, zero pixels (the B4 class). Camera-anchoring is also the honest
+   physics (zero parallax at Mly distances — the band's own `infiniteDistance` reasoning).
+   `aimAt("impostor")` (testhooks) + a screenshot luminance/variance/bright-pixel assertion in
+   `frame-ladder.spec.ts` now prove the disc with PIXELS, so this class cannot recur silently.
+   Read-across for D9/later layers: **any new mesh intended as backdrop must reason about its
+   distance from the CAMERA vs the band shell's 2000, not from the origin** — or anchor to the
+   camera outright.
 
 ### D2.3 Constellation dissolve + ledger
 
@@ -473,6 +484,25 @@ realism map.
 **Note (D2.2 built the extragalactic half):** the constellation `uColor` alpha is already
 multiplied by `_localFieldFade` (the extragalactic collapse) as of TR-090. D2.3 adds the
 _separate_ `ly 50→500` per-figure dissolve and completes the 4-entry ledger.
+
+**✅ DELIVERED 2026-07-23 — [TR-091](../test-reports/TR-091.md).** No new shader uniform was
+needed — the figures have no per-fragment fade term; `_conMat`'s alpha is already driven
+CPU-side each frame in `_pushAberration` (`uColor(..., 0.34*(1-beta)*_localFieldFade)`), so
+D2.3 adds one more multiplicand there: `figureVisibility(lyTotal)` scheduled through the same
+`frameLadderFade`/`_beginWarp` mechanism D2.1's `_furnitureFade` and D2.2's `_localFieldFade`
+already use (`_figureFadeFrom`/`_figureFadeTo`/`_figureFade`, new fields, same pattern —
+`ship-dynamics.ts`'s `FIGURE_FADE_START_LY = 50` / `FIGURE_GONE_LY = 500` / `figureVisibility`).
+Exposed as `sceneStats().figureFade`. The 4-entry ledger is completed as a dated addendum on
+the [science brief](../analysis/2026-07-22-pf11-sky-frames-and-travel-science-brief.md#addendum--the-full-4-entry-ledger-completed-by-d23-2026-07-23-astra)
+(L14 belt overbrightness, L15 warp-duration compression, L16 band+star-field persistence
+narrowed to exclude the figures, plus cross-references to L9 intro timing and L1 Reinhard) and
+audited in the [D2 realism review's D2.3 addendum](../analysis/2026-07-23-pf11-d2-frame-ladder-realism-review.md#realism-audit--d23-constellation-dissolve-2026-07-23-astra),
+which grades the `ly 50→500` window itself DECLARED LICENSE — real constellation-figure stars
+span ~80 to ~2,600 ly, so no single scene-wide constant is exactly right per-figure; the window
+is a documented, honest approximation, not a derived physical threshold. E2E
+(`frame-ladder.spec.ts`) adds a Polaris (433 ly) leg proving a partial mid-band fade alongside
+the existing Mars (=1) and M42 (=0, now on its own schedule rather than only via the
+extragalactic collapse) checkpoints.
 
 ---
 

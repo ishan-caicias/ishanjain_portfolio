@@ -543,6 +543,19 @@ export const FURNITURE_GONE_LY = 0.1;
  * star field's linear reach) and the nearest SDSS/NBG galaxy at 32.6 Mly, so
  * this threshold is effectively binary — 1e6 ly sits comfortably in that void. */
 export const EXTRAGALACTIC_LY = 1e6;
+/** Constellation figures start dissolving above this destination ly (PF-11
+ * D2.3, Astra brief §1: the figures are parallax accidents of nearby stars —
+ * real only from near Earth's own vantage). Figure stars actually span ~43 ly
+ * (Capella) to ~2,600 ly (Deneb), so no single constant is right per-figure;
+ * at 50 ly of displacement the NEAREST figures are already parallax-shifted
+ * by tens of degrees (Δθ ≈ x/d), which is why the dissolve starts here — a
+ * declared scene-wide window, not a derived threshold (ledger L17). */
+export const FIGURE_FADE_START_LY = 50;
+/** Figures fully gone at/above this destination ly — comfortably inside the
+ * ~2,400 ly linear reach of the star field itself and far short of
+ * EXTRAGALACTIC_LY, so the figure dissolve completes before the separate
+ * local-field collapse could ever re-trigger it. */
+export const FIGURE_GONE_LY = 500;
 
 /** Hermite smoothstep (0 below a, 1 above b), clamped. */
 function smoothstep(a: number, b: number, x: number): number {
@@ -563,6 +576,17 @@ export function furnitureVisibility(ly: number): number {
  * destination in between at which a partial value would ever be observed). */
 export function localFieldVisibility(ly: number): number {
   return ly >= EXTRAGALACTIC_LY ? 0 : 1;
+}
+
+/** Constellation-figure visibility (1 present … 0 gone) for a destination at
+ * `ly`. Smooth 1→0 across [FIGURE_FADE_START_LY, FIGURE_GONE_LY] — a SEPARATE,
+ * much nearer threshold than `localFieldVisibility`'s extragalactic collapse
+ * (which also zeroes the figures, but only past EXTRAGALACTIC_LY). This is
+ * the dissolve the figures need for ordinary in-galaxy DSO travel (Astra §1,
+ * PF-11 D2.3): a figure drawn from stars within ~1 kly is nonsense once the
+ * destination is itself hundreds of ly away. */
+export function figureVisibility(ly: number): number {
+  return 1 - smoothstep(FIGURE_FADE_START_LY, FIGURE_GONE_LY, ly);
 }
 
 /** Schedules a layer fade from `from`→`to` across warp progress `k` ∈ [0,1]. A

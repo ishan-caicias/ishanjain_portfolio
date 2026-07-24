@@ -10,17 +10,23 @@
  *  - D2.2: the whole local Milky Way (the 360° band) collapses at an
  *    extragalactic arrival (nbg-a0554-07, 17.9 Mly), where the external-galaxy
  *    impostor appears instead — and RESTORES on the way home.
+ *  - D2.3: the constellation figures dissolve on their OWN, nearer schedule
+ *    (ly 50→500) — full at Mars, partial at Polaris (433 ly, inside the
+ *    dissolve band), gone by M42 (1,344 ly) well before the local field's own
+ *    extragalactic collapse would zero them anyway.
  *
  * Behaviour, not readiness (#18): the assertions drive real `travelTo`/`goHome`
  * and read `sceneStats()` fades, exactly as the D0.2 planet-pixel spec drives
  * the Babylon path. No `?engine=` override — the default engine is under test.
  */
 import { test, expect, type Locator } from "@playwright/test";
+import sharp from "sharp";
 
 type EngineHandle = {
   sceneStats(): Record<string, unknown>;
   travelTo(id: string, quiet?: boolean): void;
   goHome(): void;
+  aimAt(id: string): boolean;
   arrivedId: string | null;
 };
 
@@ -30,18 +36,20 @@ const stats = (engine: Locator) =>
 const travel = (engine: Locator, id: string) =>
   engine.evaluate((el, i) => (el as unknown as EngineHandle).travelTo(i), id);
 
-test("the frame ladder fades furniture and the band by destination (D2.1/D2.2)", async ({
+test("the frame ladder fades furniture, the band, and the constellation figures by destination (D2.1/D2.2/D2.3)", async ({
   page,
 }) => {
   // Boots the full catalog scene, waits out the band's boot fade-in, and runs
-  // four sequential journeys — well past the default 30s (planet-pixels.spec
+  // five sequential journeys — well past the default 30s (planet-pixels.spec
   // sets the same budget for the same reason).
-  test.setTimeout(150000);
+  test.setTimeout(180000);
   const consoleErrors: string[] = [];
   page.on("console", (m) => {
     if (m.type() === "error") consoleErrors.push(m.text());
   });
-  await page.goto("/");
+  // ?testhooks arms aimAt() — the impostor pixel proof below needs it. It
+  // changes nothing else about the scene (same gate D0.2's spec uses).
+  await page.goto("/?testhooks");
   await page.waitForSelector("babylon-scene");
   const engine = page.locator("babylon-scene");
 
@@ -70,6 +78,26 @@ test("the frame ladder fades furniture and the band by destination (D2.1/D2.2)",
     expect(s.beltPhysicsAwake, "belt physics awake at Mars").toBe(true);
     expect(s.localFieldFade, "local field intact at Mars").toBe(1);
     expect(s.impostorVisible, "no impostor at Mars").toBe(false);
+    expect(s.figureFade, "constellation figures visible at Mars").toBe(1);
+  }
+
+  // --- Polaris (433 ly): inside the D2.3 dissolve band (50→500) — the
+  // figures are partially faded here, distinct from (and nearer than) the
+  // M42/nbg checkpoints below. ---
+  await travel(engine, "polaris");
+  await expect.poll(arrivedId, { timeout: 20000 }).toBe("polaris");
+  {
+    const s = await stats(engine);
+    const figureFade = s.figureFade as number;
+    expect(
+      figureFade,
+      "figures partially dissolved at Polaris (inside ly 50-500)",
+    ).toBeGreaterThan(0);
+    expect(
+      figureFade,
+      "figures partially dissolved at Polaris (inside ly 50-500)",
+    ).toBeLessThan(1);
+    expect(s.localFieldFade, "local field intact at Polaris").toBe(1);
   }
 
   // --- M42 (1,344 ly): furniture GONE, but still inside the galaxy. ---
@@ -83,6 +111,10 @@ test("the frame ladder fades furniture and the band by destination (D2.1/D2.2)",
     expect(s.beltPhysicsAwake, "belt physics asleep at a DSO").toBe(false);
     expect(s.localFieldFade, "the band still reads inside the galaxy").toBe(1);
     expect(s.impostorVisible, "no impostor inside the galaxy").toBe(false);
+    // Past the D2.3 dissolve band (1,344 ly > FIGURE_GONE_LY) — the figures
+    // are gone here on their OWN schedule, independent of the band/star
+    // field, which are still present (localFieldFade above).
+    expect(s.figureFade, "constellation figures gone past ly 500").toBe(0);
     // The band IS present here (ramping in); capture it for the collapse/restore
     // comparison below.
     bandPreCollapse = s.bandFade as number;
@@ -108,6 +140,63 @@ test("the frame ladder fades furniture and the band by destination (D2.1/D2.2)",
     expect(s.beltPhysicsAwake, "belt asleep beyond the solar system").toBe(
       false,
     );
+    expect(
+      s.figureFade,
+      "constellation figures gone at an extragalactic arrival",
+    ).toBe(0);
+  }
+
+  // --- PIXEL PROOF: the impostor renders real pixels, not just a state flag. ---
+  // Added by the Fable-5 review (TR-090 addendum): the first implementation
+  // placed the impostor world-fixed at 1800 from the ORIGIN — ~2840 from the
+  // camera at this arrival, beyond the band skybox's opaque depth-writing shell
+  // at 2000-from-camera, so every fragment depth-failed. `impostorVisible` was
+  // true throughout; zero pixels reached the screen (the B4 state-correct-but-
+  // no-pixels class). This assertion is what would have caught it.
+  {
+    const aimed = await engine.evaluate((el) =>
+      (el as unknown as EngineHandle).aimAt("impostor"),
+    );
+    expect(aimed, "aimAt('impostor') should arm under ?testhooks").toBe(true);
+    // aimAt only sets _yaw/_pitch; the idle tick re-derives the camera next
+    // pass (same margin the D0.2 spec uses).
+    await page.waitForTimeout(300);
+    const png = await page.locator("babylon-scene canvas").screenshot();
+    const { data, info } = await sharp(png)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    // The disc subtends ~3.4° × ~1.2° (floored size 45 at distance 1500 under
+    // the 70° FOV) — a tight 10% centre crop sits on it once aimed, against a
+    // near-black background (band collapsed, local field gone, SDSS specks).
+    const cropFrac = 0.1;
+    const x0 = Math.floor(info.width * (0.5 - cropFrac / 2));
+    const x1 = Math.floor(info.width * (0.5 + cropFrac / 2));
+    const y0 = Math.floor(info.height * (0.5 - cropFrac / 2));
+    const y1 = Math.floor(info.height * (0.5 + cropFrac / 2));
+    let sum = 0;
+    let sumSq = 0;
+    let bright = 0;
+    let n = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const idx = (y * info.width + x) * info.channels;
+        const lum =
+          0.2126 * data[idx] + 0.7152 * data[idx + 1] + 0.0722 * data[idx + 2];
+        sum += lum;
+        sumSq += lum * lum;
+        if (lum > 25) bright++;
+        n++;
+      }
+    }
+    const mean = sum / n;
+    const variance = sumSq / n - mean * mean;
+    // A depth-occluded impostor gives a black crop (mean ≈ 0, bright ≈ 0); the
+    // rendered disc gives a bright core over black (high variance, real bright
+    // pixels). Floors deliberately conservative vs the measured signal.
+    expect(mean, "impostor centre-crop mean luminance").toBeGreaterThan(1);
+    expect(variance, "impostor centre-crop variance").toBeGreaterThan(20);
+    expect(bright, "impostor bright-pixel count").toBeGreaterThan(30);
   }
 
   // --- Return home: everything restores; the impostor is gone. ---
@@ -133,6 +222,7 @@ test("the frame ladder fades furniture and the band by destination (D2.1/D2.2)",
     );
     expect(s.impostorVisible, "impostor gone at home").toBe(false);
     expect(s.beltPhysicsAwake, "belt physics awake at home").toBe(true);
+    expect(s.figureFade, "constellation figures restored at home").toBe(1);
   }
 
   // The whole ladder must run without a WebGPU/console error (#6 — a bad

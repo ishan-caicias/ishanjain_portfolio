@@ -5,7 +5,8 @@
  *
  *  1. The pure fade SCHEDULERS (ship-dynamics.ts) against Astra's brief numbers —
  *     furniture gone by ~0.1 ly, the local galaxy binary at the extragalactic
- *     threshold, and the front-loaded-out / back-loaded-in warp schedule.
+ *     threshold, the constellation figures' own nearer ly 50→500 dissolve
+ *     (D2.3), and the front-loaded-out / back-loaded-in warp schedule.
  *  2. The procedural impostor PIXEL (milky-way.ts) — a disc, not a quad: bright
  *     core, transparent rim, transparent outside the ellipse.
  *  3. The SHADER SOURCE STRINGS — no compiler cross-checks the GLSL/WGSL twins,
@@ -18,7 +19,9 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   EXTRAGALACTIC_LY,
+  FIGURE_GONE_LY,
   FURNITURE_GONE_LY,
+  figureVisibility,
   frameLadderFade,
   furnitureVisibility,
   localFieldVisibility,
@@ -61,6 +64,43 @@ describe("localFieldVisibility (D2.2 — the extragalactic collapse)", () => {
     expect(localFieldVisibility(2400)).toBe(1); // the star field's linear reach
     expect(localFieldVisibility(EXTRAGALACTIC_LY)).toBe(0);
     expect(localFieldVisibility(17_938_580)).toBe(0); // nbg-a0554-07
+  });
+});
+
+describe("figureVisibility (D2.3 — constellation dissolve, ly 50→500)", () => {
+  it("is full at Earth/Mars-scale distances and gone past 500 ly", () => {
+    expect(figureVisibility(0)).toBe(1); // home
+    expect(figureVisibility(2.4e-5)).toBe(1); // Mars
+    expect(figureVisibility(8.6)).toBe(1); // Sirius — well inside the dissolve start
+    expect(figureVisibility(50)).toBe(1); // FIGURE_FADE_START_LY itself
+    expect(figureVisibility(FIGURE_GONE_LY)).toBe(0); // 500 ly
+    expect(figureVisibility(1344)).toBe(0); // M42 — well past gone
+    expect(figureVisibility(EXTRAGALACTIC_LY)).toBe(0);
+  });
+
+  it("is strictly between 0 and 1 inside the dissolve band", () => {
+    expect(figureVisibility(433)).toBeGreaterThan(0); // Polaris
+    expect(figureVisibility(433)).toBeLessThan(1);
+    expect(figureVisibility(275)).toBeGreaterThan(0); // band midpoint
+    expect(figureVisibility(275)).toBeLessThan(1);
+  });
+
+  it("decreases monotonically across the fade window", () => {
+    let prev = figureVisibility(50);
+    for (let ly = 50; ly <= 500; ly += 10) {
+      const v = figureVisibility(ly);
+      expect(v).toBeLessThanOrEqual(prev + 1e-9);
+      prev = v;
+    }
+  });
+
+  it("is a threshold distinct from and nearer than localFieldVisibility's", () => {
+    // At M42 (1,344 ly) the figures are gone on their OWN schedule while the
+    // rest of the local field (band/star field) is still fully present —
+    // this is the whole point of D2.3 being a separate mechanism from D2.2's
+    // extragalactic collapse.
+    expect(figureVisibility(1344)).toBe(0);
+    expect(localFieldVisibility(1344)).toBe(1);
   });
 });
 
@@ -145,6 +185,16 @@ describe("ijStar uLayerFade — the shared per-layer fade (both twins)", () => {
     // Adjacent to uTime, so the belt orbital-clock test's pinned substring
     // ("uWarpDir",\n ... "uTime",) is left intact — see asteroid-dr3-belt.test.
     expect(engineSrc).toContain('"uTime",\n          "uLayerFade",');
+  });
+
+  it("D2.3: the constellation alpha is additionally scaled by _figureFade", () => {
+    // The figures have no shader-level fade uniform (they're driven CPU-side
+    // through the existing uColor alpha channel — see the `uColor(...)` call
+    // this pins), so the regression guard is the multiply itself, not a WGSL
+    // string.
+    expect(engineSrc).toContain(
+      "0.34 * (1 - beta) * this._localFieldFade * this._figureFade;",
+    );
   });
 });
 

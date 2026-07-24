@@ -231,3 +231,56 @@ compression, is D2.3's scope — this addendum records only what D2.1/D2.2 shipp
    of the same class as entry 1's exposure — honest geometry, licensed minimum size.
 
 Full detail and the term-by-term audit: [D2 realism review](2026-07-23-pf11-d2-frame-ladder-realism-review.md).
+
+---
+
+## Addendum — the full 4-entry ledger, completed by D2.3 (2026-07-23, Astra)
+
+D2.3 adds the constellation figures' own dissolve (destination ly 50→500 — a threshold nearer
+and independent of `localFieldVisibility`'s extragalactic collapse) and, per the implementation
+plan, formalises the brief's original 4-entry proposal plus a cross-reference to the Reinhard
+compression (ADR-0010). Two of the five were already given ledger numbers at their own point of
+origin — cited here, not re-derived, per the standing "no relitigating settled entries" rule:
+
+| #       | Declared departure                                                             | Magnitude                                                           | Status                                                                                     |
+| ------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| **L14** | Belt overbrightness — structure real, exposure licensed                        | ~10⁶×                                                               | NEW here; gated to the solar system by D2.1                                                |
+| **L15** | Seconds-scale warp durations — shape of journey (accel/flip/decel) honest      | ~1.2×10⁵× (Mars, 2.0 d → 1.4 s) to ~1.2×10⁸× (M42, 14.0 yr → 3.6 s) | NEW here                                                                                   |
+| **L16** | Band + star field persist during in-galaxy travel without per-ly re-projection | error ≤ ~2°/kly, invisible                                          | NEW here (constellation figures now split out — see L17)                                   |
+| L9      | Intro launch timing compression (~8 min ascent → ~8 s)                         | ~60×                                                                | Already ledgered — [D1.3 ascent review](2026-07-23-pf11-d1.3-ascent-realism-review.md)     |
+| L1      | Reinhard ratio compression (true 9.04:1 → 3.38:1 post-curve)                   | −63% on the ratio                                                   | Already ledgered — [D6.1 exposure review](2026-07-23-pf11-d6.1-exposure-realism-review.md) |
+
+**L15 derivation:** `warpDurationForLy` (ship-dynamics.ts) interpolates linearly in `log10(ly+1)`
+between `WARP_MIN_MS` (1.4 s) and `WARP_MAX_MS` (4.2 s), clamped past 10,000 ly. Mars
+(~2.37×10⁻⁵ ly) sits at the floor, 1.4 s, against the brachistochrone honesty table's 2.0-day
+(172,800 s) 1 g transit — ×1.23×10⁵. M42 (1,344 ly) computes to `1400 + 2800×(log10(1345)/4)` ≈
+3.59 s, against the table's 14.0 yr (4.42×10⁸ s) ship-time — ×1.23×10⁸. The compression is
+**not a single constant** — it grows with distance because the render duration is only
+log-distance-scaled while honest transit time is linear-plus-relativistic — but the _shape_ of
+the journey (accel/flip/decel) stays true at every distance, which is the license being declared.
+
+**L16 note (why it now excludes the figures):** the ≤2°/kly figure was computed for the band and
+star field's own depths (the star field holds real positions to ~2,400 ly; the band's structure
+sits at kpc scales). Before D2.3 the constellation figures rode along under this same license
+uncritically. They should not have: a figure's stars sit far closer together in distance than the
+band's structure (see L17) — persisting them without a nearer dissolve was the more casual half of
+this entry. D2.3 narrows L16 to the band + star field alone and gives the figures their own,
+honest threshold.
+
+**L17 (NEW) — the ly 50→500 dissolve window is a declared threshold, not a derived one.**
+Constellation-figure stars span a wide range of real depths — Capella 43 ly, Merak 79.7 ly, Dubhe
+123 ly, Polaris 433 ly, Spica ~250 ly, Betelgeuse ~548 ly, Rigel ~860 ly, Antares ~550 ly, up to
+Alnilam/Deneb in the 2,000-2,600 ly range — so there is no single ly at which "the constellations"
+become wrong; each one goes first as the camera's lateral displacement `x` approaches its own
+member stars' depth `d` (small-angle parallax, Δθ ≈ x/d). At `x` = 50 ly, a **near** figure built
+from ~80-125 ly stars (Ursa Major) is already visibly distorted (Δθ ≈ 50/100 ≈ 0.5 rad ≈ 29°) —
+50 ly is generous, not conservative, for that case. A **far** figure built from ~900-2,000 ly
+stars (Orion) is barely touched at 500 ly (Δθ ≈ 500/900 ≈ 0.56 rad ≈ 32° at the _edge_ of the
+window — still a meaningful shift, so the window errs toward removing rather than lingering). A
+single global window necessarily either dissolves some figures a little late or a little early
+relative to their true member-star depths — this is the price of one CPU-side alpha term driving
+every figure identically rather than per-figure depth-aware fades. **Verdict: DECLARED LICENSE**
+(SIMPLIFIED mechanism, not BROKEN PHYSICS — every real constellation genuinely does become
+meaningless somewhere in the tens-to-low-thousands-of-ly range this window covers; the window
+just isn't tuned per-figure). Recorded for any future per-figure refinement, not a defect to fix
+now — see the [REALISM-AUDIT](2026-07-23-pf11-d2-frame-ladder-realism-review.md#realism-audit--d23-constellation-dissolve-2026-07-23-astra).

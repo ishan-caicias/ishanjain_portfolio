@@ -393,6 +393,21 @@ brief §1). Record the four ledger entries the brief proposes (belt overbrightne
 seconds-scale warps; band/figure persistence during in-galaxy travel; intro timing compression).
 **Exit:** ledger lives in the realism map / analysis doc; E2E covers figure fade.
 
+**✅ DELIVERED 2026-07-23 — [TR-091](../test-reports/TR-091.md).** The figures now dissolve on
+their own `ly 50→500` schedule (`_figureFade`, independent of D2.2's extragalactic collapse),
+driven through the same fade-scheduler pattern D2.1/D2.2 established — full at Mars, partial at
+Polaris (433 ly), gone by M42 (1,344 ly). The full 4-entry ledger the brief proposed is now
+formalised (L14-L17) as a dated addendum on the
+[science brief](../analysis/2026-07-22-pf11-sky-frames-and-travel-science-brief.md#addendum--the-full-4-entry-ledger-completed-by-d23-2026-07-23-astra),
+cross-referencing the two entries already ledgered elsewhere (L9 intro timing at D1.3, L1
+Reinhard compression at D6.1) rather than duplicating them. Astra's
+[REALISM-AUDIT](../analysis/2026-07-23-pf11-d2-frame-ladder-realism-review.md#realism-audit--d23-constellation-dissolve-2026-07-23-astra)
+grades the split-schedule mechanism ACCURATE and the `ly 50→500` window itself DECLARED LICENSE
+(L17, new) — real constellation-figure stars span roughly 80 to 2,600 ly, so a single scene-wide
+constant is necessarily a documented approximation, not a per-figure-derived threshold; the
+audit's numbers appendix computes the parallax order-of-magnitude for a near (Ursa Major) and a
+far (Orion) figure to show why. **Phase D2 is now complete.**
+
 ## Phase D3 — Flight model v4: graceful, legible deceleration (owner R6/R11)
 
 **Audited baseline:** velocity profile is a pure triangle (`warpEase` derivative — no cruise);
