@@ -50,6 +50,14 @@ import {
   SHIP_BASE_FOV,
   SHIP_NDC_Y_OFFSET,
   SHIP_VIEW_DEPTH,
+  warpFovMult,
+  WARP_FOV_GAIN,
+  WARP_FOV_MAX_MULT,
+  advanceWarpV4,
+  warpEaseV4,
+  warpSpeedNorm,
+  warpFlipRate,
+  FLIP_MIN_MS,
   type PlumeParams,
   type SpringState,
 } from "@/lib/ship-dynamics";
@@ -408,6 +416,225 @@ describe("PF-08 F2 chase camera", () => {
       expect(maxB).toBeGreaterThanOrEqual(5);
       expect(chaseOffsetAt(0.55)[2]).toBeGreaterThan(chaseOffsetAt(0)[2]);
       expect(chaseOffsetAt(0.55)[2]).toBeGreaterThan(chaseOffsetAt(1)[2]);
+    });
+
+    // --- PF-11 D3.1: deceleration legibility (the anti-loom invariant). ---
+    it("D3.1: OPENS the chase during early braking (camera eases back)", () => {
+      // The braking pull-back beat: just past the flip the camera drifts
+      // further astern, so the ship recedes rather than looming. The global
+      // maximum standoff lives in the braking half, at k≈0.72.
+      expect(chaseOffsetAt(0.72)[2]).toBeGreaterThan(chaseOffsetAt(0.55)[2]);
+    });
+
+    it("D3.1: the ship NEVER exceeds its arrival size while braking (no loom)", () => {
+      // The core fix for owner complaint R6. Through the whole braking phase
+      // the back-distance stays ≥ SHIP_VIEW_DEPTH (the arrival framing), so the
+      // ship is never larger mid-brake than at the dock — it only reaches
+      // arrival size at exactly k=1. The pre-D3.1 table dived to 2.2 here,
+      // making the ship 37% larger than arrival while "slowing".
+      for (let k = 0.53; k < 1; k += 0.005) {
+        expect(chaseOffsetAt(k)[2]).toBeGreaterThanOrEqual(SHIP_VIEW_DEPTH);
+      }
+    });
+
+    it("D3.1: settles monotonically from the braking peak to arrival framing", () => {
+      // After the k≈0.72 pull-back peak the standoff only decreases, so the
+      // final approach reads as follow-through into the dock, never a late
+      // re-acceleration.
+      let prev = chaseOffsetAt(0.72)[2];
+      for (let k = 0.72; k <= 1; k += 0.005) {
+        const b = chaseOffsetAt(k)[2];
+        expect(b).toBeLessThanOrEqual(prev + 1e-9);
+        prev = b;
+      }
+      expect(chaseOffsetAt(1)[2]).toBe(SHIP_VIEW_DEPTH);
+    });
+  });
+
+  describe("warp profile v4 (D3.2 / ADR-0011 — coast plateau + flip floor)", () => {
+    const KA = 0.44;
+    const KD = 0.56;
+
+    it("warpFlipRate delivers the screen-time floor, and only when needed", () => {
+      // Window = 12% of the journey. Every current destination (1400-4200 ms)
+      // is far too short to clear a 1500 ms floor unaided, so r < 1 always.
+      expect(warpFlipRate(1400, KA, KD)).toBeCloseTo((0.12 * 1400) / 1500, 9);
+      expect(warpFlipRate(4200, KA, KD)).toBeCloseTo((0.12 * 4200) / 1500, 9);
+      expect(warpFlipRate(4200, KA, KD)).toBeLessThan(1);
+      // A hypothetical journey long enough needs no dilation at all.
+      expect(warpFlipRate(FLIP_MIN_MS / 0.12, KA, KD)).toBeCloseTo(1, 9);
+      expect(warpFlipRate(60000, KA, KD)).toBe(1);
+    });
+
+    it("the floor math is exact: window wall-clock = max(0.12·dur, FLIP_MIN_MS)", () => {
+      for (const dur of [1400, 2088, 3246, 3590, 4200]) {
+        const r = warpFlipRate(dur, KA, KD);
+        const windowMs = ((KD - KA) * dur) / r;
+        expect(windowMs).toBeCloseTo(Math.max((KD - KA) * dur, FLIP_MIN_MS), 6);
+      }
+    });
+
+    it("warpEaseV4 hits its endpoints exactly and stays symmetric for every r", () => {
+      // Symmetry is what preserves the arrival invariants and the existing
+      // ease-shape expectations regardless of how hard the window is dilated.
+      for (const r of [1, 0.5, 0.336, 0.112]) {
+        expect(warpEaseV4(0, r, KA, KD)).toBeCloseTo(0, 12);
+        expect(warpEaseV4(1, r, KA, KD)).toBeCloseTo(1, 12);
+        expect(warpEaseV4(0.5, r, KA, KD)).toBeCloseTo(0.5, 12);
+      }
+    });
+
+    it("warpEaseV4 is monotonic — the ship never reverses along the path", () => {
+      for (const r of [1, 0.336]) {
+        let prev = -1;
+        for (let k = 0; k <= 1.0001; k += 0.002) {
+          const s = warpEaseV4(k, r, KA, KD);
+          expect(s).toBeGreaterThanOrEqual(prev - 1e-12);
+          prev = s;
+        }
+      }
+    });
+
+    it("has a genuine CONSTANT-VELOCITY coast across the flip window", () => {
+      // The whole point of v4 over the triangle: ds/dk is FLAT through the
+      // window, so a coasting ship (engines cut) does not slow down.
+      const r = 0.336;
+      const h = 1e-5;
+      const slopeAt = (k: number) =>
+        (warpEaseV4(k + h, r, KA, KD) - warpEaseV4(k - h, r, KA, KD)) / (2 * h);
+      const mid = slopeAt(0.5);
+      for (const k of [0.46, 0.48, 0.5, 0.52, 0.54]) {
+        expect(slopeAt(k)).toBeCloseTo(mid, 6);
+      }
+    });
+
+    it("keeps WORLD velocity continuous across both window edges (the anti-lurch)", () => {
+      // World velocity ∝ ds/dk · dk/dt, and dk/dt is multiplied by r inside the
+      // window. The coast slope is m/r precisely so this product is continuous
+      // — ADR-0011's rejected option 2 is what happens without it.
+      const r = 0.336;
+      const h = 1e-5;
+      const slopeAt = (k: number) =>
+        (warpEaseV4(k + h, r, KA, KD) - warpEaseV4(k - h, r, KA, KD)) / (2 * h);
+      // Probed algebraically rather than by sampling either side of the join:
+      // the burn slopes are LINEAR (m·k/KA and m·(1−k)/(1−KD)), so their
+      // mid-segment slope is exactly m/2 — which recovers m without ever
+      // evaluating a finite difference across the piecewise boundary.
+      const mFromAccel = 2 * slopeAt(KA / 2);
+      const mFromBrake = 2 * slopeAt((1 + KD) / 2);
+      const coastSlope = slopeAt(0.5); // flat, = m/r
+      // World velocity = ds/dk · dk/dt. Inside the window dk/dt carries the
+      // extra factor r, so continuity is exactly `coastSlope · r === m`.
+      expect(coastSlope * r).toBeCloseTo(mFromAccel, 6);
+      expect(coastSlope * r).toBeCloseTo(mFromBrake, 6);
+    });
+
+    it("advanceWarpV4: a single dt-capped frame can NEVER jump the flip window", () => {
+      // THE review finding (TR-094): with the rate picked once from frame-start
+      // k, a 0.5 s capped frame starting just below the window advanced
+      // dk ≈ 0.13 > the 0.12 window at rate 1 — one slow frame skipped the
+      // whole flip, the exact TR-081 class the floor exists to kill. The
+      // piecewise integrator splits the step at the boundary and spends the
+      // remainder at rate r, so even the worst frame lands INSIDE the window.
+      const dur = 3590; // m42
+      const r = warpFlipRate(dur, KA, KD);
+      const k = advanceWarpV4(KA - 0.001, 0.5, dur, 1, r, KA, KD);
+      expect(k).toBeGreaterThan(KA);
+      expect(k).toBeLessThan(KD); // cannot exit the window in one step
+    });
+
+    it("advanceWarpV4: the window consumes its floored wall-clock exactly, however frames land", () => {
+      // Integrate a journey in deliberately awkward chunks (mixed dt sizes,
+      // boundaries straddled) and measure the wall-clock spent with k inside
+      // the window — it must equal max(0.12·dur, FLIP_MIN_MS) to sub-frame
+      // accuracy, which is the floor's whole contract.
+      const dur = 3590;
+      const r = warpFlipRate(dur, KA, KD);
+      const dts = [0.5, 0.013, 0.23, 0.047, 0.11, 0.5, 0.017];
+      let k = 0;
+      let t = 0;
+      let tIn = 0;
+      let i = 0;
+      while (k < 1) {
+        const dt = dts[i++ % dts.length];
+        const k1 = advanceWarpV4(k, dt, dur, 1, r, KA, KD);
+        // time attribution: fraction of dt spent in-window, from the k-budget
+        // consumed per segment (rate 1 outside, r inside) — reconstruct by
+        // splitting the step the same way the integrator does.
+        let budget = (dt / (dur / 1000)) * 1;
+        let kk = k;
+        while (budget > 1e-12 && kk < k1 - 1e-12) {
+          const inWin = kk >= KA && kk < KD;
+          const rate = inWin ? r : 1;
+          const boundary = kk < KA ? KA : inWin ? KD : 1;
+          const dk = Math.min(budget * rate, boundary - kk, k1 - kk);
+          const dtSeg = (dk / rate) * (dur / 1000);
+          if (inWin) tIn += dtSeg;
+          kk += dk;
+          budget -= dk / rate;
+        }
+        t += dt;
+        k = k1;
+        expect(i).toBeLessThan(10000);
+      }
+      const expectedWindowS = Math.max(0.12 * dur, FLIP_MIN_MS) / 1000;
+      expect(tIn).toBeCloseTo(expectedWindowS, 1);
+      void t;
+    });
+
+    it("advanceWarpV4 degenerates to the plain advance when r = 1", () => {
+      for (const [k0, dt] of [
+        [0, 0.1],
+        [0.3, 0.25],
+        [0.5, 0.5],
+        [0.9, 0.2],
+      ] as const) {
+        expect(advanceWarpV4(k0, dt, 2000, 0.8, 1, KA, KD)).toBeCloseTo(
+          Math.min(1, k0 + (dt / 2) * 0.8),
+          9,
+        );
+      }
+    });
+
+    it("warpSpeedNorm ramps in, HOLDS peak through the coast, ramps out", () => {
+      expect(warpSpeedNorm(0, KA, KD)).toBeCloseTo(0, 12);
+      expect(warpSpeedNorm(1, KA, KD)).toBeCloseTo(0, 12);
+      // The plateau — this is the cue fix. Under the old dsdk triangle these
+      // sagged either side of k=0.5, telling the viewer the coasting ship was
+      // slowing down.
+      for (const k of [KA, 0.47, 0.5, 0.53, KD]) {
+        expect(warpSpeedNorm(k, KA, KD)).toBeCloseTo(1, 12);
+      }
+      expect(warpSpeedNorm(KA / 2, KA, KD)).toBeCloseTo(0.5, 12);
+      expect(warpSpeedNorm((1 + KD) / 2, KA, KD)).toBeCloseTo(0.5, 12);
+    });
+  });
+
+  describe("warpFovMult (D3.1 — the warp lens breathing cue)", () => {
+    it("is base (1.0) at the journey ends where dsdk = 0", () => {
+      expect(warpFovMult(0)).toBe(1);
+    });
+
+    it("peaks at +6% at the mid-journey speed peak (dsdk = 2)", () => {
+      // dsdk = 4k / 4(1−k) peaks at 2 (k=0.5). mult = 1 + GAIN·dsdk/2.
+      expect(warpFovMult(2)).toBeCloseTo(1 + WARP_FOV_GAIN, 12);
+      expect(warpFovMult(2)).toBeCloseTo(1.06, 12);
+    });
+
+    it("increases monotonically with apparent speed up to the clamp", () => {
+      let prev = warpFovMult(0);
+      for (let d = 0; d <= 2; d += 0.05) {
+        const m = warpFovMult(d);
+        expect(m).toBeGreaterThanOrEqual(prev - 1e-12);
+        prev = m;
+      }
+    });
+
+    it("never exceeds the safety clamp", () => {
+      // The formula peaks at 1.06 for the real dsdk∈[0,2]; the clamp is a rail
+      // against any future gain/curve change feeding a larger value.
+      expect(warpFovMult(100)).toBe(WARP_FOV_MAX_MULT);
+      expect(warpFovMult(2)).toBeLessThanOrEqual(WARP_FOV_MAX_MULT);
     });
   });
 

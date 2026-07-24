@@ -18,12 +18,17 @@
  * at the stern (wrapper −Z) and extend backwards, and the whole wrapper is
  * oriented by pointing its +Z along the travel direction.
  *
- * FLIP-AND-BURN. The warp HUD's phase thresholds (accel < 0.47, flip < 0.53,
- * then decel — babylon-engine.ts `wphase`) now drive the HULL, not just the
- * readout: `flipPhase(k)` swings the ship 180° across the flip window, so the
- * decel burn is a real retro burn — nose backwards, plume toward the
- * destination. The plume phase functions receive `burning` on both burn
- * segments and `coasting` across the flip, exactly like the live engine.
+ * FLIP-AND-BURN. The warp HUD's phase thresholds (accel < WARP_ACCEL_END,
+ * flip < WARP_DECEL_START, then decel — babylon-engine.ts `wphase`) drive the
+ * HULL, not just the readout: `flipPhase(k)` swings the ship 180° across the
+ * flip window, so the decel burn is a real retro burn — nose backwards, plume
+ * toward the destination.
+ *
+ * PF-11 D3.2 widened that window to [0.44, 0.56] and gave it a screen-time
+ * floor (ADR-0011), then spent it as a five-beat manoeuvre: burn cutoff,
+ * drift beat, C² rotation across a SUB-window, settle beat, retro relight.
+ * The plume gained an eased cutoff/relight envelope on top of its boolean
+ * phases — additive, so non-warp callers are untouched.
  */
 import {
   buildPlumeVertices,
@@ -37,26 +42,75 @@ import {
 } from "./ship-dynamics";
 
 /** Warp-fraction thresholds shared with the HUD readout (babylon-engine.ts
- * `wphase`) — exported so hull choreography and HUD can't drift apart. */
-export const WARP_ACCEL_END = 0.47;
-export const WARP_DECEL_START = 0.53;
+ * `wphase`) — exported so hull choreography and HUD can't drift apart.
+ *
+ * PF-11 D3.2 widened the flip window 0.47/0.53 → 0.44/0.56 (12% of the
+ * journey). The window is also where ADR-0011's v4 profile holds a
+ * constant-velocity coast and where k's advance is slowed to buy the
+ * FLIP_MIN_MS screen-time floor. `wphase` reads these same constants (D3.1),
+ * so the HUD label boundaries moved with the window automatically. */
+export const WARP_ACCEL_END = 0.44;
+export const WARP_DECEL_START = 0.56;
 
-/** 0 while accelerating, ramps 0→1 across the flip window, 1 through the
- * decel burn — the hull's 180° flip-and-burn rotation fraction. Smoothstep
- * eased so the flip reads as a deliberate manoeuvre, not a snap. */
+/* The flip window is not all rotation. Vega's D3.2 beat sheet spends it as
+ * cutoff → drift beat → ROTATION → settle beat → relight, because three
+ * back-to-back state changes read as one blur: the still beats on either side
+ * of the turn are what make the cutoff and the relight legible as separate
+ * events. The hull therefore rotates across a SUB-window, ~1.0 s of the
+ * floored 1.5 s. */
+/** Hull rotation starts here (after the burn has died and a drift beat). */
+export const FLIP_ROT_START = 0.465;
+/** Hull rotation completes here (leaving a settle beat before relight). */
+export const FLIP_ROT_END = 0.545;
+
+/** 0 while accelerating, ramps 0→1 across the ROTATION sub-window, 1 through
+ * the decel burn — the hull's 180° flip-and-burn rotation fraction.
+ *
+ * PF-11 D3.2: smootherstep (C²) rather than smoothstep (C¹) — zero angular
+ * velocity AND zero angular acceleration at both ends, so the turn starts and
+ * lands without a jerk for the chase-look damper to fight. */
 export function flipPhase(k: number): number {
-  if (k <= WARP_ACCEL_END) return 0;
-  if (k >= WARP_DECEL_START) return 1;
-  const t = (k - WARP_ACCEL_END) / (WARP_DECEL_START - WARP_ACCEL_END);
+  if (k <= FLIP_ROT_START) return 0;
+  if (k >= FLIP_ROT_END) return 1;
+  const t = (k - FLIP_ROT_START) / (FLIP_ROT_END - FLIP_ROT_START);
+  return t * t * t * (t * (6 * t - 15) + 10);
+}
+
+/** Eased 1→0→1 main-drive envelope across the flip (PF-11 D3.2).
+ *
+ * The plume phase model was a hard boolean — full burn one frame, coast the
+ * next. Astra §3.2 asks for ~0.3 s shoulders: the drive dies over the cutoff
+ * beat and relights over the first stretch of the brake. `relightK` is the
+ * relight shoulder expressed in k (the engine converts 0.3 s using the live
+ * warp duration, and caps it so a short hop compresses the shoulder rather
+ * than eating its whole brake).
+ *
+ * Returns 1 = full burn, 0 = engines cut. */
+export const FLIP_CUTOFF_END = 0.452;
+
+export function burnEnvelope(k: number, relightK: number): number {
+  if (k <= WARP_ACCEL_END) return 1;
+  if (k < FLIP_CUTOFF_END) {
+    const t = (k - WARP_ACCEL_END) / (FLIP_CUTOFF_END - WARP_ACCEL_END);
+    return 1 - t * t * (3 - 2 * t);
+  }
+  if (k <= WARP_DECEL_START) return 0;
+  const span = Math.max(relightK, 1e-4);
+  const t = Math.min(1, (k - WARP_DECEL_START) / span);
   return t * t * (3 - 2 * t);
 }
 
 /** PlumeParams for a warp fraction — burn on both accel and decel segments,
- * engines cut across the flip, matching the live engine's phase model. */
+ * engines cut across the flip, matching the live engine's phase model.
+ *
+ * PF-11 D3.2 adds the optional eased `env` (see `burnEnvelope`). It is
+ * ADDITIVE: callers that don't pass `relightK` get the original boolean
+ * behaviour, so every existing plume expectation holds. */
 export function plumeParamsForWarp(
   k: number,
   reduced: boolean,
   tS: number,
+  relightK?: number,
 ): PlumeParams {
   const coasting = k > WARP_ACCEL_END && k < WARP_DECEL_START;
   return {
@@ -65,6 +119,7 @@ export function plumeParamsForWarp(
     parked: false,
     reduced,
     t: tS,
+    ...(relightK == null || reduced ? {} : { env: burnEnvelope(k, relightK) }),
   };
 }
 

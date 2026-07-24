@@ -18,6 +18,10 @@ import {
   EMBER_VERTEX_GLSL,
   EMBER_VERTEX_WGSL,
   flipPhase,
+  FLIP_ROT_START,
+  FLIP_ROT_END,
+  FLIP_CUTOFF_END,
+  burnEnvelope,
   MAX_EMBERS,
   plumeBuffersForWrapper,
   plumeIndices,
@@ -57,17 +61,109 @@ describe("flipPhase", () => {
       expect(f).toBeLessThanOrEqual(1);
       prev = f;
     }
-    expect(flipPhase((WARP_ACCEL_END + WARP_DECEL_START) / 2)).toBeCloseTo(
-      0.5,
-      6,
-    );
+    // NAMED CHANGE (PF-11 D3.2, #15): the midpoint probe now uses the ROTATION
+    // sub-window, not the whole flip window. D3.2 spends the window as
+    // cutoff → drift → rotation → settle → relight, so the hull is only
+    // turning across [FLIP_ROT_START, FLIP_ROT_END]; the flip window's own
+    // midpoint is no longer the half-rotated pose. Same property asserted
+    // (half-way through the turn = half-flipped), measured where the turn is.
+    expect(flipPhase((FLIP_ROT_START + FLIP_ROT_END) / 2)).toBeCloseTo(0.5, 6);
   });
 
   it("matches the HUD's own phase thresholds exactly", () => {
-    // babylon-engine.ts `wphase`: accel < 0.47, flip < 0.53 — a drift here
-    // would show the hull burning while the HUD says FLIP & BURN
-    expect(WARP_ACCEL_END).toBe(0.47);
-    expect(WARP_DECEL_START).toBe(0.53);
+    // babylon-engine.ts `wphase` reads these very constants (D3.1), so a drift
+    // here would show the hull burning while the HUD says FLIP & BURN.
+    // NAMED CHANGE (PF-11 D3.2, #15): widened 0.47/0.53 → 0.44/0.56 — the
+    // delivery plan's own D3.2 spec (12% of the journey), paired with the
+    // ADR-0011 screen-time floor. The assertion still pins the exact shipped
+    // window; only the value the plan asks for changed.
+    expect(WARP_ACCEL_END).toBe(0.44);
+    expect(WARP_DECEL_START).toBe(0.56);
+  });
+
+  it("D3.2: rotates on a C² curve — smootherstep, not smoothstep", () => {
+    // Asserted by the curve's SIGNATURE near its ends rather than by a nested
+    // finite difference across the clamp join (that stencil straddles the
+    // piecewise boundary and reports the cubic growth as a false spike).
+    // smootherstep leaves the edge as 10t³ (f'=f''=0); a C¹ smoothstep leaves
+    // it as 3t² — at t=0.01 that is 1e-5 vs 3e-4, a 30× separation.
+    const span = FLIP_ROT_END - FLIP_ROT_START;
+    for (const t of [0.01, 0.02]) {
+      const atStart = flipPhase(FLIP_ROT_START + t * span);
+      // f/t³ → 10 as t→0 (the exact curve is 10t³ − 15t⁴ + 6t⁵, so the ratio
+      // sits just under 10 for small t). A C¹ smoothstep would put f/t³ at
+      // 3/t — 300 at t=0.01 — so this band is a decisive discriminator.
+      expect(atStart / t ** 3).toBeGreaterThan(9.5);
+      expect(atStart / t ** 3).toBeLessThan(10);
+      expect(atStart).toBeLessThan(3 * t ** 2 * 0.2); // decisively not smoothstep
+      // Symmetric at the landing end (1 − f mirrors the same cubic approach).
+      const atEnd = 1 - flipPhase(FLIP_ROT_END - t * span);
+      expect(atEnd / t ** 3).toBeGreaterThan(9.5);
+      expect(atEnd / t ** 3).toBeLessThan(10);
+    }
+    // Angular velocity vanishes at both ends (one-sided probe, inside only).
+    const h = 1e-5;
+    expect(
+      (flipPhase(FLIP_ROT_START + h) - flipPhase(FLIP_ROT_START)) / h,
+    ).toBeLessThan(1e-3);
+    expect(
+      (flipPhase(FLIP_ROT_END) - flipPhase(FLIP_ROT_END - h)) / h,
+    ).toBeLessThan(1e-3);
+  });
+
+  it("D3.2: the rotation sits INSIDE the flip window, leaving drift and settle beats", () => {
+    // The beats are the choreography: the hull must not start turning the
+    // instant the burn cuts, nor still be turning when the retro burn lights.
+    expect(FLIP_ROT_START).toBeGreaterThan(WARP_ACCEL_END);
+    expect(FLIP_ROT_END).toBeLessThan(WARP_DECEL_START);
+    expect(flipPhase(WARP_ACCEL_END + 1e-6)).toBe(0);
+    expect(flipPhase(WARP_DECEL_START - 1e-6)).toBe(1);
+  });
+});
+
+describe("burnEnvelope (D3.2 — eased drive cutoff and retro relight)", () => {
+  const RELIGHT = 0.08;
+
+  it("is full burn through the accel and cut across the coast", () => {
+    expect(burnEnvelope(0, RELIGHT)).toBe(1);
+    expect(burnEnvelope(WARP_ACCEL_END, RELIGHT)).toBe(1);
+    // Cut by the end of the cutoff shoulder, and stays cut for the whole
+    // rotation — a ship that is turning must not be under thrust.
+    for (const k of [FLIP_CUTOFF_END, 0.5, FLIP_ROT_END, WARP_DECEL_START]) {
+      expect(burnEnvelope(k, RELIGHT)).toBe(0);
+    }
+  });
+
+  it("fades the cutoff and ramps the relight rather than snapping", () => {
+    const mid = (WARP_ACCEL_END + FLIP_CUTOFF_END) / 2;
+    const c = burnEnvelope(mid, RELIGHT);
+    expect(c).toBeGreaterThan(0);
+    expect(c).toBeLessThan(1);
+    const r = burnEnvelope(WARP_DECEL_START + RELIGHT / 2, RELIGHT);
+    expect(r).toBeGreaterThan(0);
+    expect(r).toBeLessThan(1);
+    // Fully relit once the shoulder is spent, and stays lit into the brake.
+    expect(burnEnvelope(WARP_DECEL_START + RELIGHT, RELIGHT)).toBeCloseTo(1, 6);
+    expect(burnEnvelope(0.9, RELIGHT)).toBeCloseTo(1, 6);
+  });
+
+  it("is monotonic within each shoulder (no flicker)", () => {
+    let prev = 1;
+    for (let k = WARP_ACCEL_END; k <= FLIP_CUTOFF_END; k += 0.0005) {
+      const v = burnEnvelope(k, RELIGHT);
+      expect(v).toBeLessThanOrEqual(prev + 1e-12);
+      prev = v;
+    }
+    prev = 0;
+    for (
+      let k = WARP_DECEL_START;
+      k <= WARP_DECEL_START + RELIGHT;
+      k += 0.0005
+    ) {
+      const v = burnEnvelope(k, RELIGHT);
+      expect(v).toBeGreaterThanOrEqual(prev - 1e-12);
+      prev = v;
+    }
   });
 });
 

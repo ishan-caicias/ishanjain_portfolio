@@ -18,6 +18,7 @@ import {
   shakeOffset,
   visualDriftStep,
   WARP_FIELD,
+  minSlowAlongSegment,
   warpSlowFactor,
   wasmSimdSupported,
 } from "@/lib/babylon-asteroids";
@@ -204,6 +205,57 @@ describe("beltDensityAt (B4 step 2)", () => {
       expect(d).toBeLessThanOrEqual(prev + 1e-12);
       prev = d;
     }
+  });
+});
+
+describe("minSlowAlongSegment (PF-11 D3.2 — frame-rate-independent slowdown record)", () => {
+  const b = ASTEROID_BELT;
+
+  it("catches the belt core even when both segment endpoints are far outside the tube", () => {
+    // THE defect this function exists to fix: at ~2 fps (measured SwiftShader
+    // load) a single frame steps ~140 world units and a point sample straddles
+    // the whole tube. A radial segment through the spine, endpoints ±150 wu
+    // (density ~0 at both), must still report the spine's full slowdown.
+    const min = minSlowAlongSegment(
+      b.center[0] + b.radius - 150,
+      b.center[1],
+      b.center[2],
+      b.center[0] + b.radius + 150,
+      b.center[1],
+      b.center[2],
+    );
+    expect(min).toBeLessThan(1 - WARP_FIELD.maxSlow + 0.02); // ≈ 0.45
+  });
+
+  it("degenerates to the point sample for a zero-length segment", () => {
+    const x = b.center[0] + b.radius + 40;
+    const point = warpSlowFactor(beltDensityAt(x, b.center[1], b.center[2]));
+    expect(
+      minSlowAlongSegment(
+        x,
+        b.center[1],
+        b.center[2],
+        x,
+        b.center[1],
+        b.center[2],
+      ),
+    ).toBeCloseTo(point, 9);
+  });
+
+  it("is ~1 for a segment that stays far from the tube", () => {
+    expect(minSlowAlongSegment(0, 0, 400, 50, 50, 500)).toBeGreaterThan(0.999);
+  });
+
+  it("never reports below the physical floor (1 - maxSlow)", () => {
+    const min = minSlowAlongSegment(
+      b.center[0] + b.radius,
+      b.center[1],
+      b.center[2] - 50,
+      b.center[0] + b.radius,
+      b.center[1],
+      b.center[2] + 50,
+    );
+    expect(min).toBeGreaterThanOrEqual(1 - WARP_FIELD.maxSlow - 1e-9);
   });
 });
 

@@ -179,7 +179,7 @@ import type { PhysicsBody } from "@babylonjs/core/Physics/v2/physicsBody";
 // binary itself is fetched (same-origin) only when _setupPhysics runs.
 import havokWasmUrl from "@babylonjs/havok/lib/esm/HavokPhysics.wasm?url";
 import {
-  advanceWarpProgress,
+  minSlowAlongSegment,
   ASTEROID_BELT,
   BELT_ORBIT,
   beltDensityAt,
@@ -349,6 +349,10 @@ import {
   SHIMMER_FRAGMENT_GLSL,
   SHIMMER_FRAGMENT_WGSL,
   spawnEmberLocal,
+  WARP_ACCEL_END,
+  WARP_DECEL_START,
+  FLIP_ROT_START,
+  FLIP_ROT_END,
 } from "./babylon-ship";
 import {
   ARRIVE_STANDOFF,
@@ -381,7 +385,11 @@ import {
   stepEmber,
   travelFrame,
   warpDurationForLy,
-  warpEase,
+  advanceWarpV4,
+  warpEaseV4,
+  warpFlipRate,
+  warpFovMult,
+  warpSpeedNorm,
   WARP_MIN_MS,
   type Ember,
 } from "./ship-dynamics";
@@ -592,6 +600,13 @@ const SHOOTING_STAR_CYCLE_S = 5;
  * inside the shell with margin while sitting beyond every world object the
  * camera can park at (deepest curated/SDSS placements ≈ 1360). */
 const IMPOSTOR_DIST = 1500;
+
+/** PF-11 D3.2 — RCS attitude puffs (Vega SHOT-BRIEF). Small, short-lived,
+ * lateral: they must read as cold gas turning the ship, not as engine fire. */
+const RCS_PUFF_COUNT = 5;
+const RCS_PUFF_SPEED = 0.25;
+const RCS_PUFF_SPREAD = 0.06;
+const RCS_PUFF_LIFE = 0.45;
 
 /** idle: parked. aim: launch-turn preview before the burn (position holds).
  * warp: the eased chase-camera flight itself. ascent (PF-11 D1.3): the
@@ -1418,6 +1433,20 @@ class BabylonScene extends HTMLElement {
   /** Stored so pick/projection helpers (called outside the render loop's own
    * closure, e.g. from pointer/keyboard handlers) can reach the camera. */
   private _camera?: FreeCamera;
+  /** The camera's resting field of view (rad), captured once at construction —
+   * the base the PF-11 D3.1 warp FOV breathing widens around. This is the
+   * runtime FreeCamera FOV (~0.8 rad), deliberately NOT SHIP_BASE_FOV (70°,
+   * a ship-mesh scale constant): breathing around the latter would snap the
+   * lens on warp start. */
+  private _baseFov = 0;
+  /** PF-11 D3.2 (ADR-0011): in-window k-rate multiplier for the current
+   * journey — slows k across the flip window so it lasts FLIP_MIN_MS of screen
+   * time. 1 = no dilation (reduced motion, or a journey already long enough). */
+  private _flipRate = 1;
+  /** Relight shoulder expressed in k for the current journey (~0.3 s of
+   * wall-clock, capped so a short hop compresses it rather than eating the
+   * brake). Feeds `plumeParamsForWarp`'s eased burn envelope. */
+  private _relightK = 0.08;
   private _stars?: Mesh;
   private _starMat?: ShaderMaterial;
   // --- PF-11 D2: frame ladder (sky honesty by destination) ---
@@ -1654,6 +1683,14 @@ class BabylonScene extends HTMLElement {
   private _shimmer?: PostProcess;
   // --- GAP-07: ember sparks ---
   private _embers: Ember[] = [];
+  /** PF-11 D3.2: live main-drive envelope (1 burn … 0 cut) — exposed for E2E. */
+  private _burnEnv = 1;
+  /** PF-11 D3.2: one-shot latches for the two RCS bursts (rotation start/end),
+   * reset per journey in `_beginWarp`. */
+  private _rcsFired: [boolean, boolean] = [false, false];
+  /** Bursts queued by the flip choreography, drained by `_emitRcsPuffs` in the
+   * ember pass (where the hull pose and scale are already in hand). */
+  private _rcsPending = 0;
   private _burnPrev = false;
   private _emberMesh?: Mesh;
   private _emberMat?: ShaderMaterial;
@@ -2001,6 +2038,9 @@ class BabylonScene extends HTMLElement {
     // required so the per-frame quatDamp below actually takes effect.
     camera.rotationQuaternion = new Quaternion();
     this._camera = camera;
+    // PF-11 D3.1: remember the resting FOV — the base the warp lens breathes
+    // around (see _baseFov). Captured before any warp can widen it.
+    this._baseFov = camera.fov;
 
     // B2 step 3: real catalog bodies, so travelTo/randomBody have real
     // targets. window.CELESTIAL is guaranteed populated by mount time —
@@ -2394,6 +2434,17 @@ class BabylonScene extends HTMLElement {
       trailWarpSpeed: Math.round(this._trailWarpSpeed * 1000) / 1000,
       trailVisible: this._trailMesh?.isVisible ?? false,
       trailMeshReady: this._trailMesh ? this._trailMesh.isReady(true) : false,
+      // PF-11 D3.1: the live camera FOV (rad) so E2E can prove the warp lens
+      // breathes (widens mid-warp) and relaxes to _baseFov at arrival. The
+      // breathing multiplier over base is the assertable speed cue.
+      fov: this._camera ? Math.round(this._camera.fov * 100000) / 100000 : 0,
+      baseFov: Math.round(this._baseFov * 100000) / 100000,
+      // PF-11 D3.2: flip choreography diagnostics. `flipRate` < 1 means the
+      // screen-time floor is dilating k across the window; `burnEnv` is the
+      // eased main-drive envelope (1 burn … 0 cut) so E2E can prove the drive
+      // actually cuts across the flip and relights on the brake.
+      flipRate: Math.round(this._flipRate * 10000) / 10000,
+      burnEnv: Math.round(this._burnEnv * 1000) / 1000,
       // PF-10 C1: GD-1 connected-trail diagnostics.
       gd1TrailSegments: this._gd1SegmentCount,
       gd1TrailMeshReady: this._gd1Mesh ? this._gd1Mesh.isReady(true) : false,
@@ -4581,8 +4632,13 @@ class BabylonScene extends HTMLElement {
       // integrated progress (B4 step 2) — hull, camera, HUD, and reveal all
       // read the one k that _tickWarp advanced this frame
       const k = w.prog ?? 0;
-      plume = plumeParamsForWarp(k, this._reduced, tS);
-      const e = warpEase(k);
+      // PF-11 D3.2: the eased cutoff/relight envelope rides along additively —
+      // reduced motion passes no relightK, keeping the original boolean plume.
+      plume = plumeParamsForWarp(k, this._reduced, tS, this._relightK);
+      this._burnEnv = plume.env ?? 1;
+      // PF-11 D3.2: hull position uses the same v4 profile as the camera, so
+      // ship and chase can never disagree about where the ship is.
+      const e = warpEaseV4(k, this._flipRate, WARP_ACCEL_END, WARP_DECEL_START);
       const wd = w.dir;
       this._ship.position.set(
         w.from[0] + (w.to[0] - w.from[0]) * e + wd[0] * SHIP_VIEW_DEPTH,
@@ -4591,6 +4647,19 @@ class BabylonScene extends HTMLElement {
       );
       const base = quatFromUnitVectors(BABYLON_FORWARD, wd);
       const f = this._reduced ? (k > 0.5 ? 1 : 0) : flipPhase(k);
+      // PF-11 D3.2: RCS puffs at the two ends of the rotation — the thrusters
+      // that START the spin and the counter-pair that STOP it. One-shot per
+      // journey each, reusing the ember buffer (no new mesh/material).
+      if (!this._reduced) {
+        if (!this._rcsFired[0] && k >= FLIP_ROT_START) {
+          this._rcsFired[0] = true;
+          this._rcsPending++;
+        }
+        if (!this._rcsFired[1] && k >= FLIP_ROT_END) {
+          this._rcsFired[1] = true;
+          this._rcsPending++;
+        }
+      }
       this._shipQuat =
         f > 0
           ? quatMultiply(base, quatFromAxisAngle([1, 0, 0], Math.PI * f))
@@ -4707,6 +4776,7 @@ class BabylonScene extends HTMLElement {
       }
     }
     this._burnPrev = burning;
+    if (this._rcsPending > 0) this._emitRcsPuffs();
     if (this._embers.length) {
       const live: Ember[] = [];
       for (const e of this._embers) if (stepEmber(e, this._dtS)) live.push(e);
@@ -5002,6 +5072,56 @@ class BabylonScene extends HTMLElement {
       this._conColorScratch.a =
         0.34 * (1 - beta) * this._localFieldFade * this._figureFade;
       this._conMat.setColor4("uColor", this._conColorScratch);
+    }
+  }
+
+  /** PF-11 D3.2 — RCS attitude-thruster puffs for the flip (Vega's beat sheet).
+   *
+   * A pitch rotation is produced by a COUPLE: two thrusters firing in opposite
+   * lateral directions at opposite ends of the hull. Both ends are emitted
+   * here as one burst; the choreography fires a burst to start the rotation
+   * and a counter-burst to stop it. Reuses the ember buffer and its existing
+   * mesh/material — no new draw call, no new asset (#1). */
+  private _emitRcsPuffs() {
+    if (!this._ship) {
+      this._rcsPending = 0;
+      return;
+    }
+    const bursts = this._rcsPending;
+    this._rcsPending = 0;
+    const q = this._shipQuat;
+    const scale = this._shipScale;
+    const shipPos = this._ship.position;
+    for (let b = 0; b < bursts; b++) {
+      // Two nozzles of the couple: fore (+Z) pushing +Y, aft (−Z) pushing −Y.
+      for (const end of [1, -1] as const) {
+        for (let i = 0; i < RCS_PUFF_COUNT; i++) {
+          if (this._embers.length >= MAX_EMBERS) break;
+          const spread = () => (Math.random() - 0.5) * RCS_PUFF_SPREAD;
+          // Local: at the hull end, venting laterally (±Y) away from the hull.
+          const lp: [number, number, number] = [
+            spread(),
+            end * 0.05,
+            end * 0.22,
+          ];
+          const lv: [number, number, number] = [
+            spread(),
+            end * RCS_PUFF_SPEED,
+            spread(),
+          ];
+          const wp = quatRotate(q, lp);
+          const wv = quatRotate(q, lv);
+          this._embers.push({
+            x: shipPos.x + wp[0] * scale,
+            y: shipPos.y + wp[1] * scale,
+            z: shipPos.z + wp[2] * scale,
+            vx: wv[0] * scale,
+            vy: wv[1] * scale,
+            vz: wv[2] * scale,
+            life: RCS_PUFF_LIFE,
+          });
+        }
+      }
     }
   }
 
@@ -5783,6 +5903,16 @@ class BabylonScene extends HTMLElement {
     this._warpSlowMin = 1;
     this._dockBase = null;
     this._dockDir = null;
+    // PF-11 D3.2 (ADR-0011): the flip screen-time floor. Reduced motion is
+    // exempt (fixed-short profile, instant hull swap — #24), so it keeps r=1.
+    this._flipRate = this._reduced
+      ? 1
+      : warpFlipRate(warpDur, WARP_ACCEL_END, WARP_DECEL_START);
+    this._rcsFired = [false, false];
+    // ~0.3 s of relight shoulder (Astra §3.2) in k-units of the BRAKE segment,
+    // capped at 0.08 so short journeys compress the shoulder instead of
+    // spending most of the brake ramping the drive back up.
+    this._relightK = Math.min(0.08, 0.3 / (Math.max(1, warpDur) / 1000));
     // PF-11 D2: capture the frame-ladder fade endpoints for this journey. `from`
     // is the live value (correct even mid-transition, e.g. a retarget); `to` is
     // the destination's own visibility. goHome passes lyTotal 0 → both restore
@@ -5942,7 +6072,19 @@ class BabylonScene extends HTMLElement {
       // feeding the B2 velocity profile). Reduced motion keeps the fixed
       // short profile exactly as TR-042 shipped it (slow factor pinned to 1).
       const k0 = w.prog ?? 0;
-      const e0 = warpEase(k0);
+      // PF-11 D3.2 (ADR-0011): v4 trapezoid position. `_flipRate` slows k
+      // inside the flip window to buy the screen-time floor; the profile's
+      // coast slope compensates by exactly 1/r, so world velocity is
+      // continuous across both window edges (no lurch). The advance is
+      // PIECEWISE at the window boundaries (advanceWarpV4, review fix) so a
+      // single dt-capped frame can never jump the whole window — the TR-081
+      // flip-skip class stays dead at ANY frame rate, not just typical ones.
+      const e0 = warpEaseV4(
+        k0,
+        this._flipRate,
+        WARP_ACCEL_END,
+        WARP_DECEL_START,
+      );
       const px =
         w.from[0] + (w.to[0] - w.from[0]) * e0 + wd[0] * SHIP_VIEW_DEPTH;
       const py =
@@ -5952,17 +6094,40 @@ class BabylonScene extends HTMLElement {
       this._warpSlow = this._reduced
         ? 1
         : warpSlowFactor(beltDensityAt(px, py, pz));
-      if (this._warpSlow < this._warpSlowMin)
-        this._warpSlowMin = this._warpSlow;
-      const k = advanceWarpProgress(k0, this._dtWarpS, warpDur, this._warpSlow);
+      const k = advanceWarpV4(
+        k0,
+        this._dtWarpS,
+        warpDur,
+        this._warpSlow,
+        this._flipRate,
+        WARP_ACCEL_END,
+        WARP_DECEL_START,
+      );
       w.prog = k;
-      const e = warpEase(k);
+      const e = warpEaseV4(k, this._flipRate, WARP_ACCEL_END, WARP_DECEL_START);
       const shipW: [number, number, number] = [
         w.from[0] + (w.to[0] - w.from[0]) * e + wd[0] * SHIP_VIEW_DEPTH,
         w.from[1] + (w.to[1] - w.from[1]) * e + wd[1] * SHIP_VIEW_DEPTH,
         w.from[2] + (w.to[2] - w.from[2]) * e + wd[2] * SHIP_VIEW_DEPTH,
       ];
       this._shipWorld = shipW; // consumed by the deflection pass
+      // PF-11 D3.2: warpSlowMin is recorded over the SEGMENT traversed this
+      // frame, not the endpoint — under SwiftShader load a frame can step
+      // ~140 world units and straddle the whole belt tube, and the point
+      // sample silently missed it (see minSlowAlongSegment). The point sample
+      // above still drives the per-frame feedback; only the record is
+      // segment-accurate.
+      if (!this._reduced) {
+        const segMin = minSlowAlongSegment(
+          px,
+          py,
+          pz,
+          shipW[0],
+          shipW[1],
+          shipW[2],
+        );
+        if (segMin < this._warpSlowMin) this._warpSlowMin = segMin;
+      }
       const off = this._reduced ? CHASE_OFFSET_REST : chaseOffsetAt(k);
       const fr = travelFrame(wd);
       this.cam = [
@@ -5997,6 +6162,10 @@ class BabylonScene extends HTMLElement {
         this._shipWorld = null;
         this._warpSlow = 1; // warpSlowMin persists until the next launch
         this.cam = [w.to[0], w.to[1], w.to[2]]; // land exactly on the invariant
+        // PF-11 D3.1: the warp lens relaxes to rest at arrival. At k=1 dsdk=0
+        // so the breathing is already at base — this is a no-op guard that also
+        // covers the reduced-motion path, which never widened it.
+        camera.fov = this._baseFov;
         if (w.home) {
           this.arrivedId = null;
           // PF-11 D6.4 / R16: arm the orbit at phase 0, which is exactly the vantage the warp
@@ -6023,9 +6192,27 @@ class BabylonScene extends HTMLElement {
         // brachistochrone accel/flip/decel readout — matches the live
         // engine's WarpOverlay contract exactly (same k thresholds, same vC
         // formula), so the transit HUD reads identically on either engine.
-        const dsdk = k < 0.5 ? 4 * k : 4 * (1 - k);
+        // PF-11 D3.2 (ADR-0011): normalized world speed replaces the old dsdk
+        // triangle. It HOLDS 1 across the coast/flip window — a ship with its
+        // engines cut does not slow down, and under the triangle every cue
+        // sagged through exactly the window where the narrative says "coast".
+        const dsdk = warpSpeedNorm(k, WARP_ACCEL_END, WARP_DECEL_START) * 2;
+        // PF-11 D3.1: FOV breathes with apparent speed — widest at the k=0.5
+        // peak, relaxing to base as the ship brakes (the missing speed cue,
+        // ported from the legacy engine). Off under reduced motion. Driven by
+        // the SAME dsdk as β and the streaks, so no cue can disagree.
+        camera.fov = this._reduced
+          ? this._baseFov
+          : this._baseFov * warpFovMult(dsdk);
+        // Phase labels sourced from the SHARED hull-choreography thresholds
+        // (babylon-ship.ts) so the HUD label boundaries can never drift from
+        // flipPhase — and D3.2's window widening is then a one-place change.
         const wphase: "accel" | "flip" | "decel" =
-          k < 0.47 ? "accel" : k < 0.53 ? "flip" : "decel";
+          k < WARP_ACCEL_END
+            ? "accel"
+            : k < WARP_DECEL_START
+              ? "flip"
+              : "decel";
         const lyTotal = w.lyTotal ?? 0;
         const vC =
           lyTotal > 0 ? (lyTotal * dsdk) / (warpDur / 1000) / 3.1688e-8 : 0;
@@ -6050,11 +6237,10 @@ class BabylonScene extends HTMLElement {
     if (this._reduced) {
       this._beta = 0;
     } else if (w.mode === "warp" && w.prog != null) {
-      const kb = w.prog;
-      this._beta = Math.min(
-        0.88,
-        0.88 * (kb < 0.5 ? 4 * kb : 4 * (1 - kb)) * 0.5,
-      );
+      // PF-11 D3.2: β follows the v4 normalized speed (peak 0.88 preserved),
+      // so aberration holds through the coast instead of sagging at the flip.
+      this._beta =
+        0.88 * warpSpeedNorm(w.prog, WARP_ACCEL_END, WARP_DECEL_START);
     } else {
       this._beta *= 0.86;
       if (this._beta < 0.004) this._beta = 0;

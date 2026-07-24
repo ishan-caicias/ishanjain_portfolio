@@ -891,6 +891,24 @@ test("babylon: chase-camera choreography drives the real WarpOverlay phase/veloc
   // (velocity line always renders) and dec 89.26° — its route hugs the
   // world-Z axis (planar ≤ ~8 units), provably clear of the belt tube at
   // planar 170, so no slowdown affects the windows.
+  // PF-11 D3.1: install a warp-FOV peak tracker BEFORE the journey. The lens
+  // breathes off dsdk, peaking (+6%) at k=0.5 — which every completed warp
+  // passes through — so tracking the peak here is robust and does NOT depend on
+  // catching the tight flip window (that's GAP-17's fragile job, deliberately
+  // kept separate). Read back after arrival: breathed > +2% over base, relaxed
+  // to base at the dock.
+  await page.locator("babylon-scene").evaluate((el) => {
+    const en = el as HTMLElement & { sceneStats(): Record<string, number> };
+    const w = window as unknown as { __fovPeak: number; __fovBase: number };
+    w.__fovPeak = 0;
+    w.__fovBase = 0;
+    window.addEventListener("cosmos:warp", () => {
+      const s = en.sceneStats();
+      if (s.fov > w.__fovPeak) w.__fovPeak = s.fov;
+      w.__fovBase = s.baseFov;
+    });
+  });
+
   await page.locator("babylon-scene").evaluate((el) => {
     (el as HTMLElement & { travelTo(id: string): void }).travelTo("polaris");
   });
@@ -904,8 +922,12 @@ test("babylon: chase-camera choreography drives the real WarpOverlay phase/veloc
     timeout: 4000,
   });
 
-  // Deceleration burn (k > 0.53) should follow before arrival.
-  await expect(page.getByText("DECELERATION BURN")).toBeVisible({
+  // Braking burn (k > WARP_DECEL_START) should follow before arrival.
+  // PF-11 D3.1 renamed the decel HUD label DECELERATION BURN → BRAKING BURN
+  // (the tighter NASA-ops cue that matches the picture); the underlying
+  // cosmos:warp `phase: "decel"` string is unchanged, so flight-v3's
+  // phase-order assertion is unaffected.
+  await expect(page.getByText("BRAKING BURN")).toBeVisible({
     timeout: 8000,
   });
 
@@ -938,6 +960,21 @@ test("babylon: chase-camera choreography drives the real WarpOverlay phase/veloc
   expect(finalCam[0]).toBeCloseTo(to![0], 6);
   expect(finalCam[1]).toBeCloseTo(to![1], 6);
   expect(finalCam[2]).toBeCloseTo(to![2], 6);
+
+  // PF-11 D3.1: the warp lens breathed and relaxed. `__fovPeak` (max over the
+  // journey, ~+6% at k=0.5) must clear +2% over base; the live FOV at the dock
+  // must be back at rest — the speed cue is proven on the real render loop, not
+  // just in the pure warpFovMult unit test.
+  const fov = await page.locator("babylon-scene").evaluate((el) => {
+    const w = window as unknown as { __fovPeak: number; __fovBase: number };
+    const s = (
+      el as HTMLElement & { sceneStats(): Record<string, number> }
+    ).sceneStats();
+    return { peak: w.__fovPeak, base: w.__fovBase, live: s.fov };
+  });
+  expect(fov.base).toBeGreaterThan(0);
+  expect(fov.peak).toBeGreaterThan(fov.base * 1.02);
+  expect(fov.live).toBeCloseTo(fov.base, 5);
 });
 
 test("babylon: GAP-17 — the flight sequence runs accel → flip → decel in strict order via the real HUD", async ({

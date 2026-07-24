@@ -30,6 +30,13 @@ export default [
       ".astro/",
       ".claude/",
       "coverage/",
+      // Playwright's generated output. Both are already declared generated in
+      // .gitignore; without matching entries here, a local E2E run with the
+      // default `html` reporter drops ~2,900 lint errors of Playwright's own
+      // bundled trace-viewer assets into the tree and BLOCKS `npm run build`
+      // (which is lint && check && astro build). Found during PF-11 D3.2.
+      "playwright-report/",
+      "test-results/",
       "**/Interactive Outerspace Portfolio/",
       "**/gaia_datasets/",
       "src/data/celestial/*.js",

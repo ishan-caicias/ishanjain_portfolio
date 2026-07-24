@@ -261,7 +261,11 @@ export const NEBULA_MARCH = {
 export const NEBULA_REVEAL = {
   /** Warp fraction where the reveal starts — the HUD's own decel threshold
    * (babylon-engine.ts `wphase`: k < 0.47 accel, < 0.53 flip, then decel). */
-  decelStart: 0.53,
+  // PF-11 D3.2 (ADR-0011): re-keyed 0.53 → 0.56 alongside the widened flip
+  // window. This literal is a FOURTH consumer of the warp phase thresholds
+  // (the blast-radius sweep found it); left at 0.53 the destination gas would
+  // start revealing while the ship is still mid-rotation.
+  decelStart: 0.56,
   /** Reveal level at the instant of arrival (the swell continues from here). */
   decelMax: 0.7,
   /** Seconds for the post-arrival swell from decelMax to 1. */

@@ -3,7 +3,7 @@ import type { WarpState } from "./types";
 
 /**
  * Full-screen warp-transit HUD: letterbox bars, destination name, phase label
- * (aligning trajectory / acceleration / flip & burn / deceleration), velocity and
+ * (aligning trajectory / acceleration / flip & burn / braking), velocity and
  * remaining-distance readouts, progress bar. Ported from lines 843-858.
  */
 export default function WarpOverlay({
@@ -21,7 +21,7 @@ export default function WarpOverlay({
       : warp.wphase === "flip"
         ? "FLIP & BURN — ROTATING SHIP"
         : warp.wphase === "decel"
-          ? "DECELERATION BURN"
+          ? "BRAKING BURN"
           : "ACCELERATION BURN";
 
   const warpVel =

@@ -42,7 +42,17 @@ test("the frame ladder fades furniture, the band, and the constellation figures 
   // Boots the full catalog scene, waits out the band's boot fade-in, and runs
   // five sequential journeys — well past the default 30s (planet-pixels.spec
   // sets the same budget for the same reason).
-  test.setTimeout(180000);
+  // NAMED CHANGE (PF-11 D3.2, #15): journey-arrival poll budgets 20s → 40s and
+  // the total 180s → 240s. ADR-0011's flip screen-time floor lengthens every
+  // journey by ~1.1–1.3 s BY DESIGN (owner-flagged duration table), and under
+  // SwiftShader this spec's own ~100 ms sceneStats polling starves rAF so that
+  // frames land ~every 2 s while _dtWarpS caps each at 0.5 s — wall-clock runs
+  // ~4× engine time (TR-089 measured multi-second evals; TR-094 derives the
+  // 4× factor). 20 s budgets sat at the new margin and the failing LEG rotated
+  // with load (polaris in isolation, home in the suite) — the same
+  // near-zero-margin ceiling class TR-080/081 recalibrated. No assertion or
+  // assertion value changed, time budgets only.
+  test.setTimeout(240000);
   const consoleErrors: string[] = [];
   page.on("console", (m) => {
     if (m.type() === "error") consoleErrors.push(m.text());
@@ -69,7 +79,7 @@ test("the frame ladder fades furniture, the band, and the constellation figures 
 
   // --- Mars: solar-system furniture present, band not collapsed, no impostor. ---
   await travel(engine, "mars");
-  await expect.poll(arrivedId, { timeout: 20000 }).toBe("mars");
+  await expect.poll(arrivedId, { timeout: 40000 }).toBe("mars");
   await expect
     .poll(async () => (await stats(engine)).furnitureFade, { timeout: 15000 })
     .toBe(1);
@@ -85,7 +95,7 @@ test("the frame ladder fades furniture, the band, and the constellation figures 
   // figures are partially faded here, distinct from (and nearer than) the
   // M42/nbg checkpoints below. ---
   await travel(engine, "polaris");
-  await expect.poll(arrivedId, { timeout: 20000 }).toBe("polaris");
+  await expect.poll(arrivedId, { timeout: 40000 }).toBe("polaris");
   {
     const s = await stats(engine);
     const figureFade = s.figureFade as number;
@@ -102,7 +112,7 @@ test("the frame ladder fades furniture, the band, and the constellation figures 
 
   // --- M42 (1,344 ly): furniture GONE, but still inside the galaxy. ---
   await travel(engine, "m42");
-  await expect.poll(arrivedId, { timeout: 20000 }).toBe("m42");
+  await expect.poll(arrivedId, { timeout: 40000 }).toBe("m42");
   await expect
     .poll(async () => (await stats(engine)).furnitureFade, { timeout: 15000 })
     .toBe(0);
@@ -126,7 +136,7 @@ test("the frame ladder fades furniture, the band, and the constellation figures 
 
   // --- nbg-a0554-07 (17.9 Mly): the local galaxy collapses to the impostor. ---
   await travel(engine, "nbg-a0554-07");
-  await expect.poll(arrivedId, { timeout: 20000 }).toBe("nbg-a0554-07");
+  await expect.poll(arrivedId, { timeout: 40000 }).toBe("nbg-a0554-07");
   await expect
     .poll(async () => (await stats(engine)).localFieldFade, { timeout: 15000 })
     .toBe(0);
@@ -202,7 +212,7 @@ test("the frame ladder fades furniture, the band, and the constellation figures 
   // --- Return home: everything restores; the impostor is gone. ---
   await engine.evaluate((el) => (el as unknown as EngineHandle).goHome());
   await expect
-    .poll(async () => (await stats(engine)).homeOrbit, { timeout: 20000 })
+    .poll(async () => (await stats(engine)).homeOrbit, { timeout: 40000 })
     .toBe(true);
   // Let the home orbit settle a couple of frames past the arrival tick.
   await expect

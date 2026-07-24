@@ -435,6 +435,47 @@ export function warpSlowFactor(density: number): number {
   return 1 - WARP_FIELD.maxSlow * d;
 }
 
+/** PF-11 D3.2 — the minimum warp-slow factor along a SEGMENT of the flight
+ * path, substepped at half the belt's tightest gaussian sigma.
+ *
+ * Why this exists: `warpSlowMin` was a per-frame POINT sample, and its E2E
+ * contract ("captured engine-side … no timing sensitivity") was never actually
+ * true — under SwiftShader load a whole m42 journey renders in ~10 frames
+ * (~2 fps measured), the per-frame position steps reach ~140 world units, and
+ * two consecutive samples can straddle the belt tube entirely (probe: samples
+ * at e=0.169 and e=0.442 around a core at e=0.326). The old triangle profile
+ * passed that test by geometric accident — one of its sparse samples happened
+ * to land on the tube edge — and the v4 profile's slightly gentler burn moved
+ * the sample off the edge and exposed the latent fragility.
+ *
+ * The point sample stays for the per-frame FEEDBACK (flight feel); this
+ * segment min makes the RECORD frame-rate-independent: the same journey now
+ * reports the same minimum at 2 fps as at 60. Substeps are capped — the belt
+ * tube is ~±3σ wide, so even a capped-coarse pass cannot miss the core. */
+export function minSlowAlongSegment(
+  ax: number,
+  ay: number,
+  az: number,
+  bx: number,
+  by: number,
+  bz: number,
+): number {
+  const dist = Math.hypot(bx - ax, by - ay, bz - az);
+  const step =
+    Math.min(WARP_FIELD.densitySigmaRadial, WARP_FIELD.densitySigmaVertical) /
+    2;
+  const n = Math.max(1, Math.min(24, Math.ceil(dist / step)));
+  let min = 1;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const s = warpSlowFactor(
+      beltDensityAt(ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t),
+    );
+    if (s < min) min = s;
+  }
+  return min;
+}
+
 /** One integration step of warp progress: dk = (dt / dur) × slow. Replaces
  * the old wall-clock k = t/dur — this is what makes the slowdown FEED the
  * B2 velocity profile rather than merely displaying it. Clamped to 1. */

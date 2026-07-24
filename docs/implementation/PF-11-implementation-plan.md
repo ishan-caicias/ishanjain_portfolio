@@ -529,6 +529,37 @@ dsdk/2)` with `FOV_GAIN ≈ 0.06`, eased, clamped, reduced-motion = 0. (Legacy r
 4. HUD phase labels: rename decel label to `BRAKING BURN` if not already; the label
    boundaries move with D3.2's window.
 
+#### D3.1 notes as built (2026-07-24, [TR-093](../test-reports/TR-093.md)) — scope calls recorded
+
+Briefed by Vega before IMPLEMENT ([SHOT-BRIEF](../experience-design/2026-07-24-pf11-d3.1-deceleration-legibility-motion-spec.md))
+and audited after ([MOTION-AUDIT](../experience-design/2026-07-24-pf11-d3.1-deceleration-legibility-motion-review.md)),
+per the cinematic-slice seam.
+
+1. **Chase decel values.** Step 1's "3.5 → ~5.0 → settle 3.5" is the shape, not the numbers — the
+   flip peak is already 5.3, so "open during braking" means _hold above it_. Shipped
+   `[0.72, 0.25, elev(5.8), 5.8]` + `[0.92, 0, elev(3.4), 3.4]`, replacing `[0.8,…,3.5]` +
+   `[0.92,…,2.2]`. The load-bearing invariant is **back ≥ `SHIP_VIEW_DEPTH` for the whole brake**
+   (the ship never exceeds arrival size before k=1) — that, not the exact peak, is what kills the
+   loom. The settle waypoint sits at **k=0.92 on the elevation locus** (Vega briefed 0.9): this
+   keeps the existing 30°-hold test window `[0.1, 0.92]` valid, so **every existing `chaseOffsetAt`
+   test passes unchanged**. Perceptually identical; graded READS in the audit.
+2. **FOV base is NOT `SHIP_BASE_FOV`.** ⚠ The trap the brief caught: `SHIP_BASE_FOV` (70°) is a
+   ship-mesh scale constant and is never assigned to the camera, which runs at Babylon's default
+   ~0.8 rad. Breathing around 70° would snap the lens on warp start. Capture
+   `this._baseFov = camera.fov` at construction and breathe around that (`warpFovMult` is a pure,
+   unit-tested fn in ship-dynamics.ts). Reset to base at arrival / reduced / non-warp.
+3. **Step 3 verified, not re-driven:** streaks read real frame-to-frame camera displacement and β
+   reads `dsdk` explicitly — both already correct, left alone. Plume intensity is phase-boolean;
+   its cutoff-at-flip / relight-retrograde is **D3.2**, recorded not dropped.
+4. **`wphase` sourced from the shared constants** (was hard-coded 0.47/0.53 literals) so the label
+   boundaries cannot drift from `flipPhase` — and D3.2's step 1 widening becomes a one-place change.
+5. **E2E carrier choice.** The FOV cue-proof was first put on GAP-17 and hit that spec's
+   **documented flip-skip flake** (TR-081; isolation ×3 = fail/pass/pass — the ~195 ms flip window
+   skipped on a slow SwiftShader frame, exactly what D3.2's screen-time floor fixes). GAP-17 was
+   restored verbatim and the proof relocated to the **stable chase-camera choreography test**, whose
+   peak-FOV tracker only needs the warp to cross k=0.5. Read-across: **don't hang new assertions on
+   a known-flaky spec** — pick the stable carrier.
+
 ### D3.2 Flip choreography
 
 **Measured input from D0.1 ([TR-081](../test-reports/TR-081.md)):** the flip window is ~195 ms
@@ -556,6 +587,72 @@ depends on fps, the floor is not doing its job.
 6. Camera: no change — the chase look damping already keeps the frame steady while the
    hull rotates within it; assert in E2E that camera quaternion rate stays smooth across
    the flip window.
+
+#### ⚠ D3.2 design-pass correction (2026-07-24 — [ADR-0011](../adr/0011-warp-velocity-profile-v4.md), supersedes step 2's mechanism)
+
+Step 2's formula is **broken as written**: `0.12 × warpDur` is 168–504 ms for every possible
+journey (`warpDurationForLy` spans 1,400–4,200 ms), always below `FLIP_MIN_MS` — so the
+"stretch `warpDur` to `FLIP_MIN_MS / 0.12`" branch fires on **every** warp and sets them all to
+12.5 s (its own parenthetical claims the opposite), and "home stays snappy via `WARP_MIN_MS`"
+is false under any correct fixed floor. The corrected mechanism (full math, options-rejected,
+duration table and blast radius in ADR-0011):
+
+- **v4 trapezoid profile** `warpEaseV4(k, r)` — genuine constant-velocity coast across
+  [0.44, 0.56] (what Astra §3.2 prescribes and the triangle cannot express);
+- **in-window rate multiplier** `r = min(1, 0.12·warpDur/FLIP_MIN_MS)` in the
+  `advanceWarpProgress` call — flip wall-clock = `max(0.12·warpDur, 1500 ms)` exactly, with
+  the coast slope `m/r` making world velocity **continuous** at the window edges (the naive
+  k-dilation lurch is the rejected option 2);
+- **cue driver `warpSpeedNorm(k)`** replaces the inline `dsdk` triangle for β / FOV / vC —
+  all hold peak through the coast (engines cut = constant speed), fixing the HUD sag §3.2
+  beat 4 flags;
+- **hidden 4th threshold consumer:** `NEBULA_REVEAL.decelStart` is a 0.53 literal in
+  nebula-field.ts — re-key to 0.56 or the gas reveals mid-flip;
+- journeys grow ~1.0–1.3 s (home 1.4→2.7 s) — owner-flagged in ADR-0011, tunable via
+  `FLIP_MIN_MS`. Choreography beats, envelope constants and RCS spec:
+  [D3.2 SHOT-BRIEF](../experience-design/2026-07-24-pf11-d3.2-flip-choreography-motion-spec.md).
+
+#### D3.2 notes as built (2026-07-24, [TR-094](../test-reports/TR-094.md))
+
+1. **Two pure modules carry the profile.** `warpEaseV4(k, r, KA, KD)` (position) and
+   `warpSpeedNorm(k, KA, KD)` (the single cue driver) in ship-dynamics.ts, plus
+   `warpFlipRate(dur, KA, KD)` and `FLIP_MIN_MS`. The engine calls `warpEaseV4` for BOTH the
+   camera and the hull, so the two can never disagree about where the ship is.
+2. **The floor rides `advanceWarpProgress`'s existing `slowFactor` argument** — the call site
+   passes `this._warpSlow * rate` where `rate` is `_flipRate` inside the window and 1 outside.
+   No signature change, so the belt proximity-slowdown (B4) composes with the flip dilation for
+   free.
+3. **`warpEase` (the old triangle) is retained and still unit-pinned** but no longer called by
+   the engine — it documents the pre-v4 curve and keeps `space-engine.js` parity readable. Its
+   tests were NOT touched.
+4. **Two named test changes (#15), both in babylon-ship.test.ts, both direct consequences of
+   the window widening the delivery plan specifies:** the threshold pin 0.47/0.53 → 0.44/0.56,
+   and the `flipPhase` midpoint probe re-aimed at the ROTATION sub-window's midpoint (the flip
+   window's own midpoint is no longer the half-rotated pose now that the window holds
+   cutoff/drift/rotation/settle beats). Same properties asserted, measured where they now live.
+5. **Test-instrument lesson (recorded, cost two red runs):** the first drafts of the
+   world-velocity-continuity and C²-rotation assertions were WRONG INSTRUMENTS, not wrong code —
+   a finite difference sampled 1e-3 either side of a piecewise join reads the linearly-rising
+   burn slope ~0.23% low, and a nested finite difference straddling the clamp boundary reports
+   the cubic growth as a ~3.9 second-derivative spike. Both were replaced with algebraic probes
+   (recover `m` from a mid-segment slope; assert the `f/t³ → 10` smootherstep signature against
+   smoothstep's `3/t`). Also: `10t³` is only the LEADING term of smootherstep — comparing to it
+   at 9-decimal precision fails against the exact `10t³ − 15t⁴ + 6t⁵`.
+6. **eslint config fix found by this slice:** `playwright-report/` and `test-results/` are
+   declared generated in `.gitignore` but were absent from the eslint ignores, so any local E2E
+   run with the default `html` reporter dropped ~2,900 lint errors of Playwright's own bundled
+   trace-viewer assets into the tree and **blocked `npm run build`** (lint && check && build).
+   Added to `eslint.config.js` with the reason inline.
+7. **`warpSlowMin` made segment-accurate (a latent instrument defect v4 exposed, TR-094).**
+   The belt proximity-slowdown record was a per-frame POINT sample; under SwiftShader load a
+   whole m42 journey renders in ~10 frames (~2 fps, probe-measured) and consecutive samples
+   stepped ~140 wu clean over the belt tube. The old triangle passed its E2E by geometric
+   accident (one sparse sample landed on the tube edge); v4's gentler burn moved the sample and
+   exposed it. Fixed with pure `minSlowAlongSegment` (σ/2 substeps, capped 24) recording the
+   minimum over each frame's traversed segment — the per-frame point sample still drives the
+   flight-feel feedback. Read-across for D9/later: **any "min/max over the journey" stat sampled
+   per frame is frame-rate-dependent unless integrated over the frame's segment** — audit new
+   stats of this class at design time.
 
 ### D3.3 goHome abort + retarget queue (DECIDED — ADR-0010)
 

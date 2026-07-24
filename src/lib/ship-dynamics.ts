@@ -103,11 +103,28 @@ export interface PlumeParams {
   reduced: boolean;
   /** Seconds — drives jitter and idle breathing. */
   t: number;
+  /** PF-11 D3.2 (optional, additive): eased main-drive envelope, 1 = full
+   * burn … 0 = engines cut. Present only on the warp path once D3.2's
+   * cutoff/relight shoulders are driving it; ABSENT means "use the boolean
+   * phases exactly as before", which is what every other caller (idle,
+   * parked, reduced motion, the legacy tests) relies on. When present it
+   * blends the burning values toward the coasting ones, so flare, alpha and
+   * throttle all fade together off one scalar. */
+  env?: number;
+}
+
+/** Blend a burning-phase value toward its coasting value by the D3.2 drive
+ * envelope. `env` absent (or 1) leaves the burning value untouched. */
+function byEnv(p: PlumeParams, burnVal: number, coastVal: number): number {
+  const e = p.env;
+  if (e == null || e >= 1) return burnVal;
+  return coastVal + (burnVal - coastVal) * Math.max(0, e);
 }
 
 /** Phase-dependent flare length (unit-ship space, extends along +Z). */
 export function plumeFlareLength(p: PlumeParams): number {
-  if (p.burning) return p.reduced ? 0.55 : 0.55 + Math.sin(p.t * 47) * 0.06;
+  if (p.burning)
+    return byEnv(p, p.reduced ? 0.55 : 0.55 + Math.sin(p.t * 47) * 0.06, 0.07);
   if (p.coasting) return 0.07;
   if (p.parked) return p.reduced ? 0.1 : 0.1 + Math.sin(p.t * 2.1) * 0.015;
   return p.reduced ? 0.16 : 0.16 + Math.sin(p.t * 2.1) * 0.03;
@@ -115,7 +132,7 @@ export function plumeFlareLength(p: PlumeParams): number {
 
 /** Plume brightness per phase (multiplied by ship fade at draw time). */
 export function plumeAlpha(p: PlumeParams): number {
-  if (p.burning) return 0.9;
+  if (p.burning) return byEnv(p, 0.9, 0.15);
   if (p.coasting) return 0.15;
   if (p.parked) return 0.3;
   return 0.42;
@@ -189,7 +206,8 @@ export const PLUME_SHEATH: readonly [number, number, number] = [
  * other plume phase functions: burn > idle > parked > coast.
  */
 export function plumeThrottle(p: PlumeParams): number {
-  if (p.burning) return p.reduced ? 0.85 : 0.85 + Math.sin(p.t * 41) * 0.15;
+  if (p.burning)
+    return byEnv(p, p.reduced ? 0.85 : 0.85 + Math.sin(p.t * 41) * 0.15, 0.06);
   if (p.coasting) return 0.06;
   if (p.parked) return p.reduced ? 0.18 : 0.18 + Math.sin(p.t * 2.0) * 0.04;
   return p.reduced ? 0.3 : 0.3 + Math.sin(p.t * 1.7) * 0.05;
@@ -400,14 +418,25 @@ const elev = (b: number) => -Math.tan(CHASE_ELEVATION) * b;
  * through cruise/flip and closing back in for arrival. Because u = −tan30°·b
  * at every interior waypoint, the interpolated elevation holds 30° exactly
  * across k ∈ [0.10, 0.92]. A whisper of lateral offset at the flip keeps a
- * depth cue without reading as a side view. */
+ * depth cue without reading as a side view.
+ *
+ * PF-11 D3.1 (Vega SHOT-BRIEF 2026-07-24 — deceleration legibility): the decel
+ * segment (k > 0.55) previously CLOSED the camera 5.3 → 3.5 → 2.2, driving the
+ * ship LARGER than its arrival size (back < SHIP_VIEW_DEPTH) while it braked —
+ * the CONTRADICTS cue behind owner complaint R6 ("decel doesn't slow"). It now
+ * OPENS to a braking pull-back (5.8 at k≈0.72 — the ship recedes as the retro
+ * burn lights) then MONOTONE-settles to the arrival framing, never dropping
+ * below SHIP_VIEW_DEPTH before k=1, so the ship never looms mid-brake. The
+ * settle waypoint sits at k=0.92 on the elevation locus so the 30° hold still
+ * runs to 0.92 (Vega's brief said 0.9; 0.92 is perceptually identical and
+ * keeps the hold-window invariant intact). */
 const CHASE_WAYPOINTS: readonly [number, number, number, number][] = [
   [0.0, 0, 0, SHIP_VIEW_DEPTH],
   [0.1, 0, elev(2.6), 2.6],
   [0.35, 0, elev(4.5), 4.5],
   [0.55, 0.6, elev(5.3), 5.3],
-  [0.8, 0.3, elev(3.5), 3.5],
-  [0.92, 0, elev(2.2), 2.2],
+  [0.72, 0.25, elev(5.8), 5.8],
+  [0.92, 0, elev(3.4), 3.4],
   [1.0, 0, 0, SHIP_VIEW_DEPTH],
 ];
 
@@ -431,6 +460,26 @@ export function chaseOffsetAt(k: number): ChaseOffset {
  * travel vector (view units) — the camera aims slightly past the ship. */
 export const CHASE_LOOK_LAMBDA = 3.0;
 export const CHASE_LOOK_AHEAD = 1.1;
+
+/** PF-11 D3.1 — warp FOV breathing (the legacy speed cue, never ported to
+ * Babylon until now; Vega SHOT-BRIEF 2026-07-24). The lens widens with
+ * apparent speed and relaxes to base as the ship brakes, so a viewer reads
+ * "slowing" from the field of view itself — one more cue driven off the SAME
+ * `dsdk` triangle every other cue uses, so they cannot disagree. Peak dsdk = 2
+ * at k=0.5 → peak multiplier 1.06 (+6%); base at both journey ends. The MAX
+ * clamp is a safety rail above the formula's own peak. Applied to the camera's
+ * RUNTIME base FOV (Babylon default ~0.8 rad), NOT SHIP_BASE_FOV (a ship-scale
+ * constant) — see babylon-engine `_baseFov`. Reduced motion passes base (no
+ * breathing), per non-negotiable #24. */
+export const WARP_FOV_GAIN = 0.06;
+export const WARP_FOV_MAX_MULT = 1.08;
+
+/** FOV multiplier for the warp lens cue at apparent speed `dsdk`
+ * (= |d warpEase/dk|, the triangle 4k / 4(1−k)). `base × warpFovMult(dsdk)` is
+ * the breathing camera FOV. */
+export function warpFovMult(dsdk: number): number {
+  return Math.min(1 + (WARP_FOV_GAIN * dsdk) / 2, WARP_FOV_MAX_MULT);
+}
 
 /** Ship scale/alpha station targets while the chase camera is active. */
 export const SHIP_WARP_SCALE = 0.9;
@@ -619,6 +668,136 @@ export const ARRIVE_STANDOFF = 38;
  * choreography and the accel/flip/decel HUD readout are both keyed off. */
 export function warpEase(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+/* ---------- PF-11 D3.2: warp velocity profile v4 (ADR-0011) --------------
+ *
+ * `warpEase` above is a pure TRIANGLE in velocity (ds/dk = 4k then 4(1−k)) —
+ * it has no cruise, so speed PEAKS for one instant at k=0.5 and falls away on
+ * both sides. That contradicts the choreography Astra §3.2 specifies and D3.2
+ * builds: main drive CUTS at k=0.44, the ship COASTS at constant velocity
+ * while it rotates 180°, then the drive RELIGHTS retrograde at k=0.56. A
+ * coasting ship with no forces on it does not slow down — but under the
+ * triangle every speed cue sags through exactly that window.
+ *
+ * v4 is a TRAPEZOID: quadratic burn-in, a genuine constant-velocity plateau
+ * across the flip window, quadratic brake-out. Two functions come out of it —
+ * `warpEaseV4` (position) and `warpSpeedNorm` (the normalized speed every cue
+ * reads) — so position and cues can never disagree about what the ship is
+ * doing.
+ *
+ * THE FLOOR. The flip must occupy >= FLIP_MIN_MS of SCREEN time or it reads as
+ * a cut, not a manoeuvre (TR-081 measured ~195 ms today, and a single frame
+ * longer than that skips the phase entirely). The floor is delivered by slowing
+ * k's advance INSIDE the window by `r = warpFlipRate(warpDur)`, which makes the
+ * window last `max(0.12·warpDur, FLIP_MIN_MS)` exactly.
+ *
+ * The subtlety that makes this honest rather than a lurch: the coast slope is
+ * `m/r`, so ds/dk rises by 1/r at precisely the k where dk/dt drops by r. World
+ * velocity `ds/dk · dk/dt` is therefore CONTINUOUS across both window edges —
+ * the ship burns a little more gently, coasts longer at that same speed, and
+ * still covers exactly 1.0 of the path. (Naively dilating k without this
+ * compensation drops world velocity ~4× the instant the window opens — an
+ * engines-off coast that visibly brakes, which is the cue contradiction D3
+ * exists to remove. ADR-0011 rejected option 2.) */
+
+/** Minimum SCREEN time for the flip window, ms (Vega: below ~1 s a 180°
+ * rotation reads as a cut rather than a manoeuvre). */
+export const FLIP_MIN_MS = 1500;
+
+/** k-advance multiplier applied INSIDE the flip window so the window lasts
+ * `max(windowFraction · warpDur, FLIP_MIN_MS)`. 1 when the journey is already
+ * long enough to clear the floor unaided (no current destination is). */
+export function warpFlipRate(
+  warpDurMs: number,
+  accelEnd: number,
+  decelStart: number,
+): number {
+  const windowMs = (decelStart - accelEnd) * Math.max(1, warpDurMs);
+  return Math.min(1, windowMs / FLIP_MIN_MS);
+}
+
+/** Peak normalized ds/dk of the v4 profile — the burn segments' top speed.
+ * Chosen so the three segments' areas sum to exactly 1. */
+function v4PeakSlope(accelEnd: number, decelStart: number, r: number): number {
+  // area = accelEnd/2·m + (decelStart−accelEnd)·(m/r) + (1−decelStart)/2·m = 1
+  const w = decelStart - accelEnd;
+  return 1 / (accelEnd / 2 + w / Math.max(r, 1e-6) + (1 - decelStart) / 2);
+}
+
+/** v4 position along the path at progress k, given the in-window rate `r`.
+ * Quadratic burn → constant-velocity coast → quadratic brake. Endpoints exact
+ * (0 at k=0, 1 at k=1) and symmetric about k=0.5 for the symmetric window this
+ * scene uses, so `warpEaseV4(0.5, r) === 0.5` for every r. */
+export function warpEaseV4(
+  k: number,
+  r: number,
+  accelEnd: number,
+  decelStart: number,
+): number {
+  const c = Math.max(0, Math.min(1, k));
+  const m = v4PeakSlope(accelEnd, decelStart, r);
+  if (c <= accelEnd) return (m * c * c) / (2 * accelEnd);
+  const sAccel = (m * accelEnd) / 2;
+  if (c <= decelStart) return sAccel + (m / r) * (c - accelEnd);
+  const d = 1 - c;
+  return 1 - (m * d * d) / (2 * (1 - decelStart));
+}
+
+/** One integration step of v4 warp progress with the in-window rate applied
+ * PIECEWISE at the window boundaries (PF-11 D3.2 REVIEW fix, TR-094).
+ *
+ * The naive form — pick the rate from k at frame start, advance the whole
+ * step at it — has a single-frame hole: a frame starting just below the
+ * window at the 0.5 s dt cap advances dk ≈ 0.13 at rate 1, which is wider
+ * than the 0.12 window. ONE capped frame could jump the entire flip, which is
+ * precisely the TR-081 skip class the floor exists to kill. This integrator
+ * splits the step where it crosses `accelEnd`/`decelStart` and spends the
+ * remaining wall-clock at the far side's rate, so the window consumes its
+ * full floored time no matter how the frame boundaries land. Time-exact:
+ * integrating any dt sequence yields the same total journey duration. */
+export function advanceWarpV4(
+  prog: number,
+  dtS: number,
+  warpDurMs: number,
+  slowFactor: number,
+  flipRate: number,
+  accelEnd: number,
+  decelStart: number,
+): number {
+  const dur = Math.max(1, warpDurMs) / 1000;
+  let k = prog;
+  let budget = (dtS / dur) * slowFactor; // k-distance at rate 1
+  for (let guard = 0; guard < 4 && budget > 0 && k < 1; guard++) {
+    const inWindow = k >= accelEnd && k < decelStart;
+    const rate = inWindow ? flipRate : 1;
+    const boundary = k < accelEnd ? accelEnd : inWindow ? decelStart : 1;
+    const maxDk = boundary - k;
+    const dk = budget * rate;
+    if (dk <= maxDk) {
+      k += dk;
+      budget = 0;
+    } else {
+      k = boundary;
+      budget -= maxDk / rate;
+    }
+  }
+  return Math.min(1, k);
+}
+
+/** Normalized world speed (0..1) at progress k — the ONE source every speed
+ * cue reads (aberration β, the D3.1 FOV breath, the HUD velocity). Ramps in
+ * over the burn, HOLDS 1 across the coast/flip window (engines cut, no forces),
+ * ramps out over the brake. Replaces the old inline `dsdk` triangle. */
+export function warpSpeedNorm(
+  k: number,
+  accelEnd: number,
+  decelStart: number,
+): number {
+  const c = Math.max(0, Math.min(1, k));
+  if (c <= accelEnd) return c / accelEnd;
+  if (c <= decelStart) return 1;
+  return (1 - c) / (1 - decelStart);
 }
 
 /* ---------- PF-09 B2 step 5: distance-scaled travel ----------------------

@@ -437,6 +437,22 @@ during braking instead of closing it (rework the waypoint table's decel segment)
 consciously decline the legacy FOV breathing (recorded either way). HUD label semantics
 (ACCELERATION BURN / FLIP & BURN / BRAKING BURN) must match what the picture shows.
 
+**✅ DELIVERED 2026-07-24 — [TR-093](../test-reports/TR-093.md)** (Vega
+[SHOT-BRIEF](../experience-design/2026-07-24-pf11-d3.1-deceleration-legibility-motion-spec.md) +
+[MOTION-AUDIT](../experience-design/2026-07-24-pf11-d3.1-deceleration-legibility-motion-review.md)).
+The chase no longer looms the ship while braking: the decel waypoints open to a pull-back
+(back 5.8 at k=0.72) then monotone-settle to arrival framing, staying ≥ SHIP_VIEW_DEPTH the whole
+brake so the ship never exceeds arrival size before k=1 (the old table dived to 2.2 — 37% oversize
+mid-brake). The **legacy FOV breathing is ported** (`warpFovMult`, +6% at the k=0.5 speed peak,
+relaxing to rest, off under reduced motion) — driven off the same `dsdk` as β and the streaks so no
+cue disagrees; the SHOT-BRIEF caught that the breathing base must be the camera's runtime 0.8-rad
+FOV, not `SHIP_BASE_FOV`. Streaks + β confirmed already derivative-driven; plume cutoff/relight is
+D3.2. HUD decel label → **BRAKING BURN**, and `wphase` now sources the shared
+`WARP_ACCEL_END`/`WARP_DECEL_START` constants so D3.2's window-widening is a one-place change. Every
+existing `chaseOffsetAt` test passes unchanged; the FOV cue-proof rides the stable chase-camera E2E
+(not the flaky GAP-17, which D3.2 fixes). Astra ledger confirmation deferred to the post-D3 full
+REALISM-AUDIT.
+
 ### D3.2 Flip choreography
 
 Widen the flip to k∈[0.44,0.56] (~12% of journey, screen-time floor ≥ 1.5 s on non-reduced
@@ -450,6 +466,22 @@ is measurable, not only a legibility judgement. `cosmos:warp` fires once per ren
 polaris's flip window is ~195 ms of wall clock, so a single frame longer than that **skips the
 `flip` phase entirely** — the GAP-17 spec's intermittent `indexOf("flip") === -1` failure. A
 visitor on that frame rate never sees a flip either. The duration floor fixes both.
+
+**✅ DELIVERED 2026-07-24 — [TR-094](../test-reports/TR-094.md)** ([ADR-0011](../adr/0011-warp-velocity-profile-v4.md)
+· Vega [SHOT-BRIEF](../experience-design/2026-07-24-pf11-d3.2-flip-choreography-motion-spec.md)).
+The design pass found the implementation plan's prescribed floor formula **arithmetically
+backwards** (it fired on every journey and would have set every warp to 12.5 s) — corrected in
+ADR-0011 and superseded in the implementation plan. What shipped instead: the **v4 trapezoid
+profile** with a genuine constant-velocity coast across the widened `[0.44, 0.56]` window (the
+old triangle made every speed cue _sag_ through an engines-off coast), the floor delivered by an
+in-window k-rate multiplier whose coast-slope compensation keeps world velocity **continuous** at
+both edges, and `warpSpeedNorm` replacing the `dsdk` triangle so β, the D3.1 FOV breath and the
+HUD velocity all **hold peak through the flip**. Choreography per Vega's five beats: eased burn
+cutoff → drift beat → **C² smootherstep rotation** across a `[0.465, 0.545]` sub-window with RCS
+puff couples at its ends → settle beat → retro relight. The blast-radius sweep caught a hidden
+fourth threshold consumer (`NEBULA_REVEAL.decelStart`, re-keyed 0.53 → 0.56, else the gas reveals
+mid-rotation). **Journeys grow ~1.0–1.3 s and home roughly doubles (1.4 → 2.7 s)** — the
+unavoidable cost of a fixed wall-clock floor, owner-flagged, tunable via `FLIP_MIN_MS`.
 
 ### D3.3 Mid-warp input policy — ✅ DECIDED (owner, 2026-07-22, ADR-0010)
 
