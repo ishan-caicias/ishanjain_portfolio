@@ -11,7 +11,31 @@ jobs:
     name: Lint & Format
     runs-on: ubuntu-latest
     steps:
+      # Git LFS with caching (TR-105). Every *.png/*.glb/*.jpg/*.jpeg/*.webp/*.obj is
+      # Git-LFS-tracked (.gitattributes); a default checkout gets ~133-byte pointer stubs, not
+      # real bytes. Without real bytes the two asset gates below (assets:verify,
+      # budget:check:assets) pass VACUOUSLY (a 133-byte "image" is trivially under budget) — the
+      # same root cause that made every full-scene E2E test fail in CI on PR #6. We fetch LFS
+      # explicitly AFTER restoring a cache of .git/lfs keyed on the set of LFS object ids, so the
+      # ~281 MB pull only happens when the assets actually change (GitHub free LFS bandwidth is
+      # 1 GB/month). Because `build` runs after `lint` (needs:) and shares this key, build
+      # normally restores the cache lint just saved and pulls ~nothing. SAFETY: `git lfs pull`
+      # always reconciles against the pointers, so a cache miss or a stale/wrong key just means a
+      # full pull — never broken or partial assets. (This caching mechanism is only fully
+      # provable on a real CI run; its worst case is "no bandwidth saved", not a broken build.)
       - uses: actions/checkout@v5
+        with:
+          lfs: false
+      - name: Compute LFS cache key
+        id: lfskey
+        run: echo "k=$(git lfs ls-files --long | cut -d ' ' -f1 | sort | sha256sum | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Restore LFS object cache
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: ${{ runner.os }}-lfs-${{ steps.lfskey.outputs.k }}
+          restore-keys: ${{ runner.os }}-lfs-
+      - run: git lfs pull
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -68,7 +92,26 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, typecheck, unit-test]
     steps:
+      # Git LFS with caching (TR-105) — REQUIRED here: `astro build` copies public/assets verbatim
+      # into dist/, and the e2e shards run against THIS dist/ via the uploaded artifact, so a
+      # build from LFS pointer stubs ships a ~2.8 MB dist of text stubs (measured on PR #6) and
+      # every full-scene E2E test fails (star-catalog decode → "procedural", ship GLB parse →
+      # shipState "failed", planet textures blank). Same cache pattern + SAFETY note as the lint
+      # job above; because this job `needs: [lint, ...]`, it normally restores the LFS cache lint
+      # just saved (same key) and `git lfs pull` fetches ~nothing.
       - uses: actions/checkout@v5
+        with:
+          lfs: false
+      - name: Compute LFS cache key
+        id: lfskey
+        run: echo "k=$(git lfs ls-files --long | cut -d ' ' -f1 | sort | sha256sum | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Restore LFS object cache
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: ${{ runner.os }}-lfs-${{ steps.lfskey.outputs.k }}
+          restore-keys: ${{ runner.os }}-lfs-
+      - run: git lfs pull
       - uses: actions/setup-node@v5
         with:
           node-version: 22

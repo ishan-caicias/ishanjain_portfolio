@@ -94,6 +94,25 @@ minutes — dwarfed by ~30+ minutes of scene-boot time. Not a meaningful optimis
 
 ## 2. Recommendations (ranked by impact)
 
+> **⚠ Correction (2026-07-25, later same day — TR-105).** Two of these recommendations were
+> overtaken by evidence within hours of writing them; corrected additively here rather than
+> rewritten, per the repo's history-is-load-bearing rule:
+>
+> - **Rec #1 (CI sharding) was implemented (TR-104) but its premise about impact is unproven and
+>   its ordering was wrong.** The first real CI run failed 63/150 for an unrelated reason — Git
+>   LFS assets were never fetched in CI (default `actions/checkout` gets pointer stubs). CI was
+>   never going to pass, sharded or not, until that was fixed (TR-105). Sharding's ~11–15 min
+>   estimate remains **unverified** — the 4-shard times measured LFS-failure retry-timeouts, not
+>   shard balance. The real prerequisite was the LFS fix, not sharding.
+> - **Rec #2 (re-measure workers) is now DONE and the answer is "keep workers=1" (TR-105).**
+>   Measured on the owner's 16-core/50 GB machine: workers=1 → 48.4 min/0-fail, workers=2 →
+>   36.9 min/**13-fail**, workers=4 → 22.5 min/**24-fail**. Failures scale monotonically with
+>   worker count — contention, not regressions — so CLAUDE.md #16 is upheld with fresh data.
+>   Parallelism is blocked until per-boot GPU load drops (the real fix; see TR-105 Part 3's
+>   `?bg=off` test-boot-flag scope). **The highest-impact lever is not in this list** — it's
+>   shedding the 3 heavy background layers on the ~7 files (~25.5 min of suite) that never assert
+>   them, which TR-105 scopes. Recs #3–#5 below stand as written.
+
 1. **Shard the CI `e2e` job across a matrix, keep `workers: 1` inside each shard.** Each shard is
    its own runner with its own single SwiftShader instance, so this doesn't reproduce the
    "N workers time-slicing ONE GPU" flake `workers:1` was fixing (TR-018/TR-052) — that problem
