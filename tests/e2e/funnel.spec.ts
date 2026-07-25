@@ -113,24 +113,16 @@ test.describe("PF-11 D1.4 funnel instrumentation", () => {
       .getByRole("button", { name: "Jump to a random destination" })
       .click();
 
-    // Click OPEN COLLECTOR CARD the moment it appears — the vista's own 5.5s auto-timeout
-    // (today's ONLY other dismissal path, pending D4.1) is a real race here: waiting on
-    // separate polls for "travel"/"arrival" first left enough wall-clock for the timeout to
-    // dismiss the vista before this click ever landed, recording "timeout" instead of the
-    // path under test.
+    // PF-11 D4.1 named test change: the vista's 5.5s auto-timeout this comment used to warn
+    // about is gone (SpaceScene no longer schedules one — the vista now waits for a real
+    // dismissal), and the z-index overlap that used to force a `.evaluate(...click())`
+    // workaround here is fixed (ArrivalVista's root now sits above #ij-mission-bar), so a
+    // real Playwright click lands on the button exactly like a visitor's would.
     const openCard = page.getByRole("button", {
       name: "OPEN COLLECTOR CARD ▸",
     });
     await expect(openCard).toBeVisible({ timeout: 15000 });
-    // A pre-existing z-index overlap this test is the first to exercise: #ij-mission-bar
-    // (z-62) visually overlaps ArrivalVista's button row (z-61) at the bottom of the
-    // viewport, so a real coordinate-based click here — even with force: true, which only
-    // skips Playwright's OWN actionability check, not the browser's real hit-testing — lands
-    // on the WHERE-TO input instead of this button. Dispatching the click directly on the
-    // element sidesteps the coordinate hit-test and still exercises the real onClick handler.
-    // Out of scope for D1.4 (belongs to D4.1's vista-dismissal work, which replaces this
-    // whole interaction); flagged in the slice TR rather than silently worked around.
-    await openCard.evaluate((el) => (el as HTMLElement).click());
+    await openCard.click();
 
     const events = (await readFunnel(page))?.events ?? [];
     expect(events.map((e) => e.event)).toEqual(

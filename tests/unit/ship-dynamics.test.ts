@@ -8,6 +8,13 @@
 import { describe, expect, it } from "vitest";
 import {
   ARRIVE_STANDOFF,
+  PLANET_ARRIVE_STANDOFF,
+  PLANET_SPHERE_RADIUS_FOR_ZOOM,
+  PLANET_ZOOM_NEAR_MARGIN,
+  ZOOM_MIN_MULT,
+  ZOOM_MAX_MULT,
+  clampZoomDistance,
+  dampScalar,
   bodyDepth,
   bodyWorldPosition,
   raDecToDir,
@@ -792,6 +799,53 @@ describe("PF-09 B2 step 3 — shared body-position math", () => {
 
   it("ARRIVE_STANDOFF matches the live engine's parked distance", () => {
     expect(ARRIVE_STANDOFF).toBe(38);
+  });
+});
+
+describe("PF-11 TR-103 zoom feature (Vega SHOT-BRIEF) — clampZoomDistance / dampScalar", () => {
+  it("clamps a planet-class distance to an absolute near-clip-safe floor, never the sphere radius itself", () => {
+    const floor = PLANET_SPHERE_RADIUS_FOR_ZOOM + PLANET_ZOOM_NEAR_MARGIN;
+    expect(clampZoomDistance(1, true, PLANET_ARRIVE_STANDOFF)).toBe(floor);
+    expect(clampZoomDistance(floor + 10, true, PLANET_ARRIVE_STANDOFF)).toBe(
+      floor + 10,
+    );
+  });
+
+  it("clamps a planet-class distance to a ceiling relative to the arrival (rest) distance", () => {
+    const ceiling = PLANET_ARRIVE_STANDOFF * ZOOM_MAX_MULT;
+    expect(clampZoomDistance(1e6, true, PLANET_ARRIVE_STANDOFF)).toBe(ceiling);
+  });
+
+  it("clamps a point-like (DSO/star/home-orbit) distance to a MULTIPLE of rest distance on both ends, not an absolute floor", () => {
+    const rest = ARRIVE_STANDOFF;
+    expect(clampZoomDistance(0, false, rest)).toBeCloseTo(
+      rest * ZOOM_MIN_MULT,
+      10,
+    );
+    expect(clampZoomDistance(1e6, false, rest)).toBeCloseTo(
+      rest * ZOOM_MAX_MULT,
+      10,
+    );
+  });
+
+  it("passes an in-bounds distance through unchanged for both target classes", () => {
+    expect(clampZoomDistance(100, true, PLANET_ARRIVE_STANDOFF)).toBe(100);
+    expect(clampZoomDistance(50, false, ARRIVE_STANDOFF)).toBe(50);
+  });
+
+  it("dampScalar converges toward target and is a no-op exactly at target", () => {
+    expect(dampScalar(50, 50, 8, 1 / 60)).toBeCloseTo(50, 10);
+    const half = dampScalar(0, 100, 8, 1 / 60);
+    expect(half).toBeGreaterThan(0);
+    expect(half).toBeLessThan(100);
+    // Converges monotonically toward target with repeated fixed-dt steps.
+    let v = 0;
+    for (let i = 0; i < 60; i++) v = dampScalar(v, 100, 8, 1 / 60);
+    expect(v).toBeCloseTo(100, 1);
+  });
+
+  it("dampScalar with zero dt is a true no-op (guards against a stalled-frame divide-by-zero class of bug)", () => {
+    expect(dampScalar(12.3, 999, 8, 0)).toBe(12.3);
   });
 });
 

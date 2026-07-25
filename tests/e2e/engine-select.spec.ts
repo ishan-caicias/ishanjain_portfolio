@@ -1366,15 +1366,33 @@ test("perf overlay is opt-in via ?perf=1", async ({ page }) => {
   });
 });
 
-// PF-10 C1 — star-cluster hall-of-fame wiring (celestial-clusters.js). The 35 curated clusters
-// use the same window.CELESTIAL merge pattern GAP-01 already proved renders (celestial-bodies.ts
-// billboard path, no new rendering code) — this test proves the NEW data file is actually wired
-// into the load chain and travelable, not just present as an unused module. Real data check:
-// Pleiades' own real ra/dec/ly (see docs/datasets/star_clusters_hall_of_fame.md) is asserted, not
-// just presence, so a future edit that silently corrupts the entry would fail this test too.
-test("babylon: PF-10 star clusters (celestial-clusters.js) load and are real travel targets", async ({
+// PF-10 C1 — star-cluster hall-of-fame wiring (celestial-clusters.js), the NGC2000 billboard
+// nebulae, and the GD-1 connected-trail visual, merged into ONE boot (2026-07-25 E2E audit,
+// recommendation #4 — TR-104). These were three separate tests, each re-booting the full
+// 555,825+-object catalog scene from scratch to read one more `window.CELESTIAL_*_COUNT` or
+// travel to one more real target; the NGC2000 count in particular was already asserted below
+// via `counts.ngc2000`, making the old standalone NGC2000 test's count check a pure duplicate.
+// No assertion was dropped — every check from all three original tests survives below, just
+// sharing one boot. Console-error checking is added for the clusters/NGC2000 legs too (only the
+// GD-1 leg had it before) since it's now free in the same test.
+//
+// The 35 curated clusters use the same window.CELESTIAL merge pattern GAP-01 already proved
+// renders (celestial-bodies.ts billboard path, no new rendering code) — this test proves the NEW
+// data file is actually wired into the load chain and travelable, not just present as an unused
+// module. Real data check: Pleiades' own real ra/dec/ly (see
+// docs/datasets/star_clusters_hall_of_fame.md) is asserted, not just presence, so a future edit
+// that silently corrupts the entry would fail this test too.
+test("babylon: PF-10 catalog layers — clusters, NGC2000 nebulae, and the GD-1 trail — load and are real travel targets", async ({
   page,
 }) => {
+  test.setTimeout(45000);
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") consoleErrors.push(m.text());
+  });
+  page.on("pageerror", (e) => pageErrors.push(e.message));
+
   await page.goto("/?engine=babylon");
   await page.waitForSelector("babylon-scene", { timeout: 15000 });
 
@@ -1447,6 +1465,65 @@ test("babylon: PF-10 star clusters (celestial-clusters.js) load and are real tra
       { timeout: 10000 },
     )
     .toBe("cluster-pleiades");
+
+  // --- PF-10 C1 continued: 41 real Billboard-archetype NGC2000 nebulae (of 47; the other 8 are
+  // custom-shader Volume objects, still blocked on the reveal-mechanism redesign, see
+  // TR-065/066), wired live via celestial-ngc2000.js, same window.CELESTIAL merge pattern as
+  // clusters/GD-1/NBG/minor-planets. Real data check on a real, well-known nebula, not just
+  // presence. `counts.ngc2000` above already proved the count; this proves a real member is
+  // travelable with real coordinates. ---
+  const lagoon = await page.evaluate(() =>
+    (
+      window as unknown as {
+        CELESTIAL?: { id: string; ra: number; dec: number; ly: number }[];
+      }
+    ).CELESTIAL?.find((e) => e.id === "ngc2000-lagoon-nebula"),
+  );
+  expect(lagoon?.ra).toBeCloseTo(270.6258, 3);
+  expect(lagoon?.dec).toBeCloseTo(-24.2872, 3);
+  expect(lagoon?.ly).toBeCloseTo(5199.99, 1);
+
+  await page.locator("babylon-scene").evaluate((el) => {
+    (el as TravelEl).travelTo("ngc2000-lagoon-nebula");
+  });
+  await expect
+    .poll(
+      () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) => (el as TravelEl).arrivedId),
+      { timeout: 10000 },
+    )
+    .toBe("ngc2000-lagoon-nebula");
+
+  // --- PF-10 C1's last remaining item: GD-1's connected-trail visual (TR-073). A static
+  // Material.LineListDrawMode mesh connecting the 1,365 real member stars in their real physical
+  // order along the stream (a great-circle fit to the real sample, NOT catalog row order — see
+  // gd1-trail.ts and docs/analysis/2026-07-20-gd1-connected-trail-science-brief.md), coloured
+  // along its length by real radial velocity. No travel needed — this reads sceneStats()
+  // directly, so it costs nothing extra beyond the boot already paid for above. ---
+  type Gd1StatsEl = HTMLElement & {
+    sceneStats(): { gd1TrailSegments: number; gd1TrailMeshReady: boolean };
+  };
+  await expect
+    .poll(
+      async () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) => (el as Gd1StatsEl).sceneStats().gd1TrailMeshReady),
+      { timeout: 20000 },
+    )
+    .toBe(true);
+
+  const gd1Stats = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as Gd1StatsEl).sceneStats());
+  // n-1 segments for n=1,365 real stars — proves every real star was included (not silently
+  // truncated) and the mesh isn't a degenerate loop.
+  expect(gd1Stats.gd1TrailSegments).toBe(1364);
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
 });
 
 // PF-10 C1 continued — the 3 Track B (PNG-pack) populations proven mechanism-only in TR-063/065
@@ -1556,61 +1633,40 @@ test("babylon: PF-10 bonus star layers merge the SAME full total on the balanced
     .toBe(555_825);
 });
 
-// PF-10 C2 — SDSS DR18 galaxy field (3,637,836 real records, TR-066/067) wired into a SEPARATE
-// mesh (log-depth-scaled positions, incompatible with the star field's linear-ly convention —
-// see ADR-0007's consequences and scripts/gaia-sdss18-pngpack.mjs's header). Real behaviour
-// asserted: the exact real record count and mesh readiness, not just "no console errors" — a
-// broken/empty decode would still leave meshReady false or count 0.
-test("babylon: PF-10 SDSS DR18 galaxy field loads into its own live mesh", async ({
+// PF-10 C2/C3 — SDSS DR18 galaxy field (3,637,836 real records, TR-066/067) and the full real
+// Gaia DR3 asteroid belt, merged into ONE boot (2026-07-25 E2E audit, recommendation #4 —
+// TR-104). Both background layers fetch/decode CONCURRENTLY during the same boot regardless of
+// which test reads them — the two were never sequential-dependent costs, just two separate 90s-
+// budgeted tests each paying for a boot the other already incurred. No assertion dropped.
+//
+// SDSS: wired into a SEPARATE mesh (log-depth-scaled positions, incompatible with the star
+// field's linear-ly convention — see ADR-0007's consequences and
+// scripts/gaia-sdss18-pngpack.mjs's header). Real behaviour asserted: the exact real record
+// count and mesh readiness, not just "no console errors" — a broken/empty decode would still
+// leave meshReady false or count 0.
+//
+// Asteroid belt: replaces the seeded-LCG procedural torus. Two tiers, both asserted because they
+// fail independently: the VISUAL layer (154,662 real objects on their own mesh, object-type byte
+// 6) and the PHYSICS layer (a bounded subset of real bodies with real Keplerian velocities,
+// built at boot from a generated module). `asteroidRealSource` is the assertion that actually
+// matters — the body COUNT is identical either way, so only the source field can distinguish
+// real catalog bodies from the procedural fallback, which is exactly the confusion a "belt
+// renders" test would sail past.
+test("babylon: PF-10 SDSS DR18 galaxy field and the real Gaia DR3 asteroid belt both load into their own live meshes", async ({
   page,
 }) => {
-  // A real ~47 MB asset, the largest single asset this site ships, decoding into 14.5M+
-  // vertices — the default 30s Playwright test timeout is too tight for fetch + decode +
-  // billboard-geometry build on top of everything else this scene already does at boot.
-  test.setTimeout(90000);
-  await page.goto("/?engine=babylon");
-  await page.waitForSelector("babylon-scene", { timeout: 15000 });
-
-  type SceneStatsEl = HTMLElement & {
-    sceneStats(): { sdssGalaxyCount: number; sdssMeshReady: boolean };
-  };
-  // Real count is 3,637,862, not the dataset's stated 3,637,836 — the shared PNG-pack format
-  // pads to a full 1024x17763 rectangle, and the trailing padding decodes as 26 extra all-zero
-  // "phantom" records, the same real, pre-existing behaviour documented for every other
-  // background layer (TR-066's derivation note on the bonus-star-layers test above).
-  await expect
-    .poll(
-      () =>
-        page
-          .locator("babylon-scene")
-          .evaluate((el) => (el as SceneStatsEl).sceneStats().sdssGalaxyCount),
-      { timeout: 75000 },
-    )
-    .toBe(3_637_862);
-
-  const stats = await page
-    .locator("babylon-scene")
-    .evaluate((el) => (el as SceneStatsEl).sceneStats());
-  expect(stats.sdssMeshReady).toBe(true);
-});
-
-// PF-10 C3 — the full real Gaia DR3 asteroid belt, replacing the seeded-LCG procedural torus.
-// Two tiers, and both are asserted here because they fail independently: the VISUAL layer
-// (154,662 real objects on their own mesh, object-type byte 6) and the PHYSICS layer (a bounded
-// subset of real bodies with real Keplerian velocities, built at boot from a generated module).
-// `asteroidRealSource` is the assertion that actually matters — the body COUNT is identical
-// either way, so only the source field can distinguish real catalog bodies from the procedural
-// fallback, which is exactly the confusion a "belt renders" test would sail past.
-test("babylon: PF-10 C3 real Gaia DR3 asteroid belt renders and drives the physics tier", async ({
-  page,
-}) => {
-  // A real ~2.0 MB asset decoding into 619k+ vertices, on top of the SDSS layer already loading.
-  test.setTimeout(90000);
+  // Both are real multi-MB assets (SDSS ~47 MB / 14.5M+ vertices, belt ~2.0 MB / 619k+ vertices)
+  // decoding CONCURRENTLY on top of everything else this scene does at boot — the default 30s
+  // Playwright timeout is too tight, and since both loads race in parallel rather than stacking,
+  // 120s (not 90+90) covers the pair with headroom.
+  test.setTimeout(120000);
   await page.goto("/?engine=babylon");
   await page.waitForSelector("babylon-scene", { timeout: 15000 });
 
   type SceneStatsEl = HTMLElement & {
     sceneStats(): {
+      sdssGalaxyCount: number;
+      sdssMeshReady: boolean;
       asteroidVisualCount: number;
       asteroidVisualReady: boolean;
       asteroidRealSource: string;
@@ -1621,10 +1677,30 @@ test("babylon: PF-10 C3 real Gaia DR3 asteroid belt renders and drives the physi
     };
   };
 
+  // Real count is 3,637,862, not the dataset's stated 3,637,836 — the shared PNG-pack format
+  // pads to a full 1024x17763 rectangle, and the trailing padding decodes as 26 extra all-zero
+  // "phantom" records, the same real, pre-existing behaviour documented for every other
+  // background layer (TR-066's derivation note on the bonus-star-layers test above).
+  await expect
+    .poll(
+      () =>
+        page
+          .locator("babylon-scene")
+          .evaluate((el) => (el as SceneStatsEl).sceneStats().sdssGalaxyCount),
+      { timeout: 90000 },
+    )
+    .toBe(3_637_862);
+
+  const sdssStats = await page
+    .locator("babylon-scene")
+    .evaluate((el) => (el as SceneStatsEl).sceneStats());
+  expect(sdssStats.sdssMeshReady).toBe(true);
+
   // Real decoded count is 154,828, not the catalog's 154,662 — the shared PNG-pack format pads
   // to a full 1024x756 rectangle and the trailing padding decodes as 166 all-zero "phantom"
-  // records. Identical, pre-existing behaviour to every other background layer (see the SDSS
-  // test above); asserted at its real value rather than rounded off.
+  // records. Identical, pre-existing behaviour to every other background layer (see SDSS above);
+  // asserted at its real value rather than rounded off. Already loading in parallel with SDSS
+  // above, so this poll should resolve near-instantly if it hasn't already.
   await expect
     .poll(
       () =>
@@ -1633,21 +1709,21 @@ test("babylon: PF-10 C3 real Gaia DR3 asteroid belt renders and drives the physi
           .evaluate(
             (el) => (el as SceneStatsEl).sceneStats().asteroidVisualCount,
           ),
-      { timeout: 75000 },
+      { timeout: 30000 },
     )
     .toBe(154_828);
 
-  const stats = await page
+  const beltStats = await page
     .locator("babylon-scene")
     .evaluate((el) => (el as SceneStatsEl).sceneStats());
-  expect(stats.asteroidVisualReady).toBe(true);
+  expect(beltStats.asteroidVisualReady).toBe(true);
   // The physics tier is real catalog data, not the procedural fallback.
-  expect(stats.asteroidRealSource).toBe("gaia-dr3");
-  expect(stats.asteroidCatalogSize).toBe(154_662);
-  expect(stats.asteroidRealEpoch).toBe("2026-07-20");
+  expect(beltStats.asteroidRealSource).toBe("gaia-dr3");
+  expect(beltStats.asteroidCatalogSize).toBe(154_662);
+  expect(beltStats.asteroidRealEpoch).toBe("2026-07-20");
   // ...and it still honours the tier budget rather than trying to instance the catalog.
-  expect(stats.asteroidCount).toBeGreaterThan(0);
-  expect(stats.asteroidCount).toBeLessThanOrEqual(48);
+  expect(beltStats.asteroidCount).toBeGreaterThan(0);
+  expect(beltStats.asteroidCount).toBeLessThanOrEqual(48);
 });
 
 // PF-10 C4 — real planetary spheres. Before this phase every body in the scene, Mars included,
@@ -1845,91 +1921,6 @@ test("babylon: PF-10 C3 belt holds still under prefers-reduced-motion", async ({
   expect(stats.asteroidRealSource).toBe("gaia-dr3");
 });
 
-// PF-10 C1 continued — the 41 real Billboard-archetype NGC2000 nebulae (of 47; the other 8 are
-// custom-shader Volume objects, still blocked on the reveal-mechanism redesign, see TR-065/066)
-// wired live via celestial-ngc2000.js, same window.CELESTIAL merge pattern as clusters/GD-1/
-// NBG/minor-planets — zero new rendering code, "nebula" (type 2) was already a fully-handled
-// billboard type. Real data check on a real, well-known nebula, not just presence.
-test("babylon: PF-10 NGC2000 billboard nebulae (celestial-ngc2000.js) load and are real travel targets", async ({
-  page,
-}) => {
-  await page.goto("/?engine=babylon");
-  await page.waitForSelector("babylon-scene", { timeout: 15000 });
-
-  const ngc2000Count = await page.evaluate(
-    () =>
-      (window as unknown as { CELESTIAL_NGC2000_COUNT?: number })
-        .CELESTIAL_NGC2000_COUNT,
-  );
-  expect(ngc2000Count).toBe(41);
-
-  const lagoon = await page.evaluate(() =>
-    (
-      window as unknown as {
-        CELESTIAL?: { id: string; ra: number; dec: number; ly: number }[];
-      }
-    ).CELESTIAL?.find((e) => e.id === "ngc2000-lagoon-nebula"),
-  );
-  expect(lagoon?.ra).toBeCloseTo(270.6258, 3);
-  expect(lagoon?.dec).toBeCloseTo(-24.2872, 3);
-  expect(lagoon?.ly).toBeCloseTo(5199.99, 1);
-
-  type TravelEl = HTMLElement & {
-    travelTo(id: string): void;
-    arrivedId: string | null;
-  };
-  await page.locator("babylon-scene").evaluate((el) => {
-    (el as TravelEl).travelTo("ngc2000-lagoon-nebula");
-  });
-  await expect
-    .poll(
-      () =>
-        page
-          .locator("babylon-scene")
-          .evaluate((el) => (el as TravelEl).arrivedId),
-      { timeout: 10000 },
-    )
-    .toBe("ngc2000-lagoon-nebula");
-});
-
-// PF-10 C1's last remaining item: GD-1's connected-trail visual (TR-073). A static
-// Material.LineListDrawMode mesh connecting the 1,365 real member stars in their real
-// physical order along the stream (a great-circle fit to the real sample, NOT catalog row
-// order — see gd1-trail.ts and docs/analysis/2026-07-20-gd1-connected-trail-science-brief.md),
-// coloured along its length by real radial velocity.
-test("babylon: PF-10 GD-1 connected-trail visual — 1,364 segments (n-1 for 1,365 real stars), console-clean", async ({
-  page,
-}) => {
-  const consoleErrors: string[] = [];
-  page.on("console", (m) => {
-    if (m.type() === "error") consoleErrors.push(m.text());
-  });
-  const pageErrors: string[] = [];
-  page.on("pageerror", (e) => pageErrors.push(e.message));
-
-  await page.goto("/?engine=babylon");
-  await page.waitForSelector("babylon-scene", { timeout: 15000 });
-
-  type Gd1StatsEl = HTMLElement & {
-    sceneStats(): { gd1TrailSegments: number; gd1TrailMeshReady: boolean };
-  };
-  await expect
-    .poll(
-      async () =>
-        page
-          .locator("babylon-scene")
-          .evaluate((el) => (el as Gd1StatsEl).sceneStats().gd1TrailMeshReady),
-      { timeout: 20000 },
-    )
-    .toBe(true);
-
-  const stats = await page
-    .locator("babylon-scene")
-    .evaluate((el) => (el as Gd1StatsEl).sceneStats());
-  // n-1 segments for n=1,365 real stars — proves every real star was
-  // included (not silently truncated) and the mesh isn't a degenerate loop.
-  expect(stats.gd1TrailSegments).toBe(1364);
-
-  expect(consoleErrors).toEqual([]);
-  expect(pageErrors).toEqual([]);
-});
+// NGC2000 billboard nebulae and the GD-1 connected-trail visual are now covered inside the
+// merged "PF-10 catalog layers" test above (2026-07-25 E2E audit, TR-104) — they shared this
+// same full-catalog boot with no reason to pay for it twice.

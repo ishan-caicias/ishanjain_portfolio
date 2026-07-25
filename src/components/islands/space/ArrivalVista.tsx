@@ -1,23 +1,47 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { CelestialEntry } from "@/data/celestial/celestial.d.ts";
 import { fmtDist, figGeom, drawGlobe } from "@/lib/spaceHelpers";
+import { moveFocusTo, restoreFocusTo } from "@/lib/focus-utils";
 
 /**
- * Cinematic landing screen shown for 5.5s (or until dismissed) after physically arriving
- * at a body - before the collector card opens. Renders one of: real photo (nebula/galaxy),
- * a procedural "star" glow, a hand-rendered rotating globe (planets/moons), or a
- * constellation figure. Ported from lines 860-898.
+ * Cinematic landing screen shown after physically arriving at a body, until dismissed -
+ * before the collector card opens. Renders one of: real photo (nebula/galaxy), a procedural
+ * "star" glow, a hand-rendered rotating globe (planets/moons), or a constellation figure.
+ * Ported from lines 860-898.
+ *
+ * PF-11 D4.1: a real `role="dialog"` surface — pointer-events-auto and above
+ * `#ij-mission-bar`'s z-index (62) so a dismissing click can never fall through to the mission
+ * bar or the canvas and start a new warp (that gap was the TR-086/R7 "babylon doesn't show the
+ * card" seam's actual cause: the vista had no dismiss input, so clicks meant to close it
+ * either landed on the mission bar underneath or reached the canvas). Click anywhere except
+ * the card button, or press Space, to dismiss; Escape is handled one level up by
+ * SpaceScene's `useEscapeStack` (a single dispatcher owns Escape across every layer, so this
+ * component doesn't also race it). The 5.5s auto-timeout this used to have is gone —
+ * SpaceScene no longer schedules one.
  */
 export default function ArrivalVista({
   entry,
   onOpenCard,
+  onDismiss,
 }: {
   entry: CelestialEntry;
   onOpenCard: () => void;
+  /** `via` names the input that dismissed the vista, for the funnel's diagnostic log. */
+  onDismiss: (via: "click" | "space") => void;
 }) {
   const globeRef = useRef<(HTMLCanvasElement & { _drawnFor?: string }) | null>(
     null,
   );
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  // Focus the dialog on mount (announces it to assistive tech via its aria-label) and give
+  // focus back to whatever had it before on unmount — the standard modal-dialog pattern.
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    moveFocusTo(rootRef.current);
+    return () => restoreFocusTo(previousFocusRef.current);
+  }, []);
 
   const c = entry.c || "#ffd54f";
   const isGlobe =
@@ -30,8 +54,21 @@ export default function ArrivalVista({
 
   return (
     <div
+      ref={rootRef}
       data-screen-label="Arrival vista"
-      className="pointer-events-none fixed inset-0 z-[60] flex animate-[ij-fadein_0.4s_ease-out_both] items-center justify-center backdrop-blur-sm"
+      role="dialog"
+      aria-label={`Arrival: ${entry.n}`}
+      tabIndex={-1}
+      onClick={() => onDismiss("click")}
+      onKeyDown={(e) => {
+        // Space at the dialog level dismisses; Space on the focused card button must keep
+        // its native activate-the-button behaviour instead (hence the currentTarget check).
+        if (e.key === " " && e.target === e.currentTarget) {
+          e.preventDefault();
+          onDismiss("space");
+        }
+      }}
+      className="pointer-events-auto fixed inset-0 z-[65] flex animate-[ij-fadein_0.4s_ease-out_both] items-center justify-center backdrop-blur-sm outline-none"
       style={{
         background:
           "radial-gradient(ellipse at 50% 50%, rgba(4,5,15,0.92) 0%, rgba(4,5,15,0.78) 55%, rgba(4,5,15,0.45) 100%)",
@@ -118,13 +155,23 @@ export default function ArrivalVista({
           </span>
         </div>
         <button
-          onClick={onOpenCard}
+          onClick={(e) => {
+            // Stop the click here so the dialog root's onDismiss doesn't also fire — opening
+            // the card already closes the vista (SpaceScene's onOpenCard sets vista: null).
+            e.stopPropagation();
+            onOpenCard();
+          }}
           className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg border border-[#ffc107]/40 bg-[#ffc107]/10 px-4 py-1.5 font-mono text-[11px] tracking-wider text-[#ffd54f] hover:bg-[#ffc107]/20"
         >
           OPEN COLLECTOR CARD ▸
         </button>
-        <div className="font-mono text-[9.5px] tracking-wider text-[#5c6bc0]">
-          HOVER THE BODY FOR VITALS
+        {/* PF-11 D4.1: replaces the old "HOVER THE BODY FOR VITALS" line, which was dead
+            copy on touch (nothing to hover). Both render; the media query picks one. */}
+        <div className="font-mono text-[9.5px] tracking-wider text-[#5c6bc0] [@media(pointer:coarse)]:hidden">
+          CLICK ANYWHERE OR PRESS SPACE TO RESUME FLIGHT
+        </div>
+        <div className="hidden font-mono text-[9.5px] tracking-wider text-[#5c6bc0] [@media(pointer:coarse)]:block">
+          TAP ANYWHERE TO RESUME FLIGHT
         </div>
       </div>
     </div>

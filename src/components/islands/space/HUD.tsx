@@ -99,6 +99,8 @@ export default function HUD({
           <br />
           CLICK A CRAFT OR GOLD BEACON TO TRAVEL
           <br />
+          SCROLL OR +/− TO ZOOM
+          <br />
           KEYS · ← → ↑ ↓ LOOK · ENTER TRAVEL · H HOME
         </div>
       </div>

@@ -794,10 +794,32 @@ duration table and blast radius in ADR-0011):
 Port space-engine.js:1482-1497 semantics into `travelTo` (babylon-engine.ts:4719-4722):
 on `id.startsWith("fs-")`, parse index `i`, read position from the retained `_field`
 (positions/meta arrays, :1588-1592 — the same store `fieldInfo(i)`/hover uses), synthesize
-`{pos, dir: normalize(pos), ly: derived from the field's depth convention (legacy uses
-L*3.9 — match the legacy-derived value so the two engines agree on synthesized `ly`)}`,
+`{pos, dir: normalize(pos), ly: ...}`,
 then `_beginWarp` + `cosmos:select` exactly like a catalog body. Arrival flows through the
 existing vista/card path; `entryForFieldStar` (SpaceScene) revives untouched. E2E = D4-AC4.
+
+> **CORRECTION (2026-07-25, during D4.2 implementation — [TR-099](../test-reports/TR-099.md)).**
+> This section originally prescribed the synthesized `ly` as _"derived from the field's depth
+> convention (legacy uses ~~L\*3.9~~ — match the legacy-derived value so the two engines agree
+> on synthesized `ly`)"_. **Following that literally would have shipped a defect**, and it is
+> superseded here rather than edited away:
+>
+> 1. **Stride.** The legacy `fieldF` is **4 floats per record**; Babylon's `_field.positions`
+>    is **3**. A verbatim port reads a neighbouring star's coordinates — no crash, no visual
+>    error, just travel to the wrong object. What shipped indexes `i*3`, pinned by a unit test.
+> 2. **Depth convention.** `L*3.9` is correct only for the base HIP field (type 0). PF-10's
+>    typed layers are **log-depth** (`fieldInfo`'s `type > 0` branch), where `L*3.9` reports a
+>    record at ~10³ ly instead of its real distance. That value is not cosmetic: it feeds
+>    `warpDurationForLy`, `localFieldVisibility` (D2.2's extragalactic collapse) and
+>    `_farDestLy` (the impostor's size) — so the literal port would have left **D2.2 dead for
+>    exactly the deep-field objects it exists to serve**, and made the collector card (which
+>    reads `fieldInfo` via `entryForFieldStar`) disagree with the journey just flown.
+>
+> What shipped routes `ly` through **`fieldInfo(i)` itself** — the same source the hover tooltip
+> and the collector card already read, so the three agree by construction. For type 0 this
+> returns exactly `r * 3.9`, so the original instruction's actual _intent_ ("the two engines
+> agree") holds wherever both engines have data; the divergence is confined to layers the
+> archived engine does not have at all.
 
 ### D4.3 Card polish + focus utility
 
@@ -813,6 +835,17 @@ existing vista/card path; `entryForFieldStar` (SpaceScene) revives untouched. E2
   `ON STATION · OPEN COLLECTOR CARD ▸`); "dossier" reserved for section overlays. One
   sweep, one TR note, E2E string updates named.
 
+> **CORRECTION (2026-07-25, during D4.3 implementation — [TR-099](../test-reports/TR-099.md)).**
+> `moveFocus(el, restoreTo)` and `useEscapeStack(layer, handler)` above describe functions
+> that **already existed with different signatures** by the time D4.3 started — D4.1 landed
+> first (as this section's own "if D1 lands first, create it here" anticipated) and shipped
+> `moveFocusTo(el)` / `restoreFocusTo(el)` as two separate functions, and
+> `useEscapeStack(layers: readonly EscapeLayer[])` taking a priority-ordered array rather than
+> a single `(layer, handler)` pair. D4.3 **reused those as built** rather than re-authoring to
+> match this section's literal signatures — only `trapFocus(container, event)` was genuinely
+> new. Renaming the D4.1 functions to match this doc after the fact would have been the
+> tail wagging the dog; this correction updates the doc to the shipped reality instead.
+
 ### D4.4 Content pass (DECIDED — sourced, owner-approved drafts)
 
 - **Do not edit generated catalog files** (#22). New hand-curated overlay module
@@ -824,6 +857,15 @@ existing vista/card path; `entryForFieldStar` (SpaceScene) revives untouched. E2
   `docs/analysis/2026-XX-XX-card-content-sources.md` → owner approves batch → land.
 - Unit test: no `[[TODO` string remains in the merged catalog; overlay only overrides
   existing ids (no phantom bodies).
+
+> **PROGRESS (2026-07-25 — [TR-099](../test-reports/TR-099.md)).** Batch 1 (the 25 deferred
+> cluster texts) is DELIVERED and owner-approved — source list at
+> [docs/analysis/2026-07-25-card-content-sources.md](../analysis/2026-07-25-card-content-sources.md).
+> "Applied LAST in SpaceScene's import chain" is implemented as its own `.then()` sequenced
+> AFTER the base-catalog `Promise.all` resolves, not as one more entry inside that array —
+> `Promise.all` does not order its own array's module side effects relative to each other, and
+> this overlay's entire job (overriding ids the base modules add) depends on every one of them
+> having already run first. Batch 2 (the 41+ NGC2000 nebula entries) is NOT started.
 
 ---
 

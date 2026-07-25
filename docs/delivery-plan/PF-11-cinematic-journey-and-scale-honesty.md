@@ -550,42 +550,90 @@ through to the canvas and can launch a NEW warp (the exact opposite of "dismiss 
 (c) stale hover tooltip persists under the card modal; (d) "dossier" naming is overloaded
 across three UIs; (e) NGC2000 cards render a literal `[[TODO: content pass…]]`.
 
-### D4.1 Vista dismissal (owner-specified): click-anywhere / spacebar / Escape → vista closes,
+### D4.1 Vista dismissal (owner-specified) — ✅ DELIVERED 2026-07-25 ([TR-098](../test-reports/TR-098.md)):
 
-ship stays parked (pure React state — `arrivedId` and camera untouched). Experience-review
-decisions ADOPTED: vista root becomes a real `role="dialog"` surface (pointer-events-auto,
-container focused on mount, focus restored on dismissal) so a dismissing click cannot fall
-through and launch travel; **the 5.5 s auto-timeout is REMOVED** (with dismissal present it
-only creates races and a WCAG 2.2.1 problem — its E2E dependencies are named test changes);
-a visible hint line `CLICK ANYWHERE OR PRESS SPACE TO RESUME FLIGHT` (touch variant swaps
-the dead hover copy); Space at dialog level dismisses while Space on the focused card button
-activates it (correct native semantics, documented); global Escape stack ordered
-card → vista → suggestions → sectionOpen; **the card does NOT auto-open on arrival** (the
-vista is the cinematic payoff; the card keeps its two entrances, with the button
-strengthened).
+click-anywhere / spacebar / Escape → vista closes, ship stays parked (pure React state —
+`arrivedId` and camera untouched). Experience-review decisions ADOPTED: vista root is now a
+real `role="dialog"` surface (pointer-events-auto, container focused on mount, focus restored
+on dismissal), raised above `#ij-mission-bar`'s z-index so a dismissing click cannot fall
+through and launch travel (the TR-086 root cause); **the 5.5 s auto-timeout is REMOVED**; a
+visible hint line `CLICK ANYWHERE OR PRESS SPACE TO RESUME FLIGHT` (touch variant swaps the
+dead hover copy); Space at dialog level dismisses while Space on the focused card button
+activates it (correct native semantics); a global Escape stack (new `useEscapeStack`,
+`focus-utils.ts`) ordered card → vista → suggestions → sectionOpen, replacing the old
+close-everything-at-once handler; a 300 ms post-dismiss click-swallow window closes the
+D4-AC2 double-click gap; **the card does NOT auto-open on arrival** (unchanged — the vista is
+the cinematic payoff; the card keeps its two entrances, with the button strengthened). Escape
+handled exclusively by the global stack, not also inside `ArrivalVista` itself (a documented
+deviation from the implementation plan's literal phrasing — see TR-098). D4.2/D4.3/D4.4 remain
+open, as scoped.
 
-### D4.2 Field-object travel parity: implement the `fs-` branch in Babylon `travelTo`
+### D4.2 Field-object travel parity — ✅ DELIVERED 2026-07-25 ([TR-099](../test-reports/TR-099.md)):
 
-(synthesized target, full select→warp→arrive→vista→card flow, matching space-engine.js:1482-97
-semantics), reviving `entryForFieldStar` on the default path. The tooltip CTA and the click
-outcome must never disagree.
+implemented the `fs-` branch in Babylon `travelTo` (synthesized target, full
+select→warp→arrive→vista→card flow, reviving `entryForFieldStar` on the default path). Two
+real defects in the implementation plan's own prescribed port caught before shipping: the
+legacy `fieldF` array is 4 floats/record, Babylon's `_field.positions` is 3 (a verbatim port
+reads a neighbouring star); and the plan's prescribed `ly: L*3.9` disagrees with `fieldInfo`'s
+own log-depth convention for PF-10's typed bonus layers by orders of magnitude, which would
+have left D2.2's extragalactic collapse dead for exactly the deep-field objects it exists to
+serve. Shipped routes `ly` through `fieldInfo` itself instead — the same source the tooltip
+and card already read. Implementation plan corrected in place (superseded, not edited away).
+The tooltip CTA and the click outcome never disagree (D4-AC4).
 
-### D4.3 Card polish: clear stale hover state when a modal opens AND gate `HoverTooltip` on
+### D4.3 Card polish — ✅ DELIVERED 2026-07-25 ([TR-099](../test-reports/TR-099.md)):
 
-`!cardId && !vista`; rationalise the "dossier/collector card" naming to one word per surface
-(ux-copy pass); fix the vestigial `e.r === "field"` ternary; give CollectorCard the focus
-trap + focus move its `aria-modal` already claims; ≥24px hit areas + `aria-label`/
-`aria-pressed` on the style dots; one shared focus-management utility serving D1/D4/D5.
+hover cleared explicitly at both card-open sites AND `HoverTooltip` gated on
+`!cardId && !vista` (belt-and-suspenders); "dossier" naming pass (the collector card is never
+called that outside its own "dossier" visual-style option, which is a separate, pre-existing,
+plan-endorsed concept — "dossier" itself stays reserved for section overlays); vestigial
+`e.r === "field"` ternary removed; CollectorCard gained a real focus trap (new `trapFocus`,
+`focus-utils.ts`) + focus move/restore on open/close, matching the `aria-modal` it already
+claimed; style dots now have a real 24px hit target (WCAG 2.5.8) with `aria-label`/
+`aria-pressed`; stat-bar decoration marked `aria-hidden`. Reuses D4.1's `moveFocusTo`/
+`restoreFocusTo`/`useEscapeStack` rather than re-authoring them (a documented deviation from
+this item's literal `moveFocus(el, restoreTo)` naming — see TR-099).
 
-### D4.4 Content pass — ✅ AUTHORSHIP DECIDED (owner, 2026-07-22, ADR-0010)
+### D4.4 Content pass — ✅ BATCH 1 DELIVERED 2026-07-25 ([TR-099](../test-reports/TR-099.md)), owner-approved same day:
 
-NGC2000 field notes + the 25/35 deferred cluster flavour texts: **owner-approved GENERATED
-drafts, grounded in official sources** — every card's facts trace to NASA/ESA/IAU/refereed
-literature (source list per card recorded alongside the content; licensing rules per
-[docs/research/texture-sources-public-domain.md](../research/texture-sources-public-domain.md));
-owner approves each batch before ship; no invented facts, ever.
+the 25 deferred cluster field-notes + lore, **owner-approved GENERATED drafts, grounded in
+official sources** — every card's facts trace to NASA/ESA/refereed literature/mission
+archives (source list per card in
+[docs/analysis/2026-07-25-card-content-sources.md](../analysis/2026-07-25-card-content-sources.md));
+numerical facts (distance/age/magnitude) reused the catalog's own already-hand-verified `"st"`
+values rather than re-deriving them. New override-only `celestial-content-overlay.js`
+(CLAUDE.md #22 — never hand-edits the generated `celestial-clusters.js`), sequenced strictly
+after the base-catalog `Promise.all` in SpaceScene's import chain (not inside it — import
+order within one `Promise.all` is not guaranteed).
+
+**Batch 2 (41 NGC2000 nebula entries) — ✅ DELIVERED 2026-07-25** (drafted
+[TR-100](../test-reports/TR-100.md), owner-approved and wired
+[TR-101](../test-reports/TR-101.md)): all 41 ids researched (identities live-search-verified,
+not blind guesses), written into a new sibling `celestial-content-overlay-ngc2000.js` + 6 new
+unit tests, full source list in
+[docs/analysis/2026-07-25-ngc2000-card-content-sources.md](../analysis/2026-07-25-ngc2000-card-content-sources.md).
+Sequenced as its own `.then()` after batch 1's overlay in `SpaceScene.tsx`'s import chain (kept
+as a separate module rather than added to batch 1's own file, since that file was already
+wired live — a shared file would have shipped batch 2 without a separate approval gate). Two
+data-quality findings flagged, not fixed (generated catalog, out of scope):
+`ngc2000-crescent-nebula`'s own `ly` value is ~3 orders of magnitude off the real object's
+distance; `ngc2000-butterfly-nebula`/`ngc2000-bug-nebula` looked like a pipeline duplicate but
+are confirmed two different real objects (M2-9 vs NGC 6302) sharing a nickname. Total JS
+budget raised 1200→1205 KB gz (`budgets.config.mjs`, TR-101) to absorb the deliberate content
+growth.
+
+**`isFarField` field-object defect — ✅ FIXED 2026-07-25 ([TR-100](../test-reports/TR-100.md)):**
+the HUD's `MILKY WAY ASTERN` line was driven off a catalog-only lookup that always missed
+`fs-` (field-object) ids, silently reporting every field arrival as near regardless of true
+distance — unreachable before D4.2, reachable (and wrong) since. Fixed by routing through
+`entryFor()`'s existing `fs-` fallback; new E2E coverage closes the "unverifiable by test" gap
+this item was flagged with.
+
 **Exit:** adopted criteria **D4-AC1..6** (incl. the double-click/rapid-click no-warp
-assertion) + axe-clean + manual regression.
+assertion) + axe-clean + manual regression — D4.1's TR-098 and D4.2-4/TR-099 close all six.
+**Phase D4 is now fully complete** except the one standing item across the whole phase —
+owner-eyes manual regression (see TR-101's Known limitations — attempted again this pass too,
+same standing Browser-pane constraint, new repro evidence recorded in TR-100).
 
 ## Phase D5 — Where-To console v2 (owner R9/R10)
 

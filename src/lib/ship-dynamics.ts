@@ -726,6 +726,76 @@ export function frameLadderFade(
  * through it). */
 export const ARRIVE_STANDOFF = 38;
 
+/** Planet-class arrival standoff (Vega SHOT-BRIEF, 2026-07-25 — owner-reported "camera
+ * pointing away from Mars on arrival, zoom out a little so the star field is also
+ * partially visible"). Deliberately DECOUPLED from `ARRIVE_STANDOFF`, which stays
+ * untouched — it's also the ascent-cinematic end distance and the home-orbit radius
+ * (both asserted exactly equal to it elsewhere), and retuning it would silently retune
+ * two unrelated shots. At the old 38-unit distance a `PLANET_SPHERE_RADIUS`=26 sphere
+ * subtends `2*asin(26/38) ≈ 86.3°` — wider than the 70° base FOV, i.e. edge-to-edge
+ * with zero sky visible, not a reveal. 80 units targets `2*asin(26/80) ≈ 37.7°`,
+ * roughly half the FOV — the classic reveal ratio: the sphere reads as dominant
+ * without touching the frame edges. Every planet/moon/dwarf body renders at the same
+ * normalized sphere radius (see planet-sphere.ts), so one shared distance is correct
+ * for all of them, not a per-body formula. */
+export const PLANET_ARRIVE_STANDOFF = 80;
+
+/** Literal duplicate of planet-sphere.ts's `PLANET_SPHERE_RADIUS` — same reasoning as
+ * this file's other duplicated constants (kept import-free/pure for unit-testability);
+ * a unit test asserts the two agree. Zoom's near floor for a planet-class body keeps
+ * this margin clear of the rendered surface so the camera's near clip plane can never
+ * punch through it. */
+export const PLANET_SPHERE_RADIUS_FOR_ZOOM = 26;
+export const PLANET_ZOOM_NEAR_MARGIN = 5;
+
+/** Zoom bounds for point-like targets (DSOs, stars, field objects) and the home orbit:
+ * no physical surface to collide with, so bounds scale off the resting distance itself
+ * rather than an absolute floor (Vega SHOT-BRIEF, 2026-07-25). */
+export const ZOOM_MIN_MULT = 0.3;
+export const ZOOM_MAX_MULT = 3;
+
+/** Per-tick zoom step, as a fraction of the CURRENT distance (multiplicative, not
+ * additive, so one wheel notch/keypress feels proportionally similar whether parked
+ * close to a moon or far from a nebula). One mouse-wheel notch (`deltaY` ≈ ±100 in
+ * most browsers) or one keypress both apply one step. */
+export const ZOOM_STEP = 0.12;
+
+/** Damping rate for the eased approach to a new zoom target (Vega SHOT-BRIEF:
+ * "responsive utility control... on the order of 150-250ms per step, not an ambient
+ * cinematic move"). `dampScalar` is exponential, so this is a rate constant, not a
+ * literal duration — lambda=8 reaches ~80% of the way to target in 200ms. */
+export const ZOOM_LAMBDA = 8;
+
+/** Clamps a candidate zoom distance to this target's bounds. `restDist` is the
+ * distance the camera actually arrived at (== `PLANET_ARRIVE_STANDOFF` for a
+ * planet-class body, `ARRIVE_STANDOFF`/`HOME_ORBIT_RADIUS` otherwise) — the ceiling is
+ * always relative to it; the floor is an absolute near-clip-safe margin for a
+ * planet-class body (which has a real surface to avoid punching through) or a
+ * fraction of `restDist` otherwise (nothing physical to collide with). */
+export function clampZoomDistance(
+  dist: number,
+  isPlanetClass: boolean,
+  restDist: number,
+): number {
+  const min = isPlanetClass
+    ? PLANET_SPHERE_RADIUS_FOR_ZOOM + PLANET_ZOOM_NEAR_MARGIN
+    : restDist * ZOOM_MIN_MULT;
+  const max = restDist * ZOOM_MAX_MULT;
+  return Math.max(min, Math.min(max, dist));
+}
+
+/** Frame-rate-independent exponential damp of a plain scalar toward `target` — the
+ * non-wrap-aware sibling of `dampAngle` below, for values with no periodicity (a zoom
+ * distance, never an angle). */
+export function dampScalar(
+  current: number,
+  target: number,
+  lambda: number,
+  dt: number,
+): number {
+  return current + (target - current) * (1 - Math.exp(-lambda * dt));
+}
+
 /** Warp-path easing (ease-in-out quad) — the live engine's accel/decel curve
  * for the ship's world-space position along a warp (space-engine.js's private
  * `ease`, not importable). Distinct from any UI/CSS easing; this specifically

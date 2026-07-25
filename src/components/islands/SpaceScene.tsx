@@ -51,6 +51,7 @@ import {
   FUNNEL_OVERLAY_STORAGE_KEY,
   type FunnelSession,
 } from "@/lib/funnel";
+import { useEscapeStack } from "@/lib/focus-utils";
 
 interface SpaceSceneProps {
   density?: number;
@@ -80,14 +81,22 @@ function catalog(): CelestialEntry[] {
  * render for a value that changes once per arrival is waste. A module-level
  * closure, NOT a useMemo — a hook here would sit below the component's
  * `if (!engineReady) return null` early exit, the exact Rules-of-Hooks
- * crash (#310) D1.4 already hit (TR-086). */
+ * crash (#310) D1.4 already hit (TR-086).
+ *
+ * PF-11 D4.2 follow-up (TR-100): must go through `entryFor`, not a raw
+ * `catalog()` lookup — field objects (`fs-N`) are synthesized from the
+ * engine's live `fieldInfo()` and never written into `window.CELESTIAL`, so
+ * a catalog-only lookup silently reports every field arrival as near
+ * regardless of true distance. This was unreachable before D4.2 (nothing
+ * could ever arrive at an `fs-` id); it is reachable now, and SDSS field
+ * galaxies routinely sit at 32.6M-28.86B ly. */
 let farFieldCache: { id: string; far: boolean } | undefined;
 function isFarField(id: string | null): boolean {
   if (!id) return false;
   if (farFieldCache?.id !== id) {
     farFieldCache = {
       id,
-      far: (catalog().find((e) => e.id === id)?.ly ?? 0) >= EXTRAGALACTIC_LY,
+      far: (entryFor(id)?.ly ?? 0) >= EXTRAGALACTIC_LY,
     };
   }
   return farFieldCache.far;
@@ -98,6 +107,14 @@ function isFarField(id: string | null): boolean {
  * not content to read, and the ongoing warp-transit overlay keeps communicating the journey
  * (destination, phase, home-bound framing) long after this banner clears itself. */
 const NAV_NOTICE_MS = 2200;
+
+/** PF-11 D4.1 (D4-AC2): how long, after any vista dismissal (click/Space/Escape), SpaceScene
+ * swallows the NEXT pointerdown aimed at the engine canvas before it reaches the engine's own
+ * pick/click handling. A double-click or rapid-click burst that dismisses the vista would
+ * otherwise land its second click on the canvas the instant the vista unmounts and launch an
+ * unintended warp — the exact "babylon doesn't show the card" symptom R7 reported, which
+ * traced back to the vista having no real dismiss surface at all (TR-086). */
+const VISTA_CLICK_SWALLOW_MS = 300;
 
 /** Extracted so PF-11 D1.4 can compute an accurate result count for the value a keystroke is
  * ABOUT to produce, synchronously inside the `onCmdChange` callback — a `useEffect` reacting
@@ -154,7 +171,7 @@ function bodyDisplayName(id: string): string {
 /**
  * PF-07 Phases 1-4: mounts the ported <space-engine> WebGL scene, its "always visible
  * during travel" chrome (HUD, mission control, hover tooltip, warp transit overlay,
- * arrival vista), the collector-card and section-overlay dossiers, station sprite markers,
+ * arrival vista), the collector card and the section-overlay dossiers, station sprite markers,
  * and the travel-mode/scroll-mode toggle. Header nav links work via document-level click
  * delegation (see the event-wiring effect). The mobile responsive pass
  * (design_handoff_mobile_responsive) also relocated two HUD actions - the mode toggle and
@@ -213,6 +230,12 @@ export default function SpaceScene({
   const [revealReady, setRevealReady] = useState(false);
   const [ascentActive, setAscentActive] = useState(false);
 
+  /** PF-11 D4.1: text for the sr-only `role="status"` region announcing a vista dismissal
+   * (the vista itself unmounts the instant it's dismissed, so the announcing node has to live
+   * outside it to still be there for assistive tech to read). Same convention as PreFlight's
+   * own sparse `role="status"` announcer. */
+  const [vistaAnnouncement, setVistaAnnouncement] = useState("");
+
   const onLaunch = useCallback((ascent: boolean) => {
     funnelRef.current?.record("launch-pressed");
     const en = engineEl();
@@ -262,12 +285,11 @@ export default function SpaceScene({
   const desiredBodyRef = useRef<string | null>(null);
   const spriteElsRef = useRef<SpriteRefMap>({});
   const bodyCacheRef = useRef<Record<string, SpaceEngineBody | undefined>>({});
-  const vistaTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
-  /** PF-11 D3.3: auto-clears the transient abort/retarget-queued notice banner. Separate
-   * from `vistaTimeoutRef` — the two overlays are unrelated and can be live at once (a
-   * notice fires mid-warp; the vista only ever opens at rest). */
+  /** PF-11 D4.1: epoch-ms deadline until which the engine's own click-to-travel pick is
+   * suppressed (see `VISTA_CLICK_SWALLOW_MS`). A plain ref, not state — it's read inside a
+   * native capture-phase listener, not rendered. */
+  const clickSwallowUntilRef = useRef<number>(0);
+  /** PF-11 D3.3: auto-clears the transient abort/retarget-queued notice banner. */
   const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
@@ -275,6 +297,23 @@ export default function SpaceScene({
   const patch = useCallback((p: Partial<SceneState>) => {
     setState((s) => ({ ...s, ...p }));
   }, []);
+
+  /** PF-11 D4.1: the ONE path that closes the arrival vista — click-anywhere, Space, and the
+   * Escape stack all funnel through this. `arrivedId`/camera are deliberately untouched (the
+   * owner spec: dismiss closes the vista, the ship stays parked exactly where it landed). */
+  const dismissVista = useCallback(
+    (via: "click" | "space" | "escape") => {
+      const vistaId = stateRef.current.vista?.id ?? null;
+      const name = vistaId ? entryFor(vistaId)?.n : null;
+      clickSwallowUntilRef.current = Date.now() + VISTA_CLICK_SWALLOW_MS;
+      funnelRef.current?.record("vista-dismissed", { via });
+      patch({ vista: null });
+      setVistaAnnouncement(
+        name ? `Resumed flight at ${name}.` : "Resumed flight.",
+      );
+    },
+    [patch],
+  );
 
   const isTravel =
     (state.navOverride ?? (mobile ? "scroll" : "travel")) === "travel";
@@ -510,9 +549,24 @@ export default function SpaceScene({
       import("@/data/celestial/celestial-gd1.js"),
       import("@/data/celestial/celestial-ngc2000.js"),
       import("@/data/celestial/celestial-saturn-moons.js"),
-    ]).then(() => {
-      if (!cancelled) setEngineReady(true);
-    });
+    ])
+      .then(
+        // PF-11 D4.4: sequenced as its own .then, NOT inside the Promise.all above.
+        // Promise.all does not order its array's own top-level module side effects relative
+        // to each other — the overlay's whole job is overriding ids the base catalog modules
+        // add, so it must run strictly after every one of them has already run, not "probably
+        // usually does in practice." Batch 1 (25 clusters, owner-approved 2026-07-25).
+        () => import("@/data/celestial/celestial-content-overlay.js"),
+      )
+      .then(
+        // Batch 2 (41 NGC2000 nebulae, owner-approved 2026-07-25, TR-100) — same reasoning,
+        // its own .then chained after batch 1 rather than folded into one import for the
+        // same non-ordering-guarantee reason above.
+        () => import("@/data/celestial/celestial-content-overlay-ngc2000.js"),
+      )
+      .then(() => {
+        if (!cancelled) setEngineReady(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -700,16 +754,21 @@ export default function SpaceScene({
       }
       const s = stateRef.current;
       if (!s.warp && s.arrivedId === id) {
-        clearTimeout(vistaTimeoutRef.current);
+        // PF-11 D4.3: clear hover explicitly (not just via the HoverTooltip render gate below)
+        // — the card's focus trap is about to pull keyboard focus onto itself, and a tooltip
+        // still anchored to a now-stale cursor position has no business surviving that.
         patch({
           vista: null,
           cardId: id,
+          hover: null,
           tilt: { rx: 0, ry: 0, mx: 50, my: 50 },
           queuedTargetId,
         });
         return;
       }
       funnelRef.current?.record("arrival", { id });
+      // PF-11 D4.1: no auto-timeout — the vista now stays until the visitor dismisses it
+      // (click-anywhere, Space, or Escape; see `dismissVista`).
       patch({
         warp: null,
         arrivedId: id,
@@ -717,14 +776,6 @@ export default function SpaceScene({
         hover: null,
         queuedTargetId,
       });
-      clearTimeout(vistaTimeoutRef.current);
-      vistaTimeoutRef.current = setTimeout(() => {
-        // PF-11 D1.4: the 5.5s auto-timeout is today's only "vista dismissed" path pending
-        // D4.1's click-anywhere/Space/Escape dismissal — recorded honestly as such, not
-        // silently left uninstrumented (see the slice TR for D4.1's expected extension).
-        funnelRef.current?.record("vista-dismissed", { via: "timeout" });
-        patch({ vista: null });
-      }, 5500);
     }) as EventListener);
     on("cosmos:home", (() => {
       // D3.3: going home — including as an ABORT — discards a pending nav-click
@@ -796,11 +847,21 @@ export default function SpaceScene({
       setRevealReady(true);
     }) as EventListener);
 
-    const handleKeydown = (e: KeyboardEvent) => {
-      if (e.key === "Escape")
-        patch({ cardId: null, mcOpen: false, sectionOpen: null });
+    // PF-11 D4.1 (D4-AC2): swallow the pointerdown that would otherwise start the engine's
+    // own drag/click gesture for `VISTA_CLICK_SWALLOW_MS` after a vista dismissal. Capture
+    // phase on `document` so this runs BEFORE the engine's own `canvas.addEventListener`
+    // listener (bound directly on the canvas, in the babylon-engine.ts/space-engine.js
+    // "SpaceScene's click gate, not the engine" split the implementation plan calls for) —
+    // scoped to clicks that actually target the engine element so it never touches mission
+    // bar / card / any other chrome's own clicks.
+    const swallowEngineClick = (ev: PointerEvent) => {
+      if (Date.now() >= clickSwallowUntilRef.current) return;
+      const target = ev.target as Element | null;
+      if (target?.closest?.("space-engine, babylon-scene")) {
+        ev.stopPropagation();
+      }
     };
-    window.addEventListener("keydown", handleKeydown);
+    document.addEventListener("pointerdown", swallowEngineClick, true);
 
     const knownSections = [
       "hero",
@@ -864,9 +925,8 @@ export default function SpaceScene({
 
     return () => {
       listeners.forEach(([n, f]) => window.removeEventListener(n, f));
-      window.removeEventListener("keydown", handleKeydown);
+      document.removeEventListener("pointerdown", swallowEngineClick, true);
       document.removeEventListener("click", clickDelegate);
-      clearTimeout(vistaTimeoutRef.current);
     };
   }, [
     engineReady,
@@ -924,7 +984,15 @@ export default function SpaceScene({
         top: number;
         bottom: number;
       } | null = null;
-      const heroCopy = atHome ? document.getElementById("ij-hero-copy") : null;
+      // TR-102 (owner-reported classic-view scroll jank): `dodge` only matters when a
+      // sprite could actually show, and `show` below already requires `travel` — so
+      // computing it while `!travel` (classic view) was pure waste, and the worst kind:
+      // three `getBoundingClientRect()` calls forcing a synchronous layout flush on
+      // EVERY rAF tick while the visitor is mid-scroll, the exact "not smooth" symptom
+      // reported. Gating on `atHome && travel` removes that cost in classic view with no
+      // behavior change in travel mode (dodge was already unreachable there when !travel).
+      const heroCopy =
+        atHome && travel ? document.getElementById("ij-hero-copy") : null;
       if (heroCopy) {
         const h1 = heroCopy.querySelector("h1");
         const badge = heroCopy.firstElementChild as HTMLElement | null;
@@ -979,11 +1047,33 @@ export default function SpaceScene({
     return () => cancelAnimationFrame(raf);
   }, [engineReady]);
 
+  // PF-11 D4.1: the global Escape dispatcher — exactly one of these closes per press, in this
+  // priority order (replaces the old blanket `patch({cardId:null, mcOpen:false,
+  // sectionOpen:null})` that closed everything at once regardless of what was actually open).
+  // `mcOpen` rides along wherever it's already inert (see types.ts — nothing currently reads
+  // it as true) so it's never left stuck if a future consumer starts setting it.
+  useEscapeStack([
+    {
+      active: !!state.cardId,
+      onEscape: () => patch({ cardId: null, mcOpen: false }),
+    },
+    { active: !!state.vista, onEscape: () => dismissVista("escape") },
+    { active: !!state.cmd, onEscape: () => patch({ cmd: "" }) },
+    {
+      active: !!state.sectionOpen,
+      onEscape: () => patch({ sectionOpen: null, mcOpen: false }),
+    },
+  ]);
+
   if (!engineReady) return null;
 
   // --- derived render values (mirrors renderVals() for the Phase 2/3 subset) ---
+  // PF-11 D4.3: gated on !cardId && !vista as a render-time backstop — belt-and-suspenders
+  // alongside the explicit `hover: null` clears at both card-open sites above, so a future
+  // path that opens the card without remembering that clear still can't leave a stale
+  // tooltip showing (or fighting the card's focus trap) underneath it.
   const hoverTooltip: HoverTooltipData | null = (() => {
-    if (!state.hover) return null;
+    if (!state.hover || state.cardId || state.vista) return null;
     const e = entryFor(state.hover.id);
     if (!e) return null;
     return {
@@ -994,9 +1084,11 @@ export default function SpaceScene({
       rarityColor: rarityColor(e.r),
       dist: fmtDist(e),
       mg: e.mg,
+      // PF-11 D4.3 naming pass: "dossier" is reserved for SectionOverlay's own display mode
+      // (the delivery plan's R8 audit) — the collector card is never called that anywhere else.
       cta:
         !state.warp && state.arrivedId === e.id
-          ? "ON STATION · CLICK TO OPEN DOSSIER ▸"
+          ? "ON STATION · OPEN COLLECTOR CARD ▸"
           : "CLICK TO TRAVEL ▸",
       x: state.hover.x,
       y: state.hover.y,
@@ -1145,6 +1237,12 @@ export default function SpaceScene({
 
       <HoverTooltip data={hoverTooltip} />
 
+      {/* PF-11 D4.1 (D4-AC6): persists across the vista's own mount/unmount so a dismissal
+          announcement is still there for assistive tech to read after the vista is gone. */}
+      <div role="status" className="sr-only">
+        {vistaAnnouncement}
+      </div>
+
       <WarpOverlay
         warp={state.warp}
         destName={warpDestName}
@@ -1157,12 +1255,16 @@ export default function SpaceScene({
       {vistaEntry && (
         <ArrivalVista
           entry={vistaEntry}
+          onDismiss={dismissVista}
           onOpenCard={() => {
-            clearTimeout(vistaTimeoutRef.current);
             funnelRef.current?.record("vista-dismissed", { via: "open-card" });
+            // PF-11 D4.3: hover is already null here in practice (the vista blocks all
+            // pointer events, so nothing could have re-hovered since arrival) — cleared
+            // explicitly anyway so this path doesn't silently depend on that staying true.
             patch({
               vista: null,
               cardId: vistaEntry.id,
+              hover: null,
               tilt: { rx: 0, ry: 0, mx: 50, my: 50 },
             });
           }}

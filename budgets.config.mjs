@@ -32,8 +32,11 @@
 /** Ceilings for the JS/WASM payload, in GZIP kilobytes over `dist/_astro`. */
 export const bundle = {
   /** Any large regression across the whole JS payload (both engines + app; PF-09's ~900 KB
-   * engine budget is subsumed). Measured 1031 KB on 2026-07-19 (TR-052); ~15% headroom. */
-  totalJsGz: 1200,
+   * engine budget is subsumed). Measured 1031 KB on 2026-07-19 (TR-052); ~15% headroom.
+   * Raised 1200 -> 1205 on 2026-07-25 (TR-101): PF-11 D4.4 batch 2 (41 owner-approved,
+   * sourced NGC2000 nebula field-notes/lore) measured 1200.9 KB, 0.9 KB over the prior
+   * ceiling — deliberate content growth, not drift; ~4 KB headroom restored. */
+  totalJsGz: 1205,
 
   /** The TR-027 canary, and the most important number in this file. An accidental
    * `@babylonjs/core` BARREL import materializes as a single ~1.1 MB chunk and trips this

@@ -83,10 +83,19 @@ jobs:
           name: dist
           path: dist/
 
+  # Sharded across 4 runners (2026-07-25 E2E audit, TR-104): each shard is its own VM with its
+  # own single SwiftShader instance, so this does NOT reproduce the "N workers time-slicing ONE
+  # GPU" flake that workers:1 (playwright.config.ts, TR-018/TR-052) exists to prevent — that
+  # problem is about local multi-worker contention on ONE machine, and shards share no GPU.
+  # `workers: 1` stays in effect INSIDE each shard via playwright.config.ts, unchanged.
   e2e:
-    name: E2E Tests
+    name: E2E Tests (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -99,4 +108,21 @@ jobs:
           name: dist
           path: dist/
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - run: npx playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # Aggregator so branch-protection can keep requiring a single, stable status-check name
+  # ("E2E Tests") instead of the four per-shard names above, which would otherwise break any
+  # existing required-check rule the moment this job became a matrix (same reasoning as
+  # docs:check/assets:verify living as steps rather than jobs above — TR-034).
+  e2e-summary:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: e2e
+    if: always()
+    steps:
+      - name: Check shard results
+        run: |
+          if [ "${{ needs.e2e.result }}" != "success" ]; then
+            echo "One or more E2E shards failed or were cancelled."
+            exit 1
+          fi

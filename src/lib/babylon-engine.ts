@@ -356,6 +356,11 @@ import {
 } from "./babylon-ship";
 import {
   ARRIVE_STANDOFF,
+  PLANET_ARRIVE_STANDOFF,
+  clampZoomDistance,
+  dampScalar,
+  ZOOM_STEP,
+  ZOOM_LAMBDA,
   bodyWorldPosition,
   CHASE_LOOK_AHEAD,
   CHASE_LOOK_LAMBDA,
@@ -572,6 +577,44 @@ export function freeLookDir(
   // matching space-engine.js's own `pitch = down.pitch + dy*k` (drag down
   // increases pitch) reading as "nose up" rather than an inverted mouselook.
   return [cp * sy, sp, cp * cy];
+}
+
+/* --- PF-11 D4.2: field-object travel target -----------------------------
+ *
+ * Extracted pure because the two things it does are exactly the two ways this port could fail
+ * silently, and neither is visible in a passing render:
+ *
+ *  - the `fs-<i>` parse and bounds check (a NaN or an out-of-range index would index
+ *    `undefined` coordinates and fly the ship to `[NaN,NaN,NaN]`); and
+ *  - the **3-float stride**. `space-engine.js`'s `fieldF` is 4 floats per star, Babylon's
+ *    `_field.positions` is 3 — the implementation plan prescribed porting the legacy code,
+ *    and a verbatim `i*4` port reads a neighbouring star's coordinates and quietly flies
+ *    somewhere plausible-looking but wrong. A test pins the stride so it cannot drift back.
+ *
+ * `ly` is deliberately NOT computed here — it belongs to `fieldInfo`'s dual depth convention
+ * (linear for the base HIP field, log-depth for PF-10's bonus layers), and reimplementing that
+ * is the duplication this whole slice is avoiding. See `_fieldBody`. */
+export function fieldStarTarget(
+  id: string,
+  positions: Float32Array,
+  count: number,
+): {
+  index: number;
+  pos: [number, number, number];
+  dir: [number, number, number];
+} | null {
+  if (!id.startsWith("fs-")) return null;
+  const index = parseInt(id.slice(3), 10);
+  if (!Number.isInteger(index) || index < 0 || index >= count) return null;
+  const pos: [number, number, number] = [
+    positions[index * 3],
+    positions[index * 3 + 1],
+    positions[index * 3 + 2],
+  ];
+  // A star exactly at the camera origin has no direction to fly along; `|| 1` mirrors the
+  // legacy engine's own guard rather than emitting a NaN direction.
+  const L = Math.hypot(pos[0], pos[1], pos[2]) || 1;
+  return { index, pos, dir: [pos[0] / L, pos[1] / L, pos[2] / L] };
 }
 
 /** Free-look pitch clamp — matches space-engine.js's ±1.45 rad (≈ ±83°). */
@@ -1830,6 +1873,38 @@ class BabylonScene extends HTMLElement {
   /** PF-11 D6.4 / R16: armed on arriving home, cleared on any departure. */
   private _homeOrbit = false;
   private _homeOrbitPhase = 0;
+  /** TR-103 zoom feature (Vega SHOT-BRIEF, owner-requested): the parked target's world
+   * position (curated body, `fs-` field object) that zoom dollies toward/away from —
+   * null when not usefully defined (mid-warp, or in the home orbit, which has its own
+   * radius-based system below and doesn't need a fixed bearing since the orbit itself
+   * continuously changes bearing by design). Set at arrival (`_tickWarp`'s k>=1
+   * branch), read only while `warp.mode === "idle"`. */
+  private _parkedTargetPos: [number, number, number] | null = null;
+  /** Unit vector from `_parkedTargetPos` TO the camera, fixed at arrival and untouched
+   * by free-look (which only ever changes `_yaw`/`_pitch`/`_camQuat` — the VIEW
+   * direction — never camera position). Zoom dollies along this fixed bearing, so it
+   * composes with free-look instead of fighting it: looking around never changes where
+   * the camera stands, zooming never changes which way the visitor was looking. */
+  private _camBearing: [number, number, number] = [0, 0, 1];
+  /** Current and target standoff distance for the zoom feature — eased toward the
+   * target every idle frame (`dampScalar`, snapped instantly under reduced motion,
+   * matching this repo's existing `_reduced` convention for driven camera values).
+   * Reset to the real arrival distance at every fresh arrival/home-orbit re-arm, so a
+   * zoom level from one body never carries over to the next. */
+  private _zoomDist = ARRIVE_STANDOFF;
+  private _zoomTargetDist = ARRIVE_STANDOFF;
+  /** The distance THIS arrival actually used (== `PLANET_ARRIVE_STANDOFF`,
+   * `ARRIVE_STANDOFF`, or `HOME_ORBIT_RADIUS`) — a fixed reference for
+   * `clampZoomDistance`'s bounds, set once at arrival and never itself changed by
+   * zooming. Kept separate from `_zoomTargetDist`, which DOES change with every zoom
+   * step — clamping a moving value against itself would let the ceiling/floor drift
+   * away with every step instead of bounding the zoom range. */
+  private _zoomRestDist = ARRIVE_STANDOFF;
+  /** Whether the current parked target is planet/moon/dwarf-class — selects which of
+   * `clampZoomDistance`'s two floor policies applies (absolute near-clip-safe margin
+   * for a real rendered sphere, vs. a fraction of resting distance for a point-like
+   * DSO/star/field object, which has nothing physical to collide with). */
+  private _zoomIsPlanet = false;
   /** Bug fix (owner-reported, post-D6.4): the home orbit's per-frame "aim at the planet"
    * driver used to run every frame the visitor wasn't actively mid-drag — including the
    * very next frame after a drag ENDED — so releasing a drag snapped the view straight
@@ -5228,7 +5303,41 @@ class BabylonScene extends HTMLElement {
    * in _boot), so `this` (the <babylon-scene> element) is the correct
    * keyboard-focus target, matching the live engine's own `this.tabIndex=0`
    * on itself, not its internal canvas. */
+  /** TR-103 zoom feature (Vega SHOT-BRIEF): applies one zoom step (positive = in,
+   * negative = out; fractional/large values from a wheel delta are fine) as a
+   * MULTIPLICATIVE change to the TARGET distance — the eased approach toward that
+   * target happens once per idle frame in `_tickWarp`, not here, so a fast burst of
+   * wheel/key input compounds smoothly against a moving spring target rather than
+   * fighting it. A safe no-op unless genuinely parked with something to zoom
+   * relative to (mid-warp/ascent/aim, or parked with neither a target nor the home
+   * orbit armed — shouldn't happen, but this guard makes it inert rather than
+   * undefined if it ever does). */
+  private _adjustZoom(steps: number) {
+    if (this.warp.mode !== "idle") return;
+    if (!this._homeOrbit && !this._parkedTargetPos) return;
+    const raw = this._zoomTargetDist * Math.pow(1 - ZOOM_STEP, steps);
+    this._zoomTargetDist = clampZoomDistance(
+      raw,
+      this._zoomIsPlanet,
+      this._zoomRestDist,
+    );
+  }
+
   private _bindPointer(canvas: HTMLCanvasElement) {
+    // TR-103 zoom feature: wheel-to-zoom, parked states only (a no-op mid-warp is
+    // handled inside _adjustZoom itself, but preventDefault only when it could
+    // actually do something, so page/section scroll is never blocked for no reason).
+    canvas.addEventListener(
+      "wheel",
+      (ev) => {
+        if (this.warp.mode !== "idle") return;
+        ev.preventDefault();
+        // Natural mapping: scrolling "down" (positive deltaY) zooms out, matching
+        // every map/inspection-camera convention a visitor already knows.
+        this._adjustZoom(-ev.deltaY / 100);
+      },
+      { passive: false },
+    );
     canvas.addEventListener("pointerdown", (ev) => {
       this._dragStart = {
         x: ev.clientX,
@@ -5293,7 +5402,7 @@ class BabylonScene extends HTMLElement {
     this.setAttribute("role", "application");
     this.setAttribute(
       "aria-label",
-      "Interactive star chart. Arrow keys look around, Enter travels to the target nearest screen centre, H returns home.",
+      "Interactive star chart. Arrow keys look around, Enter travels to the target nearest screen centre, H returns home, plus and minus zoom in and out.",
     );
     this.addEventListener("keydown", (e) => {
       const k = e.key;
@@ -5316,6 +5425,12 @@ class BabylonScene extends HTMLElement {
         else this._travelToNearestCenter();
       } else if (k === "h" || k === "H") {
         this.goHome();
+      } else if (k === "+" || k === "=") {
+        // TR-103 zoom feature: '=' is the unshifted key '+' shares on most layouts —
+        // accepting both means a visitor doesn't need Shift held for zoom-in.
+        this._adjustZoom(1);
+      } else if (k === "-" || k === "_") {
+        this._adjustZoom(-1);
       } else return;
       e.preventDefault();
     });
@@ -5601,6 +5716,49 @@ class BabylonScene extends HTMLElement {
 
   // --- travel (B2 steps 3-4) ---
 
+  /** PF-11 D4.2 — synthesize a travel target for a field/deep-layer object (`fs-<i>`).
+   *
+   * Ports space-engine.js:1482-1497. The ~168,883 hoverable field objects (base HIP field plus
+   * PF-10's WD/SDSS/OC/GD-1/EXO/AST/OORT layers) are billboard instances in one GPU mesh, not
+   * `bodies` entries — so `travelTo` could never resolve one and silently returned, even though
+   * the hover tooltip was showing `CLICK TO TRAVEL ▸` over it. Synthesizing a body here (never
+   * pushing it into `this.bodies`, exactly as the legacy engine keeps it local) lets the whole
+   * select→warp→arrive→vista→card path run unchanged, which is what revives
+   * `entryForFieldStar` on the default engine.
+   *
+   * TWO DELIBERATE DIVERGENCES FROM THE LEGACY SOURCE, both because Babylon's field is not the
+   * field space-engine.js had:
+   *
+   * 1. `positions` is 3 floats per star here, not the legacy `fieldF`'s 4 — a verbatim `i*4`
+   *    port would read a neighbouring star's coordinates and fly somewhere else entirely.
+   *    Pinned by a test on `fieldStarTarget`, which owns that parse/stride contract.
+   * 2. `ly` comes from `fieldInfo(i)`, NOT the implementation plan's prescribed legacy `L*3.9`.
+   *    For the base HIP field (type 0) `fieldInfo` returns exactly `r * 3.9`, so the two engines
+   *    agree wherever both have data — which is what the plan's instruction was actually for.
+   *    But PF-10's bonus layers are LOG-DEPTH-scaled (`fieldInfo`'s `type > 0` branch), and
+   *    `L*3.9` would report an SDSS galaxy at ~2,000 ly instead of ~1e9. That is not cosmetic:
+   *    `lyTotal` drives `warpDurationForLy`, `localFieldVisibility` and `_farDestLy`, so the
+   *    literal port would have left D2.2's extragalactic collapse and its impostor dead for
+   *    precisely the deep-field objects they exist to serve — and would have made the arrival
+   *    card (which reads `fieldInfo` via `entryForFieldStar`) disagree with the journey the
+   *    visitor just flew. `fieldInfo` is the same source the tooltip and card already read, so
+   *    routing through it makes them agree by construction rather than by coincidence.
+   */
+  private _fieldBody(id: string): BabylonBody | undefined {
+    const f = this._field;
+    if (!f) return undefined;
+    const t = fieldStarTarget(id, f.positions, f.count);
+    if (!t) return undefined;
+    const fi = this.fieldInfo(t.index);
+    if (!fi) return undefined;
+    return {
+      e: { id, ra: fi.ra, dec: fi.dec, ly: fi.ly },
+      pos: t.pos,
+      dir: t.dir,
+      vis: false,
+    };
+  }
+
   travelTo(id: string, quiet?: boolean) {
     // GAP-19: no-WebGPU/WebGL2 fallback — mirrors space-engine.js's `noGL`
     // branch exactly (space-engine.js:1471-1478). `!this._engine` is true
@@ -5619,7 +5777,11 @@ class BabylonScene extends HTMLElement {
     }
     const b =
       this.bodies.find((x) => x.e.id === id) ??
-      this.stations.find((x) => x.e.id === id);
+      this.stations.find((x) => x.e.id === id) ??
+      // PF-11 D4.2: resolved BEFORE the D3.3 policy gate below, so a field object picked
+      // mid-journey QUEUES like any other destination instead of falling out the `!b` return
+      // as a fresh silent no-op. The queue drain re-enters `travelTo`, which re-synthesizes.
+      this._fieldBody(id);
     if (!b) return; // unknown id — nothing to queue or fly to
     // PF-11 D3.3 (ADR-0010): picking a destination mid-journey used to be a
     // silent no-op. It now QUEUES — the pick is remembered, announced, and
@@ -5637,10 +5799,18 @@ class BabylonScene extends HTMLElement {
       return;
     }
     const dir = b.dir;
+    // TR-103 (Vega SHOT-BRIEF): planet/moon/dwarf bodies get the larger, decoupled
+    // PLANET_ARRIVE_STANDOFF — everything else (stars, DSOs, stations, fs- field
+    // objects, all of which are "star"-typed per entryForFieldStar) keeps the
+    // original ARRIVE_STANDOFF, untouched.
+    const standoff =
+      b.e.t === "planet" || b.e.t === "moon" || b.e.t === "dwarf"
+        ? PLANET_ARRIVE_STANDOFF
+        : ARRIVE_STANDOFF;
     const to: [number, number, number] = [
-      b.pos[0] - dir[0] * ARRIVE_STANDOFF,
-      b.pos[1] - dir[1] * ARRIVE_STANDOFF,
-      b.pos[2] - dir[2] * ARRIVE_STANDOFF,
+      b.pos[0] - dir[0] * standoff,
+      b.pos[1] - dir[1] * standoff,
+      b.pos[2] - dir[2] * standoff,
     ];
     this.arrivedId = null;
     this._beginWarp(b, to, false, !!quiet, b.e.ly ?? 0);
@@ -5935,7 +6105,13 @@ class BabylonScene extends HTMLElement {
       if (!m || !m.isVisible) return false;
       pos = [m.position.x, m.position.y, m.position.z];
     } else {
-      const b = this.bodies.find((x) => x.e.id === bodyId);
+      // PF-11 D4.2: `fs-<i>` resolves through the same synthesis `travelTo` uses, so a spec
+      // can aim at a field object and then drive the REAL hover→click path (CLAUDE.md #18)
+      // instead of calling `travelTo` directly and proving only that the method exists.
+      // Field objects are billboard instances, never `bodies` entries, so the ?? is the only
+      // way this hook can reach the ~168,883 objects D4.2 makes travelable.
+      const b =
+        this.bodies.find((x) => x.e.id === bodyId) ?? this._fieldBody(bodyId);
       if (!b) return false;
       pos = b.pos;
     }
@@ -6086,6 +6262,14 @@ class BabylonScene extends HTMLElement {
 
     const w = this.warp;
     if (w.mode === "idle") {
+      // TR-103 zoom feature (Vega SHOT-BRIEF): ease toward the target distance every
+      // idle frame. Reduced motion snaps instantly — this is direct user manipulation,
+      // not an ambient move, but per this repo's existing `_reduced` convention for
+      // driven camera values (chase-look, home-orbit aim), easing is skipped so a zoom
+      // step can't read as ambient camera motion under that preference.
+      this._zoomDist = this._reduced
+        ? this._zoomTargetDist
+        : dampScalar(this._zoomDist, this._zoomTargetDist, ZOOM_LAMBDA, dt);
       // PF-11 D6.4 / owner requirement R16 — THE HOME ORBIT. Home used to mean "parked at the
       // origin", and the origin is inside the Earth sphere this slice reveals there, so home now
       // means "in a slow orbit around it" (see _isAtHomeVantage for the predicate both this and
@@ -6106,7 +6290,14 @@ class BabylonScene extends HTMLElement {
         // the 12° the declared period calls for — exactly the 8x the clamp implies at ~2.5 fps.
         if (!this._reduced)
           this._homeOrbitPhase += HOME_ORBIT_RATE * this._dtWarpS;
-        const [px, py, pz] = homeOrbitPosition(this._homeOrbitPhase);
+        // TR-103: zoom's eased distance IS the orbit radius — homeOrbitPosition's pure
+        // scale-by-radius construction (planet-sphere.ts) keeps the 90° phase invariant
+        // exactly regardless of radius, so zooming during the home orbit can never
+        // disturb the terminator-hold R16 depends on.
+        const [px, py, pz] = homeOrbitPosition(
+          this._homeOrbitPhase,
+          this._zoomDist,
+        );
         this.cam[0] = px;
         this.cam[1] = py;
         this.cam[2] = pz;
@@ -6135,6 +6326,21 @@ class BabylonScene extends HTMLElement {
         Math.hypot(this.cam[0], this.cam[1], this.cam[2]) < 1
       ) {
         this._yaw += IDLE_DRIFT_RATE * dt;
+      }
+      // TR-103 zoom feature: dolly along the FIXED bearing set at arrival — never the
+      // free-look view direction, which is exactly what keeps zoom and free-look from
+      // fighting each other (looking around never moves the camera; zooming never
+      // changes which way it's pointed). A no-op every frame the visitor hasn't
+      // touched zoom, since `_zoomDist` then already equals the arrival distance and
+      // this just re-derives the same position `this.cam` already holds.
+      if (!this._homeOrbit && this._parkedTargetPos) {
+        const p = this._parkedTargetPos;
+        const b = this._camBearing;
+        this.cam = [
+          p[0] + b[0] * this._zoomDist,
+          p[1] + b[1] * this._zoomDist,
+          p[2] + b[2] * this._zoomDist,
+        ];
       }
       this._camQuat = quatFromUnitVectors(
         BABYLON_FORWARD,
@@ -6272,9 +6478,58 @@ class BabylonScene extends HTMLElement {
           this._homeOrbit = true;
           this._homeOrbitPhase = 0;
           this._homeLookOverridden = false;
+          // TR-103 zoom feature: reset fresh on every new home arrival — a zoom level
+          // from a prior orbit (or a body visited before goHome) shouldn't carry over.
+          // No fixed bearing needed here: the orbit's own position update below already
+          // recomputes bearing every frame by design (that's the whole orbit).
+          this._parkedTargetPos = null;
+          this._zoomIsPlanet = false;
+          this._zoomDist = HOME_ORBIT_RADIUS;
+          this._zoomTargetDist = HOME_ORBIT_RADIUS;
+          this._zoomRestDist = HOME_ORBIT_RADIUS;
           emit("cosmos:home", {});
         } else if (w.target) {
           this.arrivedId = w.target.e.id;
+          // TR-102 (owner-reported): arrival used to leave orientation wherever the
+          // chase-look quatDamp above had converged to — a function of the TRAVEL
+          // direction (wd), not the direction from the now-snapped standoff point to
+          // the body itself. Position lands correctly (this.cam = w.to, above), but
+          // nothing ever pointed the camera AT what it just landed next to, so the
+          // body could sit off to the side or fully out of frame — and dismissing the
+          // vista/card never re-aims either (SpaceScene deliberately leaves the camera
+          // untouched on dismiss, so a bad arrival aim persisted through both). This is
+          // exactly the vector math the `?testhooks`-only `aimAt()` method already used
+          // (see its own comment above), now made real for every arrival rather than
+          // only reachable from a harness. Sets `_yaw`/`_pitch` so later idle-branch
+          // frames stay consistent, AND `_camQuat` directly so this exact frame renders
+          // correctly with no one-tick pop.
+          {
+            const dx = w.target.pos[0] - this.cam[0];
+            const dy = w.target.pos[1] - this.cam[1];
+            const dz = w.target.pos[2] - this.cam[2];
+            const len = Math.hypot(dx, dy, dz) || 1;
+            const ux = dx / len,
+              uy = dy / len,
+              uz = dz / len;
+            this._pitch = Math.asin(Math.max(-1, Math.min(1, uy)));
+            this._yaw = Math.atan2(ux, uz);
+            this._camQuat = quatFromUnitVectors(BABYLON_FORWARD, [ux, uy, uz]);
+            // TR-103 zoom feature: bearing is the OPPOSITE of the aim direction just
+            // computed (target -> camera here, camera -> target above) — fixed at
+            // arrival, untouched by free-look (which only ever writes _yaw/_pitch/
+            // _camQuat, never camera position). `len` is exactly the standoff
+            // travelTo actually used for this body, so zoom starts exactly where
+            // arrival left it, not at some independently-guessed default.
+            this._camBearing = [-ux, -uy, -uz];
+            this._parkedTargetPos = w.target.pos;
+            this._zoomIsPlanet =
+              w.target.e.t === "planet" ||
+              w.target.e.t === "moon" ||
+              w.target.e.t === "dwarf";
+            this._zoomDist = len;
+            this._zoomTargetDist = len;
+            this._zoomRestDist = len;
+          }
           // B4 step 4 — docking contact: a gentle impulse as the ship berths.
           // The camera feels it through the shake system; the hull's sprung
           // settle rides _tickShip's dock branch along this approach axis.

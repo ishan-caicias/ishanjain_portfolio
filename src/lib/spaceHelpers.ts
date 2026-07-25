@@ -162,7 +162,7 @@ function spectralClassFor(colorIndex: number): string {
 }
 
 /**
- * Synthesizes a dossier entry for one of the ~200k uncurated field stars/deep-layer
+ * Synthesizes a collector-card entry for one of the ~200k uncurated field stars/deep-layer
  * objects (id "fs-N"), which aren't in the hand-curated CELESTIAL catalog.
  */
 export function entryForFieldStar(

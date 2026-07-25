@@ -45,7 +45,11 @@ import {
   SUN_RA_DEG,
   SUN_DEC_DEG,
 } from "@/lib/planet-sphere";
-import { ARRIVE_STANDOFF } from "@/lib/ship-dynamics";
+import {
+  ARRIVE_STANDOFF,
+  PLANET_ARRIVE_STANDOFF,
+  PLANET_SPHERE_RADIUS_FOR_ZOOM,
+} from "@/lib/ship-dynamics";
 import { QUALITY_BUDGETS } from "@/lib/babylon-tiers";
 import { WGSL_RESERVED_IDENTIFIERS } from "@/lib/nebula-field";
 
@@ -575,6 +579,23 @@ describe("PF-11 D6.4 the home vantage and its orbit", () => {
       expect(Math.hypot(...p)).toBeCloseTo(HOME_ORBIT_RADIUS, 6);
     }
     expect(HOME_ORBIT_RADIUS).toBe(ARRIVE_STANDOFF);
+  });
+
+  it("TR-103: ship-dynamics.ts's duplicated PLANET_SPHERE_RADIUS_FOR_ZOOM agrees with this module's own PLANET_SPHERE_RADIUS", () => {
+    // Same reasoning as HOME_ORBIT_RADIUS above — kept as a literal in ship-dynamics.ts
+    // to stay import-free/pure, so a live test is what actually enforces agreement.
+    expect(PLANET_SPHERE_RADIUS_FOR_ZOOM).toBe(PLANET_SPHERE_RADIUS);
+  });
+
+  it("TR-103: the new planet-class arrival standoff clears the old one and subtends roughly half the base FOV", () => {
+    expect(PLANET_ARRIVE_STANDOFF).toBeGreaterThan(ARRIVE_STANDOFF);
+    const angularDiameterDeg =
+      (2 * Math.asin(PLANET_SPHERE_RADIUS / PLANET_ARRIVE_STANDOFF) * 180) /
+      Math.PI;
+    // 70° base FOV (SHIP_BASE_FOV) — the reveal target is roughly half of it, with
+    // generous tolerance since this is a design choice, not a derived invariant.
+    expect(angularDiameterDeg).toBeGreaterThan(25);
+    expect(angularDiameterDeg).toBeLessThan(50);
   });
 
   it("starts at the spec'd ra 160 / dec 0 bearing, so reduced motion parks on-spec", () => {
