@@ -1,5 +1,15 @@
 # E2E shard matrix — preserving the "E2E Tests" required status check
 
+> **⚠ SUPERSEDED (2026-07-25, later same day — TR-106).** The shard matrix this doc describes
+> was replaced by a curated CI smoke subset the same day it was first verified. Left in place,
+> not deleted, per this repo's additive-correction rule — the reasoning below (workers:1 vs.
+> sharding being orthogonal) is still correct and may matter again if CI hardware ever changes.
+> See [2026-07-25-e2e-ci-smoke-subset.md](2026-07-25-e2e-ci-smoke-subset.md) for what replaced
+> it and why. Also: **the branch-protection concern below never applied** — `main` has no
+> branch protection configured at all (confirmed via `gh api .../branches/main/protection` →
+> 404 "Branch not protected"), so the `e2e-summary` aggregator job was solving a problem that
+> didn't exist. Harmless (it worked as designed), just unnecessary.
+
 Date: 2026-07-25 (Procyon). Implements recommendation #1 of
 [the same-day E2E performance audit](../analysis/2026-07-25-e2e-suite-performance-and-staleness-audit.md);
 verified in [TR-104](../test-reports/TR-104.md).
