@@ -54,6 +54,19 @@
  * every velocity, chosen so a circular 2.7 AU orbit moves at ~3 world units/s (the midpoint of
  * the belt's existing tuned drift range). Because the factor is UNIFORM, relative speeds stay
  * exactly real: inner asteroids genuinely outrun outer ones by the real vis-viva ratio.
+ *
+ * ADDENDUM (PF-11 D6.2, GO — 2026-07-29): DECLARED #1 is now RESOLVED, not merely flagged.
+ * `babylon-asteroids.ts`'s belt model (spine circle, herding pull, gaussian density, orbital
+ * rotation) was re-expressed in the obliquity-inclined basis this file's `eclipticToEquatorial`
+ * already defines — the same rotation, mirrored there as `toBeltSpace`/`fromBeltSpace` (world
+ * <-> belt-local), so `--frame equatorial` output round-trips through the tuned geometry
+ * correctly. The one casualty, measured not assumed: the m42 showcase-route crossing this
+ * header used to cite no longer exists (m42 isn't near the real ecliptic) — Aldebaran's real
+ * position is, and now serves that role (see `ASTEROID_BELT`'s ORIENTATION note for the
+ * numbers). `distanceToBeltSpine` below gained the same `frame` parameter `eclipticToWorld`
+ * already had, for the same reason: the physics-subset selection in
+ * `gaia-asteroids-pngpack.mjs` ranks candidates by spine distance, and that ranking has to
+ * measure in whichever frame the candidate positions actually landed in.
  */
 
 /** Kilometres per astronomical unit (IAU 2012 definition — exact). */
@@ -169,6 +182,18 @@ export function eclipticToEquatorial([x, y, z]) {
   return [x, y * c - z * s, y * s + z * c];
 }
 
+/** Inverse of `eclipticToEquatorial` — equatorial (world) -> ecliptic-aligned rotation ONLY, no
+ * translation. Added for D6.2's `distanceToBeltSpine` (below): a candidate's world position
+ * already carries BOTH the rotation AND the `BELT_CENTER_Z` world-frame translation
+ * `eclipticToWorld` applies (in that order), so measuring spine distance in "equatorial" mode
+ * means undoing them in the reverse order — translate back first, then un-rotate. */
+export function equatorialToEcliptic([x, y, z]) {
+  const eps = OBLIQUITY_J2000_DEG * D2R;
+  const c = Math.cos(eps),
+    s = Math.sin(eps);
+  return [x, y * c + z * s, -y * s + z * c];
+}
+
 /** DECLARED #1 + #2: heliocentric ecliptic AU -> scene world units. `frame` selects DECLARED #1:
  * "ecliptic" (default) maps the ecliptic plane onto the scene's tuned belt plane; "equatorial"
  * applies the real obliquity first, matching the rest of the catalog's frame at the cost
@@ -193,12 +218,22 @@ export function circularSpeedKmS(aAu) {
   return Math.sqrt(GM_SUN_KM3_S2 / (aAu * KM_PER_AU));
 }
 
-/** Distance from a world-space point to the belt's SPINE CIRCLE (radius BELT_RADIUS in the
- * X-Y plane at z = BELT_CENTER_Z) — the real, data-derived ranking used to choose which real
- * asteroids become physics bodies. Mirrors `beltPullAccel`'s own geometry so the selected
- * bodies are exactly the ones the herding force is best behaved for. */
-export function distanceToBeltSpine([x, y, z]) {
-  const planar = Math.hypot(x, y) - BELT_RADIUS;
-  const dz = z - BELT_CENTER_Z;
-  return Math.hypot(planar, dz);
+/** Distance from a world-space point to the belt's SPINE CIRCLE (radius BELT_RADIUS, in the
+ * belt-local X-Y plane once the point below has had `BELT_CENTER_Z` and the obliquity rotation
+ * undone) — the real, data-derived ranking used to choose which real asteroids become physics
+ * bodies. Mirrors `beltPullAccel`'s own geometry (babylon-asteroids.ts) so the selected bodies
+ * are exactly the ones the herding force is best behaved for.
+ *
+ * `frame` mirrors `eclipticToWorld`'s own parameter (PF-11 D6.2): "ecliptic" (default) — `[x,
+ * y, z]` is already belt-local (no real rotation was ever applied), only the Z translation
+ * needs undoing. "equatorial" — undo the translation FIRST (world-frame, applied after rotation
+ * when the point was created), THEN undo the rotation, recovering the same belt-local point
+ * either way. */
+export function distanceToBeltSpine([x, y, z], frame = "ecliptic") {
+  const [lx, ly, lz] =
+    frame === "equatorial"
+      ? equatorialToEcliptic([x, y, z - BELT_CENTER_Z])
+      : [x, y, z - BELT_CENTER_Z];
+  const planar = Math.hypot(lx, ly) - BELT_RADIUS;
+  return Math.hypot(planar, lz);
 }

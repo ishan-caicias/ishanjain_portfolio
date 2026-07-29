@@ -105,6 +105,11 @@ test("the frame ladder fades furniture, the band, and the constellation figures 
   {
     const s = await stats(engine);
     expect(s.beltPhysicsAwake, "belt physics awake at Mars").toBe(true);
+    // PF-11 D7.5: -1 is the tolerated "not Havok-backed on this hardware" reading
+    // (visual/off/loading/failed tiers) — everywhere else the bodies must be DYNAMIC.
+    expect([false, -1], "belt Havok bodies not STATIC at Mars").toContain(
+      s.beltBodiesStatic,
+    );
     expect(s.localFieldFade, "local field intact at Mars").toBe(1);
     expect(s.impostorVisible, "no impostor at Mars").toBe(false);
     expect(s.figureFade, "constellation figures visible at Mars").toBe(1);
@@ -145,6 +150,11 @@ test("the frame ladder fades furniture, the band, and the constellation figures 
   {
     const s = await stats(engine);
     expect(s.beltPhysicsAwake, "belt physics asleep at a DSO").toBe(false);
+    // PF-11 D7.5: the Havok bodies THEMSELVES stopped being simulated, not just our
+    // per-frame force-application loop skipping.
+    expect([true, -1], "belt Havok bodies set STATIC at a DSO").toContain(
+      s.beltBodiesStatic,
+    );
     expect(s.localFieldFade, "the band still reads inside the galaxy").toBe(1);
     expect(s.impostorVisible, "no impostor inside the galaxy").toBe(false);
     // Past the D2.3 dissolve band (1,344 ly > FIGURE_GONE_LY) — the figures
@@ -181,6 +191,10 @@ test("the frame ladder fades furniture, the band, and the constellation figures 
     expect(s.beltPhysicsAwake, "belt asleep beyond the solar system").toBe(
       false,
     );
+    expect(
+      [true, -1],
+      "belt Havok bodies set STATIC beyond the solar system",
+    ).toContain(s.beltBodiesStatic);
     expect(
       s.figureFade,
       "constellation figures gone at an extragalactic arrival",
@@ -269,6 +283,10 @@ test("the frame ladder fades furniture, the band, and the constellation figures 
     );
     expect(s.impostorVisible, "impostor gone at home").toBe(false);
     expect(s.beltPhysicsAwake, "belt physics awake at home").toBe(true);
+    expect(
+      [false, -1],
+      "belt Havok bodies resume DYNAMIC back at home",
+    ).toContain(s.beltBodiesStatic);
     expect(s.figureFade, "constellation figures restored at home").toBe(1);
   }
 

@@ -122,8 +122,25 @@ Each cost a real defect. Sources in `docs/test-reports/`.
     4-file change or CI red-fails before parsing anything. (TR-034)
 21. TypeScript pinned `~6.0.3`. **Do not upgrade to TS 7** — breaks `astro check` and typed
     lint. (ADR-0001)
-22. Generated/vendored files are **never hand-edited**: `src/data/celestial/*.js` (verbatim
-    ports, lint-ignored), `public/assets/craft/*.glb`, `meshopt_decoder.js`.
+22. Generated/vendored files are **never hand-edited**: `src/data/asteroids-dr3-physics.ts` and
+    the other `scripts/`-emitted data modules, `public/assets/craft/*.glb`,
+    `meshopt_decoder.js`. Regeneration goes through the pipeline that owns them.
+
+    **`src/data/celestial/*.js` is a different case, clarified 2026-07-29** (PF-11 D6.6b
+    hand-edited `celestial-catalog.js` while D5.4 in the same session used a new overlay module
+    for the same class of change — rule and practice had diverged, which is itself the drift
+    class this repo treats as a defect). These files are **hand-curated data verbatim-ported
+    from the PF-07 prototype**, not machine output — nothing regenerates them, so "never
+    hand-edited" was never enforceable and a wrong RA/Dec had nowhere to be fixed. The real,
+    enforceable rules:
+    - **Prefer an overlay module** for anything additive (new bodies, text/content overrides) —
+      `celestial-missing-moons.js`, `celestial-saturn-moons.js`, `celestial-content-overlay.js`
+      are the precedents. Overlays keep the base ports byte-identical to the prototype.
+    - **A direct edit to the base ports is allowed only to correct data that is factually
+      wrong**, must be the minimal field change, and must be named in a TR with the source that
+      establishes the correct value. Anything larger, or anything additive, is an overlay.
+    - They stay lint- and prettier-ignored either way; byte-identity with the prototype is now
+      a strong default rather than an invariant (see `.prettierignore` / `eslint.config.js`).
 
 **Accessibility — regression-tested, must not regress**
 

@@ -112,6 +112,46 @@ export function unpackTypeAndColour(packed: number): {
   };
 }
 
+/** PF-11 D5.3 — nearest field-catalog member of a given object-type byte to a world
+ * position, by real 3D distance (not screen-space, unlike `_pickField`'s cone test). A
+ * typed-array scan with no per-iteration allocation; extracted here (rather than left inline
+ * in babylon-engine.ts) so it unit-tests off-GPU, the same reasoning TR-097 used for
+ * `raySphereDist`/`cursorRayDir`. Returns -1 if the field has no member of that type. Camera
+ * position epoch caching (this scan is expensive enough that a caller shouldn't run it every
+ * frame) is the caller's concern, not this pure function's.
+ *
+ * CORRECTION (2026-07-29 code review, finding 2): the "no per-iteration allocation" claim above
+ * was FALSE as originally shipped — the loop called `unpackTypeAndColour`, which returns a fresh
+ * `{ type, colour }` object every record. Over the loaded field (~200k+ records) × one call per
+ * class row that is millions of short-lived objects per cold camera epoch. The type byte is just
+ * the integer part of the packed float (see `packTypeAndColour`), so `Math.floor` reads it
+ * directly and the colour half — which this function never uses — is never computed. The claim
+ * is now true. `unpackTypeAndColour` stays the tested round-trip helper for callers that need
+ * both halves; it is its use inside a hot scan that was wrong. */
+export function nearestOfType(
+  field: StarField,
+  typeByte: number,
+  cam: readonly [number, number, number],
+): number {
+  const [cx, cy, cz] = cam;
+  let best = -1;
+  let bestDist2 = Infinity;
+  for (let i = 0; i < field.count; i++) {
+    // Integer part only — the allocation-free half of `unpackTypeAndColour`. A unit test pins
+    // the two against each other so this can never silently diverge from the packer.
+    if (Math.floor(field.meta[i * 2 + 1]) !== typeByte) continue;
+    const dx = field.positions[i * 3] - cx;
+    const dy = field.positions[i * 3 + 1] - cy;
+    const dz = field.positions[i * 3 + 2] - cz;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 < bestDist2) {
+      bestDist2 = d2;
+      best = i;
+    }
+  }
+  return best;
+}
+
 export interface StarCatalog extends StarField {
   /** Index at which the Gaia deep layer begins (= Hipparcos record count). */
   deepStart: number;
@@ -143,6 +183,65 @@ export function decodeStarCatalog(chunks: Uint8Array[]): StarCatalog {
       // x = magnitude byte normalised; the shader applies Pogson's law to it.
       meta[w * 2] = raw[o + 12] / 255;
       meta[w * 2 + 1] = packTypeAndColour(raw[o + 14], raw[o + 13]);
+    }
+  }
+  return { positions, meta, count, deepStart: counts[0] ?? 0 };
+}
+
+/** PF-11 D7.3: reads packed records directly out of the RGBA pixel buffer the canvas API always
+ * hands back (`ImageData.data`/`getImageData(...).data`), rather than requiring a caller to have
+ * already copied it down to a stripped, alpha-free RGB buffer first. `decodeStarCatalog` above
+ * needs that strip pass because `DataView.getFloat32` requires 4 CONTIGUOUS bytes, and RGBA's
+ * alpha byte breaks contiguity every 3rd byte; this version gathers each record's 15 bytes one
+ * at a time via the pixel/channel mapping instead, at the cost of per-byte indexing rather than
+ * one contiguous read.
+ *
+ * The trade only pays off because it removes a whole extra full-size buffer from the peak — the
+ * SDSS chunk alone is ~47 MB of RGB, ~63 MB as RGBA, and the strip pass briefly holds both at
+ * once. This version holds only the RGBA source and the (much smaller) decoded output.
+ *
+ * RECORD_BYTES=15 is exactly 5 RGB pixels (15 / 3), so pixel `p` within a record supplies bytes
+ * `[3p, 3p+2]` from its R,G,B channels (alpha is skipped, never part of the packed format). */
+export function decodeStarCatalogFromRGBA(
+  chunks: readonly { rgba: Uint8Array | Uint8ClampedArray }[],
+): StarCatalog {
+  const counts = chunks.map((c) =>
+    Math.floor(c.rgba.length / 4 / (RECORD_BYTES / 3)),
+  );
+  const count = counts.reduce((a, b) => a + b, 0);
+  const positions = new Float32Array(count * 3);
+  const meta = new Float32Array(count * 2);
+  // Reused scratch for the three float32 fields — 4 gathered bytes reinterpreted as one f32.
+  const scratch = new Uint8Array(4);
+  const scratchDv = new DataView(scratch.buffer);
+
+  let w = 0;
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const rgba = chunks[ci].rgba;
+    const readByte = (recordByteIndex: number): number => {
+      const pixel = (recordByteIndex / 3) | 0;
+      const channel = recordByteIndex - pixel * 3; // 0=R, 1=G, 2=B — alpha never packed
+      return rgba[pixel * 4 + channel];
+    };
+    for (let i = 0; i < counts[ci]; i++, w++) {
+      const o = i * RECORD_BYTES;
+      scratch[0] = readByte(o);
+      scratch[1] = readByte(o + 1);
+      scratch[2] = readByte(o + 2);
+      scratch[3] = readByte(o + 3);
+      positions[w * 3] = scratchDv.getFloat32(0, true);
+      scratch[0] = readByte(o + 4);
+      scratch[1] = readByte(o + 5);
+      scratch[2] = readByte(o + 6);
+      scratch[3] = readByte(o + 7);
+      positions[w * 3 + 1] = scratchDv.getFloat32(0, true);
+      scratch[0] = readByte(o + 8);
+      scratch[1] = readByte(o + 9);
+      scratch[2] = readByte(o + 10);
+      scratch[3] = readByte(o + 11);
+      positions[w * 3 + 2] = scratchDv.getFloat32(0, true);
+      meta[w * 2] = readByte(o + 12) / 255;
+      meta[w * 2 + 1] = packTypeAndColour(readByte(o + 14), readByte(o + 13));
     }
   }
   return { positions, meta, count, deepStart: counts[0] ?? 0 };

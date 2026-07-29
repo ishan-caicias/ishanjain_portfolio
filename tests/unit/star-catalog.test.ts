@@ -10,10 +10,13 @@ import {
   CATALOG_CHUNKS,
   CI_UNPACK_SCALE,
   decodeStarCatalog,
+  decodeStarCatalogFromRGBA,
+  nearestOfType,
   packTypeAndColour,
   RECORD_BYTES,
   unpackTypeAndColour,
 } from "@/lib/star-catalog";
+import type { StarField } from "@/lib/star-field";
 
 /** Build a chunk of `n` records with per-index values, matching the packer's
  * 15-byte little-endian layout. */
@@ -134,6 +137,72 @@ describe("decodeStarCatalog", () => {
   });
 });
 
+/** `getImageData(...).data` shape: 4 bytes/pixel, alpha always opaque for these packed assets
+ * (the pipeline never encodes transparency into the catalog PNGs). */
+function rgbToRgba(rgb: Uint8Array): Uint8Array {
+  const nPx = Math.ceil(rgb.length / 3);
+  const out = new Uint8Array(nPx * 4);
+  for (let p = 0; p < nPx; p++) {
+    out[p * 4] = rgb[p * 3] ?? 0;
+    out[p * 4 + 1] = rgb[p * 3 + 1] ?? 0;
+    out[p * 4 + 2] = rgb[p * 3 + 2] ?? 0;
+    out[p * 4 + 3] = 255;
+  }
+  return out;
+}
+
+describe("decodeStarCatalogFromRGBA (PF-11 D7.3 — stride-aware reader, no strip-pass copy)", () => {
+  it("matches decodeStarCatalog byte-for-byte on a single chunk", () => {
+    const rgb = makeChunk(37, rec);
+    const viaRgb = decodeStarCatalog([rgb]);
+    const viaRgba = decodeStarCatalogFromRGBA([{ rgba: rgbToRgba(rgb) }]);
+    expect(viaRgba.count).toBe(viaRgb.count);
+    expect(viaRgba.deepStart).toBe(viaRgb.deepStart);
+    expect(Array.from(viaRgba.positions)).toEqual(Array.from(viaRgb.positions));
+    expect(Array.from(viaRgba.meta)).toEqual(Array.from(viaRgb.meta));
+  });
+
+  it("matches decodeStarCatalog across multiple chunks, deepStart included", () => {
+    const c1 = makeChunk(11, rec);
+    const c2 = makeChunk(23, rec);
+    const viaRgb = decodeStarCatalog([c1, c2]);
+    const viaRgba = decodeStarCatalogFromRGBA([
+      { rgba: rgbToRgba(c1) },
+      { rgba: rgbToRgba(c2) },
+    ]);
+    expect(viaRgba.deepStart).toBe(viaRgb.deepStart);
+    expect(Array.from(viaRgba.positions)).toEqual(Array.from(viaRgb.positions));
+    expect(Array.from(viaRgba.meta)).toEqual(Array.from(viaRgb.meta));
+  });
+
+  it("drops a trailing partial record exactly like decodeStarCatalog", () => {
+    // 12 extra bytes = 4 whole extra RGB pixels (a real canvas's last row can only pad in
+    // whole-pixel units) — 4 of the 5 pixels a 6th record would need, so it must be dropped.
+    const rgb = makeChunk(5, rec, 12);
+    const viaRgb = decodeStarCatalog([rgb]);
+    const viaRgba = decodeStarCatalogFromRGBA([{ rgba: rgbToRgba(rgb) }]);
+    expect(viaRgba.count).toBe(viaRgb.count);
+    expect(viaRgba.count).toBe(5);
+  });
+
+  it("tolerates a missing optional chunk", () => {
+    const f = decodeStarCatalogFromRGBA([
+      { rgba: rgbToRgba(makeChunk(6, rec)) },
+      { rgba: new Uint8Array(0) },
+    ]);
+    expect(f.count).toBe(6);
+    expect(f.deepStart).toBe(6);
+  });
+
+  it("accepts a Uint8ClampedArray (getImageData's real return type)", () => {
+    const rgb = makeChunk(9, rec);
+    const rgba = new Uint8ClampedArray(rgbToRgba(rgb));
+    const f = decodeStarCatalogFromRGBA([{ rgba }]);
+    expect(f.count).toBe(9);
+    expect(f.positions[3 * 3]).toBeCloseTo(rec(3).x, 4);
+  });
+});
+
 describe("photometry (the density fix — TR-037)", () => {
   // Mirrors of the shader arithmetic, kept here so the mapping that decides how
   // many stars are actually visible is asserted rather than eyeballed on a phone.
@@ -160,5 +229,80 @@ describe("photometry (the density fix — TR-037)", () => {
     for (let i = 0; i < faint.count; i++) {
       expect(alphaOf(faint.meta[i * 2])).toBeLessThan(0.2);
     }
+  });
+});
+
+describe("nearestOfType (PF-11 D5.3 — search console class rows)", () => {
+  function mkField(
+    entries: { pos: [number, number, number]; type: number }[],
+  ): StarField {
+    const positions = new Float32Array(entries.length * 3);
+    const meta = new Float32Array(entries.length * 2);
+    entries.forEach((e, i) => {
+      positions[i * 3] = e.pos[0];
+      positions[i * 3 + 1] = e.pos[1];
+      positions[i * 3 + 2] = e.pos[2];
+      meta[i * 2] = 0.5; // magnitude byte — irrelevant here
+      meta[i * 2 + 1] = packTypeAndColour(e.type, 128);
+    });
+    return { positions, meta, count: entries.length };
+  }
+
+  it("finds the nearest member of the requested type, ignoring closer members of other types", () => {
+    const field = mkField([
+      { pos: [0, 0, 1], type: 2 }, // WD, distance 1 from origin
+      { pos: [0, 0, 5], type: 2 }, // WD, distance 5 — farther, must lose
+      { pos: [0, 0, 0.1], type: 3 }, // SDSS, closer overall but wrong type
+    ]);
+    expect(nearestOfType(field, 2, [0, 0, 0])).toBe(0);
+  });
+
+  it("measures real 3D distance from the given camera position, not from the origin", () => {
+    const field = mkField([
+      { pos: [10, 0, 0], type: 6 },
+      { pos: [10, 0, 5], type: 6 },
+    ]);
+    // Camera sitting right next to index 1 - it must win despite being farther from the origin.
+    expect(nearestOfType(field, 6, [10, 0, 4.5])).toBe(1);
+  });
+
+  it("returns -1 when the field has no member of the requested type", () => {
+    const field = mkField([{ pos: [1, 1, 1], type: 1 }]);
+    expect(nearestOfType(field, 7, [0, 0, 0])).toBe(-1);
+  });
+
+  it("returns -1 on an empty field", () => {
+    const field = mkField([]);
+    expect(nearestOfType(field, 2, [0, 0, 0])).toBe(-1);
+  });
+
+  it("its allocation-free Math.floor type read agrees with unpackTypeAndColour for every type/colour pair", () => {
+    // 2026-07-29 code-review finding 2: the scan now reads the type byte as `Math.floor(packed)`
+    // instead of destructuring `unpackTypeAndColour`'s freshly-allocated object. That is only
+    // safe while the two agree EXACTLY — including at ciByte 255, the off-by-one boundary
+    // `CI_PACK_DIV`'s "divide by 256, not 255" comment exists for. Pinned across the whole
+    // domain rather than spot-checked, because a silent divergence here would mis-class every
+    // reddest object in the catalog and never throw.
+    for (let type = 0; type <= 7; type++) {
+      for (let ci = 0; ci <= 255; ci++) {
+        const packed = packTypeAndColour(type, ci);
+        expect(Math.floor(packed)).toBe(unpackTypeAndColour(packed).type);
+        expect(Math.floor(packed)).toBe(type);
+      }
+    }
+  });
+
+  it("finds the right member even at the ciByte-255 packing boundary (end-to-end, through the scan)", () => {
+    // The same boundary as above, but exercised through `nearestOfType` itself on a field whose
+    // records all carry the extreme colour byte — proof the scan, not just the arithmetic, is
+    // correct there.
+    const positions = new Float32Array(6);
+    const meta = new Float32Array(4);
+    positions.set([0, 0, 9], 0); // index 0: type 2, far
+    positions.set([0, 0, 1], 3); // index 1: type 2, near
+    meta[1] = packTypeAndColour(2, 255);
+    meta[3] = packTypeAndColour(2, 255);
+    expect(nearestOfType({ positions, meta, count: 2 }, 2, [0, 0, 0])).toBe(1);
+    expect(nearestOfType({ positions, meta, count: 2 }, 3, [0, 0, 0])).toBe(-1);
   });
 });

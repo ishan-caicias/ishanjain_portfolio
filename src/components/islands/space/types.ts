@@ -59,6 +59,10 @@ export interface SceneState {
   copied: boolean;
   styleOverride: CardStyleMode | null;
   tilt: { rx: number; ry: number; mx: number; my: number };
+  /** PF-11 D9.2 — the Render Console dialog's open state. Its own field rather than folding
+   * into `sectionOpen` (a content-driven dossier switch) because this is a control surface
+   * with live-updating checkboxes/sliders, not a content section. */
+  renderConsoleOpen: boolean;
 }
 
 export const INITIAL_SCENE_STATE: SceneState = {
@@ -82,6 +86,7 @@ export const INITIAL_SCENE_STATE: SceneState = {
   copied: false,
   styleOverride: null,
   tilt: { rx: 0, ry: 0, mx: 50, my: 50 },
+  renderConsoleOpen: false,
 };
 
 export interface Station {

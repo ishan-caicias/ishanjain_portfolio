@@ -182,14 +182,16 @@ import {
   minSlowAlongSegment,
   ASTEROID_BELT,
   BELT_ORBIT,
+  BELT_OBLIQ_COS,
+  BELT_OBLIQ_SIN,
   beltDensityAt,
-  beltPullAccel,
+  beltPullAccelInto,
   buildAsteroidField,
   buildRealAsteroidField,
   displaceRockVertices,
   IMPACT_SHAKE,
   impactShakeAmplitude,
-  passageDeflectForce,
+  passageDeflectForceInto,
   ROCK_BASE_COUNT,
   shakeOffset,
   visualDriftStep,
@@ -235,6 +237,10 @@ import {
   type PatchRect,
 } from "./planet-vt";
 import { composeAtlas, rectChanged } from "./planet-vt-stream";
+import type {
+  CatalogDecodeRequest,
+  CatalogDecodeResponse,
+} from "../workers/catalog-decode.worker";
 // PF-11 D1.3: the launch-from-Earth ascent curves (pure; Astra §4 physics, Vega motion-spec).
 import {
   ASCENT_DURATION_MS,
@@ -266,11 +272,13 @@ import {
   buildStarBillboards,
   buildStarField,
   LIVE_STAR_COUNT,
+  mergeStarFields,
 } from "./star-field";
 import {
   CATALOG_CHUNKS,
   decodeStarCatalog,
   unpackTypeAndColour,
+  nearestOfType,
 } from "./star-catalog";
 import { buildShootingStars } from "./shooting-stars";
 import { ComputeShader } from "@babylonjs/core/Compute/computeShader";
@@ -324,6 +332,11 @@ import {
   type QualityBudget,
   type QualityTierName,
 } from "./babylon-tiers";
+import {
+  LAYERS_STORAGE_KEY,
+  resolveLayers,
+  type LayerId,
+} from "./render-layers";
 import {
   DOCK_CONTACT,
   dockFade,
@@ -633,6 +646,14 @@ const KEY_PITCH_MAX = 0.02;
  * inertia/decay constant this codebase uses (e.g. `_beta *= 0.86`). */
 const KEY_LOOK_DAMP = 0.9;
 
+/** PF-11 D7.4: max rate for the `cosmos:warp` DOM CustomEvent that drives WarpOverlay's React
+ * state during an active warp — audited at full frame rate (up to 60 Hz) driving a setState on
+ * every single frame. 10 Hz matches load-progress.ts's `STAGE_PROGRESS_MAX_HZ` precedent for the
+ * same class of "real data, but far more UI churn than a visible readout needs" throttle. Phase
+ * transitions (accel -> flip -> decel) always emit immediately regardless — see
+ * `_lastWarpEmitPhase`. */
+const WARP_EVENT_MIN_INTERVAL_MS = 1000 / 10;
+
 /** B3: shared cycle length (seconds) for the shooting-star particles — each
  * particle repeats endlessly at its own phase offset within this cycle (see
  * shooting-stars.ts). Long enough that particles don't feel synchronized,
@@ -861,7 +882,13 @@ const float MIN_QUAD_PX = 1.5;
 const float CI_UNPACK_SCALE = ${(256 / 255).toFixed(8)};
 const float ORBIT_OMEGA_K = ${BELT_ORBIT.omegaK.toFixed(4)};
 const float ORBIT_MIN_R = ${BELT_ORBIT.minRadius.toFixed(1)};
-const float ORBIT_SUN_Z = ${ASTEROID_BELT.center[2].toFixed(1)};`;
+const float ORBIT_SUN_Z = ${ASTEROID_BELT.center[2].toFixed(1)};
+// PF-11 D6.2: belt-local (ecliptic-aligned) <-> world (equatorial) basis — the same rotation
+// babylon-asteroids.ts's toBeltSpace/fromBeltSpace apply, baked as constants (matching this
+// module's existing style for ORBIT_SUN_Z above) rather than a uniform, since the obliquity
+// never changes at runtime.
+const float ORBIT_OBLIQ_COS = ${BELT_OBLIQ_COS.toFixed(7)};
+const float ORBIT_OBLIQ_SIN = ${BELT_OBLIQ_SIN.toFixed(7)};`;
 
 ShaderStore.ShadersStore["ijStarVertexShader"] = `
 precision highp float;
@@ -926,14 +953,25 @@ void main(){
   float ty = floor(starMeta.y);
   vec3 orbited = position;
   if (uTime > 0.0 && ty > 5.5 && ty < 6.5) {
-    // TRUE heliocentric distance — the Sun sits at the belt-plane centre, not the world origin.
-    // Using the planar radius instead overstates the rate by up to +189% for the real objects
-    // inclined past 40 degrees (Astra, orbital-motion brief). One extra term fixes all of them.
-    float rOrb = length(vec3(position.xy, position.z - ORBIT_SUN_Z));
+    // PF-11 D6.2: position in — subtract the Sun's fixed world-Z placement FIRST (ORBIT_SUN_Z
+    // is a world-frame translation applied AFTER rotation when baking real data, mirroring
+    // eclipticToWorld exactly, so undoing it correctly means translating BEFORE rotating here),
+    // then undo the obliquity rotation about world X (babylon-asteroids.ts's toBeltSpace).
+    float rz0 = position.z - ORBIT_SUN_Z;
+    float lx = position.x;
+    float ly = position.y * ORBIT_OBLIQ_COS + rz0 * ORBIT_OBLIQ_SIN;
+    float lz = -position.y * ORBIT_OBLIQ_SIN + rz0 * ORBIT_OBLIQ_COS;
+    // TRUE heliocentric distance — the Sun sits at belt-local (0,0,0) now that ORBIT_SUN_Z is
+    // already subtracted above. Using the planar radius instead overstates the rate by up to
+    // +189% for the real objects inclined past 40 degrees (Astra, orbital-motion brief).
+    float rOrb = length(vec3(lx, ly, lz));
     if (rOrb > ORBIT_MIN_R) {
       float ang = ORBIT_OMEGA_K * inversesqrt(rOrb*rOrb*rOrb) * uTime;
       float cs = cos(ang), sn = sin(ang);
-      orbited = vec3(position.x*cs - position.y*sn, position.x*sn + position.y*cs, position.z);
+      float rx = lx*cs - ly*sn, ry = lx*sn + ly*cs, rz = lz;
+      // Position out: rotate belt-local -> world (fromBeltSpace's exact rotation), THEN
+      // re-apply the Sun's world-Z translation.
+      orbited = vec3(rx, ry*ORBIT_OBLIQ_COS - rz*ORBIT_OBLIQ_SIN, ORBIT_SUN_Z + ry*ORBIT_OBLIQ_SIN + rz*ORBIT_OBLIQ_COS);
     }
   }
   vec4 centre = view * vec4(orbited, 1.0);
@@ -1032,6 +1070,9 @@ const CI_UNPACK_SCALE : f32 = ${(256 / 255).toFixed(8)};
 const ORBIT_OMEGA_K : f32 = ${BELT_ORBIT.omegaK.toFixed(4)};
 const ORBIT_MIN_R : f32 = ${BELT_ORBIT.minRadius.toFixed(1)};
 const ORBIT_SUN_Z : f32 = ${ASTEROID_BELT.center[2].toFixed(1)};
+// PF-11 D6.2: line-for-line twin of the GLSL ORBIT_OBLIQ constants above.
+const ORBIT_OBLIQ_COS : f32 = ${BELT_OBLIQ_COS.toFixed(7)};
+const ORBIT_OBLIQ_SIN : f32 = ${BELT_OBLIQ_SIN.toFixed(7)};
 
 // GAP-06: line-for-line twin of the GLSL aberrate() above.
 fn aberrate(p : vec3<f32>, warpDirView : vec3<f32>) -> vec3<f32> {
@@ -1074,15 +1115,23 @@ fn main(input : VertexInputs) -> FragmentInputs {
   let ty : f32 = floor(vertexInputs.starMeta.y);
   var orbited : vec3<f32> = vertexInputs.position;
   if (uniforms.uTime > 0.0 && ty > 5.5 && ty < 6.5) {
-    let rOrb : f32 = length(vec3<f32>(vertexInputs.position.xy, vertexInputs.position.z - ORBIT_SUN_Z));
+    // PF-11 D6.2: line-for-line twin of the GLSL basis-change block above.
+    let rz0 : f32 = vertexInputs.position.z - ORBIT_SUN_Z;
+    let lx : f32 = vertexInputs.position.x;
+    let ly : f32 = vertexInputs.position.y * ORBIT_OBLIQ_COS + rz0 * ORBIT_OBLIQ_SIN;
+    let lz : f32 = -vertexInputs.position.y * ORBIT_OBLIQ_SIN + rz0 * ORBIT_OBLIQ_COS;
+    let rOrb : f32 = length(vec3<f32>(lx, ly, lz));
     if (rOrb > ORBIT_MIN_R) {
       let ang : f32 = ORBIT_OMEGA_K * inverseSqrt(rOrb*rOrb*rOrb) * uniforms.uTime;
       let cs : f32 = cos(ang);
       let sn : f32 = sin(ang);
+      let rx : f32 = lx*cs - ly*sn;
+      let ry : f32 = lx*sn + ly*cs;
+      let rz : f32 = lz;
       orbited = vec3<f32>(
-        vertexInputs.position.x*cs - vertexInputs.position.y*sn,
-        vertexInputs.position.x*sn + vertexInputs.position.y*cs,
-        vertexInputs.position.z);
+        rx,
+        ry*ORBIT_OBLIQ_COS - rz*ORBIT_OBLIQ_SIN,
+        ORBIT_SUN_Z + ry*ORBIT_OBLIQ_SIN + rz*ORBIT_OBLIQ_COS);
     }
   }
   var centre : vec4<f32> = uniforms.view * vec4<f32>(orbited, 1.0);
@@ -1587,10 +1636,29 @@ class BabylonScene extends HTMLElement {
         ) {
           return;
         }
-        const tex = new Texture(
-          atlas.canvas.toDataURL("image/png"),
-          this._scene,
-        );
+        // PF-11 D7.4: `toDataURL("image/png")` synchronously PNG-encodes a canvas up to
+        // 4096x4096x4 = 64 MB on the main thread, and `new Texture(dataUrl, scene)` then
+        // decodes that PNG straight back into pixels to upload — a pure round trip through a
+        // codec neither side needed. Reading the canvas' own ImageData and uploading it
+        // directly skips both the encode and the decode; `getContext("2d")` on an
+        // already-2D canvas (composeAtlas required one to draw the tiles) always returns the
+        // same context, so the toDataURL path below is an unreached defensive fallback only.
+        const atlasCtx = atlas.canvas.getContext("2d");
+        const tex = atlasCtx
+          ? RawTexture.CreateRGBATexture(
+              atlasCtx.getImageData(
+                0,
+                0,
+                atlas.canvas.width,
+                atlas.canvas.height,
+              ).data,
+              atlas.canvas.width,
+              atlas.canvas.height,
+              this._scene ?? null,
+              true,
+              true,
+            )
+          : new Texture(atlas.canvas.toDataURL("image/png"), this._scene);
         tex.wrapU = Texture.CLAMP_ADDRESSMODE;
         tex.wrapV = Texture.CLAMP_ADDRESSMODE;
         this._planetMat.setTexture("detailTex", tex);
@@ -1729,6 +1797,12 @@ class BabylonScene extends HTMLElement {
   private _plumeScratch = new Float32Array(
     PLUME_VERTEX_COUNT * PLUME_VERTEX_FLOATS,
   );
+  /** PF-11 D7.4: last flare length the plume geometry was rebuilt for. Under normal motion
+   * `plumeFlareLength` includes a continuous `sin(t*…)` jitter term (deliberate — it is the
+   * idle-breathing/burn-flicker visual), so this rarely repeats and rarely skips anything; the
+   * real payoff is reduced motion, where the jitter term is dropped and the value holds exactly
+   * constant for as long as the phase doesn't change (`null` forces the first frame to build). */
+  private _lastPlumeFlareLen: number | null = null;
   private _shimmer?: PostProcess;
   // --- GAP-07: ember sparks ---
   private _embers: Ember[] = [];
@@ -1745,6 +1819,10 @@ class BabylonScene extends HTMLElement {
   private _emberMat?: ShaderMaterial;
   private _emberPos = new Float32Array(MAX_EMBERS * 4 * 3);
   private _emberMeta = new Float32Array(MAX_EMBERS * 4 * 2);
+  /** PF-11 D7.4: the ember buffer was rebuilt and re-uploaded to the GPU every frame even
+   * with zero live embers (the common case — bursts are momentary). -1 forces the first
+   * frame to build regardless. */
+  private _lastEmberCount = -1;
   /** Shimmer uniforms staged by _tickShip, pushed in the post-process's
    * onApply (the effect object is only valid there). */
   private _shimmerState = { cx: 0.5, cy: 0.5, intensity: 0, aspect: 1 };
@@ -1753,6 +1831,11 @@ class BabylonScene extends HTMLElement {
    * failure, or reduced motion — the plan's render-without-physics tier). */
   private _physicsMode: "off" | "loading" | "havok" | "visual" | "failed" =
     "off";
+  /** PF-11 D7.5: the dynamically-imported `PhysicsMotionType` enum, captured once when Havok
+   * initialises so `_setBeltPhysicsAwake` can call `setMotionType` without a second import.
+   * `typeof import(...)` is a type-space-only reference — it costs nothing in the bundle; the
+   * one runtime import stays exactly where it already was, inside `_setupPhysicsInner`. */
+  private _physicsMotionType?: typeof import("@babylonjs/core/Physics/v2/IPhysicsEnginePlugin").PhysicsMotionType;
   private _asteroidField?: AsteroidField;
   private _asteroidInstances: InstancedMesh[] = [];
   private _asteroidBodies: PhysicsBody[] = [];
@@ -1760,6 +1843,13 @@ class BabylonScene extends HTMLElement {
   private _asteroidPos?: Float32Array;
   private _asteroidVel?: Float32Array;
   private _asteroidPull = new Vector3();
+  /** 2026-07-29 code review, finding 3 — reused destination for `beltPullAccelInto` in the
+   * per-frame Havok force loop, so that loop allocates nothing per rock. */
+  private _beltPullScratch = new Float64Array(3);
+  /** PF-11 D7.4 — same reuse for `passageDeflectForceInto`, the loop's other per-rock tuple
+   * allocation (only live during an in-progress warp, but still a per-frame allocation the
+   * render loop should not make). */
+  private _deflectScratch = new Float64Array(3);
   // --- B4 step 2: proximity slowdown + passage deflection ---
   /** Current warp slow factor (1 = clear space) and the journey's minimum
    * (reset at launch) — the E2E proof that a belt crossing actually slowed
@@ -1828,6 +1918,14 @@ class BabylonScene extends HTMLElement {
     meta: Float32Array;
     count: number;
   } | null = null;
+  /** PF-11 D5.3 — memoizes `nearestFieldOfType`'s O(f.count) scan per coarse camera-position
+   * "epoch" (world units rounded to a 5-unit grid): the search console re-derives its class
+   * rows on every keystroke, but "the nearest white dwarf" changes far slower than that — only
+   * when the ship has actually moved a meaningful distance, not every render. */
+  private _classEpochCache: {
+    epoch: string;
+    byType: Map<number, number>;
+  } | null = null;
   /* PF-10 C1: base-catalog raw RGB chunks (stars-hip.png + deep.png, already fetched+decoded
    * at boot), retained so a bonus-layer merge can re-decode them alongside new chunks in one
    * decodeStarCatalog call instead of re-fetching/re-decoding the base catalog's images. Null
@@ -1844,6 +1942,12 @@ class BabylonScene extends HTMLElement {
   private _sdssGalaxyCount = 0;
   /** Guards `_loadSdssGalaxyLayer` to run at most once per boot. */
   private _sdssLayerRequested = false;
+  /** PF-11 D7.3: lazily created, reused for every decode request this engine instance makes
+   * (today, only the one SDSS fetch). Never explicitly terminated — it is exactly as long-lived
+   * as the `<babylon-scene>` element itself, and `dispose()` below tears it down with everything
+   * else. */
+  private _catalogWorker?: Worker;
+  private _catalogWorkerReqId = 0;
   /** PF-10 C3: the full real Gaia DR3 asteroid belt — again a SEPARATE mesh from `_stars`
    * (belt-frame world units, not the star field's light-year convention). Shares `_starMat`;
    * object-type byte 6. The bounded Havok subset is a different thing entirely — see
@@ -1951,6 +2055,17 @@ class BabylonScene extends HTMLElement {
    * like space-engine.js's `this._beta` — ramps with the accel/decel curve
    * during warp, decays 0.86x/frame otherwise. */
   private _beta = 0;
+  // --- PF-11 D7.4: cosmos:warp -> React throttle ---
+  /** `performance.now()` of the last `cosmos:warp` DOM dispatch. Internal engine state (warp
+   * progress, β, camera) still updates every frame regardless of this — only the CustomEvent
+   * that drives React's WarpOverlay setState is throttled, per the audited finding that this
+   * was firing (and re-rendering React) at full frame rate during every warp. */
+  private _lastWarpEmitMs = 0;
+  /** Last emitted `phase` string — a phase CHANGE always emits immediately regardless of the
+   * throttle window below, so the accel/flip/decel transition the HUD and the E2E suite key
+   * off can never be coalesced away by unlucky timing (the flip window is the narrowest, ~6%
+   * of a typical journey). */
+  private _lastWarpEmitPhase: "accel" | "flip" | "decel" | null = null;
   // --- GAP-12: HTML attribute overrides ---
   private _densityOverride = 1;
   private _showConstellations = true;
@@ -1966,6 +2081,10 @@ class BabylonScene extends HTMLElement {
 
   // --- SpaceEngineElement contract surface ---
   bodies: BabylonBody[] = [];
+  /** PF-11 D7.4: id -> body, built once in `connectedCallback` alongside `bodies` itself (which
+   * never mutates after boot). Every by-id lookup against the curated catalog should use this
+   * instead of `bodies.find(...)`. */
+  private _bodyById = new Map<string, BabylonBody>();
   stations: BabylonBody[] = [];
   cam: [number, number, number] = [0, 0, 0];
   arrivedId: string | null = null;
@@ -1987,11 +2106,27 @@ class BabylonScene extends HTMLElement {
   /** Frames this engine has actually rendered (read by the perf harness). */
   renderFrames = 0;
 
+  // --- PF-11 D9.1: Render Console layer state ---
+  /** Resolved once at boot (URL `?layers=` -> localStorage -> tier default, via
+   * `resolveLayers`) and updated live by `setLayers()`/the `layers` attribute. Every id in
+   * `LAYERS` is always present. Layers marked `implemented: false` in the registry
+   * (`star-field`, `bonus-stars`, `gaia-tiny`) have their state tracked here for
+   * forward-compatibility but `_applyLayerToggle` does nothing for them today. */
+  private _layerState: Record<LayerId, boolean | number> = resolveLayers(
+    null,
+    null,
+    "balanced",
+  );
+  /** `nebula-volumes`/`milky-way-band` have no existing on/off flag of their own (unlike
+   * `constellations`, which already had `_showConstellations`) — these back the new toggle. */
+  private _nebulaLayerEnabled = true;
+  private _bandLayerEnabled = true;
+
   // --- GAP-12: HTML attribute parity with space-engine.js's
   // observedAttributes/attributeChangedCallback (density/constellations/
   // ship/craft) ---
   static get observedAttributes() {
-    return ["density", "constellations", "ship", "craft"];
+    return ["density", "constellations", "ship", "craft", "layers"];
   }
 
   attributeChangedCallback(
@@ -2017,6 +2152,130 @@ class BabylonScene extends HTMLElement {
           : value === "off"
             ? "off"
             : null;
+    } else if (name === "layers") {
+      // PF-11 D9.1: mirrors the `?layers=` URL param's own format so a spec (or a future
+      // markup-driven default) can set the same string either way. Malformed JSON is ignored
+      // rather than thrown — an attribute value is easier to typo than a URL param, and this
+      // must never be the reason the scene fails to boot.
+      if (!value) return;
+      try {
+        const parsed = JSON.parse(value) as Partial<
+          Record<LayerId, boolean | number>
+        >;
+        this.setLayers(parsed);
+      } catch (e) {
+        console.warn("[babylon-engine] malformed layers attribute", e);
+      }
+    }
+  }
+
+  /** PF-11 D9.1: the Render Console's engine-side surface. Merges `config` into the current
+   * layer state and applies only the ids that actually changed (a `setLayers({})` or a repeat
+   * of the current value is a no-op, not a redundant fetch/dispose/toggle). Always emits
+   * `cosmos:layers` with the FULL resolved state afterward — even a no-op call — so a UI that
+   * calls this speculatively (e.g. applying a preset) can trust the event as the source of
+   * truth rather than diffing its own optimistic state. */
+  setLayers(config: Partial<Record<LayerId, boolean | number>>) {
+    for (const entry of Object.entries(config)) {
+      const id = entry[0] as LayerId;
+      const value = entry[1];
+      if (value === undefined || this._layerState[id] === value) continue;
+      this._layerState[id] = value;
+      this._applyLayerToggle(id, value);
+    }
+    if (typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem(
+          LAYERS_STORAGE_KEY,
+          JSON.stringify(this._layerState),
+        );
+      } catch {
+        // Private-browsing/storage-full — the in-memory state above is still correct for this
+        // session; only cross-session persistence is lost.
+      }
+    }
+    emit("cosmos:layers", { ...this._layerState });
+  }
+
+  /** Whether `id`'s CURRENT resolved state means "on" — `false` and `0` both read as off (a
+   * `0` chunk-prefix is `gaia-tiny`'s "nothing enabled yet" state, once D8 ships it), any
+   * other number or `true` reads as on. Centralised so `_applyLayerToggle` and
+   * `_updateFrameLadder`'s `belt-physics` gate can't drift apart on what "on" means. */
+  private _layerOn(id: LayerId): boolean {
+    const v = this._layerState[id];
+    return v !== false && v !== 0;
+  }
+
+  /** Applies the IMMEDIATE effect of one layer's new value. `belt-physics` and `planet-hires`
+   * have no entry here — both are read LIVE where they're consulted (`_updateFrameLadder`
+   * combines `belt-physics` with the existing D2.1 distance fade every frame; `_tickPlanetSphere`
+   * reads `planet-hires` each time a body is dressed) rather than needing a push here.
+   * `star-field`/`bonus-stars`/`gaia-tiny` are intentionally absent — see their `implemented:
+   * false` registry entries for why each one specifically can't be toggled today. */
+  private _applyLayerToggle(id: LayerId, value: boolean | number) {
+    const on = value !== false && value !== 0;
+    switch (id) {
+      case "sdss-field": {
+        const scene = this._scene;
+        const engine = this._engine;
+        if (on) {
+          if (this._sdssMesh) this._sdssMesh.setEnabled(true);
+          else if (!this._sdssLayerRequested && scene && engine) {
+            void this._loadSdssGalaxyLayer(scene, engine);
+          }
+        } else {
+          // PF-11 D9.1 exit criteria: disabling a heavy layer should actually release its
+          // GPU/CPU geometry, not just hide it — re-enabling re-fetches (usually HTTP-cache-
+          // absorbed), the same trade D7.2's texture-departure disposal already accepted.
+          this._sdssMesh?.dispose();
+          this._sdssMesh = undefined;
+          this._sdssGalaxyCount = 0;
+          this._sdssLayerRequested = false;
+        }
+        break;
+      }
+      case "belt-visual": {
+        const scene = this._scene;
+        const engine = this._engine;
+        if (on) {
+          if (this._asteroidVisualMesh)
+            this._asteroidVisualMesh.setEnabled(true);
+          else if (!this._asteroidLayerRequested && scene && engine) {
+            void this._loadAsteroidVisualLayer(scene, engine);
+          }
+        } else {
+          this._asteroidVisualMesh?.dispose();
+          this._asteroidVisualMesh = undefined;
+          this._asteroidVisualCount = 0;
+          this._asteroidLayerRequested = false;
+        }
+        break;
+      }
+      case "nebula-volumes": {
+        this._nebulaLayerEnabled = on;
+        this._nebulaMesh?.setEnabled(on);
+        break;
+      }
+      case "gd1-trail": {
+        this._gd1Mesh?.setEnabled(on);
+        break;
+      }
+      case "constellations": {
+        // Same effect the pre-existing `constellations` HTML attribute already produces —
+        // this is the second way to reach it, not a competing mechanism.
+        this._showConstellations = on;
+        this._conMesh?.setEnabled(on);
+        break;
+      }
+      case "milky-way-band": {
+        // No direct setEnabled — _tickMilkyWay already drives visibility via `uFade`
+        // (boot ramp x the D2.2 extragalactic-collapse fade); this just adds a third
+        // multiplicand to that same product, read every tick.
+        this._bandLayerEnabled = on;
+        break;
+      }
+      default:
+        break; // belt-physics, planet-hires (read live), star-field/bonus-stars/gaia-tiny (not implemented)
     }
   }
 
@@ -2122,6 +2381,21 @@ class BabylonScene extends HTMLElement {
         new URLSearchParams(window.location.search).get("tier"),
       ),
     );
+    // PF-11 D9.1: resolved AFTER _quality so its tier default is the one that actually
+    // booted (backend + device + ?tier= all folded in already), same resolution order as
+    // every other override this file has (?layers= URL -> localStorage -> tier default).
+    this._layerState = resolveLayers(
+      new URLSearchParams(window.location.search).get("layers"),
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem(LAYERS_STORAGE_KEY)
+        : null,
+      this._quality.name,
+    );
+    this._nebulaLayerEnabled = this._layerState["nebula-volumes"] !== false;
+    this._bandLayerEnabled = this._layerState["milky-way-band"] !== false;
+    // `constellations` already had its own attribute-driven flag (GAP-12) — the layer state
+    // just becomes a second way to set the SAME flag, at boot rather than only post-boot.
+    this._showConstellations = this._layerState["constellations"] !== false;
 
     const scene = new Scene(engine);
     this._scene = scene;
@@ -2158,6 +2432,10 @@ class BabylonScene extends HTMLElement {
         fig: e.fig,
       }),
     );
+    // PF-11 D7.4: `this.bodies` is fixed for the life of this element (assigned exactly once,
+    // here) — an id->body Map built once now turns every by-id lookup below from an O(bodies)
+    // `.find` into O(1), including `_tickPlanetSphere`'s, which runs every frame.
+    this._bodyById = new Map(this.bodies.map((b) => [b.e.id, b]));
 
     // PF-11 D1.1: the largest boot-critical download (2.02 + 0.87 MB), and the
     // one the pre-flight dossier spends most of its time showing. No try/finally
@@ -2402,13 +2680,21 @@ class BabylonScene extends HTMLElement {
         emitStageDone("first-frame");
         emit("cosmos:ready", {});
         // PF-10 C1: kick off the bonus background-layer fetch only after the first real frame
-        // has rendered — never awaited, never gating cosmos:ready itself.
+        // has rendered — never awaited, never gating cosmos:ready itself. Not gated on
+        // `_layerState["bonus-stars"]` — see render-layers.ts's `implemented: false` note,
+        // this layer isn't independently toggleable yet.
         void this._loadBonusStarLayers();
-        // PF-10 C2: SDSS DR18 galaxy field — same non-blocking philosophy, own mesh.
-        void this._loadSdssGalaxyLayer(scene, engine);
-        // PF-10 C3: the full 154,662-object real DR3 asteroid belt — likewise own mesh, likewise
-        // never in front of the startup budget.
-        void this._loadAsteroidVisualLayer(scene, engine);
+        // PF-10 C2 / PF-11 D9.1: SDSS DR18 galaxy field — same non-blocking philosophy, own
+        // mesh, now gated on the resolved layer state so a visitor who disabled it (or loaded
+        // with `?layers=sdss-field:0`) never pays for the 47 MB fetch at all.
+        if (this._layerState["sdss-field"] !== false) {
+          void this._loadSdssGalaxyLayer(scene, engine);
+        }
+        // PF-10 C3 / PF-11 D9.1: the full 154,662-object real DR3 asteroid belt — likewise own
+        // mesh, likewise never in front of the startup budget, likewise layer-gated.
+        if (this._layerState["belt-visual"] !== false) {
+          void this._loadAsteroidVisualLayer(scene, engine);
+        }
       }
     });
 
@@ -2473,6 +2759,11 @@ class BabylonScene extends HTMLElement {
       this._retargetTimer = undefined;
     }
     this.queuedTargetId = null;
+    // PF-11 D7.3: the decode worker outlives nothing on its own — it has no timers or
+    // observables of its own to leak, but an un-terminated Worker keeps its thread (and this
+    // engine instance, via its closure) alive past disconnect.
+    this._catalogWorker?.terminate();
+    this._catalogWorker = undefined;
     this._engine?.dispose();
   }
 
@@ -2491,6 +2782,9 @@ class BabylonScene extends HTMLElement {
       totalVertices: m ? m.getTotalVertices() : -1,
       totalIndices: m ? m.getTotalIndices() : -1,
       materialReady: m?.material ? m.material.isReady(m) : false,
+      // PF-11 D9.1: the Render Console's resolved layer state, mirrored for E2E — a plain copy
+      // (not a live reference) so a caller can't accidentally mutate engine state through it.
+      layers: { ...this._layerState },
       // PF-10 C2: SDSS DR18 galaxy field diagnostics (separate mesh, see _loadSdssGalaxyLayer).
       sdssGalaxyCount: this._sdssGalaxyCount,
       sdssMeshReady: this._sdssMesh ? this._sdssMesh.isReady(true) : false,
@@ -2630,6 +2924,15 @@ class BabylonScene extends HTMLElement {
       localFieldFade: Math.round(this._localFieldFade * 1000) / 1000,
       figureFade: Math.round(this._figureFade * 1000) / 1000,
       beltPhysicsAwake: this._beltPhysicsAwake,
+      // PF-11 D7.5: proves the Havok bodies THEMSELVES actually stopped being simulated, not
+      // just that our own force-application loop skipped — -1 when physics isn't Havok-backed
+      // (visual/off/loading/failed tiers have no motion type to read at all).
+      beltBodiesStatic:
+        this._physicsMode === "havok" && this._physicsMotionType
+          ? this._asteroidBodies.every(
+              (b) => b.getMotionType() === this._physicsMotionType!.STATIC,
+            )
+          : -1,
       impostorVisible: this._impostorVisible,
       impostorTextureReady: this._impostorTex?.isReady() ?? false,
       // B4 step 2: proximity-slowdown diagnostics. warpSlowMin persists past
@@ -2702,6 +3005,17 @@ class BabylonScene extends HTMLElement {
     );
     this.starCount = field.count;
     this._field = field;
+    // PF-11 D7.1: this mesh is never scene-picked (isPickable=false, see boot setup) — the
+    // custom `_pick`/`_pickField` screen-space search reads `_field` above, a plain typed
+    // array independent of the GPU geometry — so the CPU-side vertex/index copy Babylon
+    // retains after upload (~54-361 MB across the merged/bonus field) serves no purpose once
+    // this frame's buffers are on the GPU. `setVerticesData`/`setVerticesBuffer` (used by
+    // `vd.applyToMesh` and the call above) always build a fresh Geometry rather than reuse the
+    // cleared one, so clearing here cannot break the next bonus-layer rebuild. Trade-off,
+    // undocumented until now: a lost WebGL context can no longer restore this mesh's real data
+    // (Babylon's `_rebuild()` falls back to an empty same-size buffer without a CPU cache) —
+    // accepted for a portfolio site with no existing context-restore recovery path either way.
+    this._stars.geometry?.clearCachedData();
   }
 
   /** Resolves once `this.warp.mode === "idle"`, polling once per animation frame, capped at
@@ -2722,6 +3036,40 @@ class BabylonScene extends HTMLElement {
         requestAnimationFrame(check);
       };
       check();
+    });
+  }
+
+  /** PF-11 D7.3: hands an already-fetched image Blob to the catalog-decode worker and resolves
+   * with its billboard-ready output. Lazily creates one worker per engine instance and reuses it
+   * for every call (today, only the SDSS layer) — `disconnectedCallback` terminates it. Requests
+   * are tagged with an incrementing id so a response can never be mismatched to the wrong call,
+   * even though only one call is ever in flight today (the `_sdssLayerRequested` guard already
+   * prevents re-entry) — the same defensive-not-currently-load-bearing discipline the VT
+   * streamer's pending/rect identity checks already use. */
+  private _decodeCatalogInWorker(blob: Blob): Promise<{
+    positions: Float32Array;
+    meta: Float32Array;
+    indices: Uint32Array;
+    vertexCount: number;
+    count: number;
+  }> {
+    if (!this._catalogWorker) {
+      this._catalogWorker = new Worker(
+        new URL("../workers/catalog-decode.worker.ts", import.meta.url),
+        { type: "module" },
+      );
+    }
+    const worker = this._catalogWorker;
+    const id = ++this._catalogWorkerReqId;
+    return new Promise((resolve, reject) => {
+      const onMessage = (ev: MessageEvent<CatalogDecodeResponse>) => {
+        if (ev.data.id !== id) return;
+        worker.removeEventListener("message", onMessage);
+        if (ev.data.ok) resolve(ev.data);
+        else reject(new Error(ev.data.error));
+      };
+      worker.addEventListener("message", onMessage);
+      worker.postMessage({ id, blob } satisfies CatalogDecodeRequest);
     });
   }
 
@@ -2765,8 +3113,14 @@ class BabylonScene extends HTMLElement {
           }),
         ),
       );
-      const merged = decodeStarCatalog([...this._baseCatalogRgb, ...bonusRgb]);
-      if (merged.count <= this.starCount) return; // every bonus chunk failed; nothing to merge
+      // PF-11 D7.5: decode ONLY the new bonus chunks — `this._field` already holds the base
+      // catalog's decoded positions/meta from boot (guaranteed non-null: `_baseCatalogRgb`
+      // non-null, checked above, only happens alongside a successful real-catalog decode), so
+      // re-running `decodeStarCatalog` over the base bytes again would just re-parse ~168,959
+      // already-known-good records for nothing. `mergeStarFields` is plain concatenation.
+      const bonusField = decodeStarCatalog(bonusRgb);
+      if (bonusField.count === 0 || !this._field) return; // every bonus chunk failed
+      const merged = mergeStarFields(this._field, bonusField);
       // Real finding, not a test-timing nicety: rebuilding billboard geometry for 500k+ merged
       // records and re-uploading new GPU vertex buffers is genuine main-thread + GPU work — on
       // SwiftShader (CI/software rendering) large enough to visibly stall an in-flight warp if
@@ -2789,6 +3143,11 @@ class BabylonScene extends HTMLElement {
       // sit in the dossier as permanently "STREAMING" long after the engine
       // gave up on it.
       bonusStage.finish();
+      // PF-11 D7.6: this method runs at most once (`_bonusLayersRequested` above) and this is
+      // its last read of `_baseCatalogRgb` on every exit path (success, the early "every bonus
+      // chunk failed" return, and the catch) — the ~2.4 MB base-catalog RGB chunks it retains
+      // serve no purpose for the rest of the session once this merge attempt is over.
+      this._baseCatalogRgb = null;
     }
   }
 
@@ -2813,14 +3172,17 @@ class BabylonScene extends HTMLElement {
     const sdssStage = new StageAggregator("sdss-field", emitStage);
     const sdssUrl = "assets/sdss18.png";
     try {
-      const rgb = await loadChunkRGB(sdssUrl, {
-        stage: "sdss-field",
-        sink: sdssStage.sink(sdssUrl),
-      });
-      const field = decodeStarCatalog([rgb]);
-      if (field.count === 0) return;
+      // PF-11 D7.3: the fetch (with its real byte progress into the dossier) stays on the main
+      // thread; decode + billboard-build — the actual CPU cost, ~5 sequential O(n) passes over
+      // 3.64M records measured pre-slice — move to `catalog-decode.worker.ts`.
+      const blob = await fetchWithProgress(
+        sdssUrl,
+        "sdss-field",
+        sdssStage.sink(sdssUrl),
+      );
+      const bb = await this._decodeCatalogInWorker(blob);
+      if (bb.count === 0) return;
       await this._waitForWarpIdle();
-      const bb = buildStarBillboards(field);
       const mesh = new Mesh("sdssGalaxies", scene);
       const vd = new VertexData();
       vd.positions = bb.positions;
@@ -2832,9 +3194,13 @@ class BabylonScene extends HTMLElement {
       mesh.alwaysSelectAsActiveMesh = true;
       mesh.material = this._starMat ?? null;
       this._sdssMesh = mesh;
-      this._sdssGalaxyCount = field.count;
-      sdssStage.finish(field.count);
-      emit("cosmos:sdss-galaxies", { total: field.count });
+      this._sdssGalaxyCount = bb.count;
+      // PF-11 D7.1: one-shot mesh, never rebuilt or picked (galaxies aren't in
+      // `this.bodies` or `_field` — see the star mesh's clearCachedData note). ~361 MB
+      // of CPU-side vertex/index arrays freed for the largest layer this site ships.
+      mesh.geometry?.clearCachedData();
+      sdssStage.finish(bb.count);
+      emit("cosmos:sdss-galaxies", { total: bb.count });
     } catch (e) {
       console.warn("[babylon-engine] SDSS galaxy layer failed", e);
     } finally {
@@ -2901,6 +3267,10 @@ class BabylonScene extends HTMLElement {
       }
       this._asteroidVisualMesh = mesh;
       this._asteroidVisualCount = field.count;
+      // PF-11 D7.1: one-shot mesh, never rebuilt or picked. ~15 MB of CPU-side
+      // vertex/index arrays freed (see the star mesh's clearCachedData note for the
+      // WebGL-context-loss trade-off this and the SDSS layer now share).
+      mesh.geometry?.clearCachedData();
       beltStage.finish(field.count);
       emit("cosmos:asteroid-belt", { total: field.count });
     } catch (e) {
@@ -3284,6 +3654,59 @@ class BabylonScene extends HTMLElement {
       });
   }
 
+  /** PF-11 D7.2: releases the real per-body textures (surface, height, normal, cloud, night,
+   * specular, plus any in-flight VT detail atlas) when the sphere departs a body with no next
+   * body queued. Earth alone was measured at ≈683 MB VRAM with mips retained indefinitely,
+   * across every body ever visited in a session — this is the fix.
+   *
+   * Every sampler is rebound to its shared 1x1 placeholder (`_planetPlaceholderTex`/
+   * `_planetFlatNormalTex`/`_planetBlackTex`, built once in `_setupPlanetSphere`) rather than
+   * left pointing at a disposed object — CLAUDE.md #9 (TR-059): a declared sampler needs a
+   * real texture bound before the mesh next draws, disposed-and-still-bound included. The
+   * trade this accepts: returning to the same body re-fetches its textures from scratch
+   * (usually absorbed by the browser HTTP cache, not re-decoded from nothing) rather than
+   * keeping them warm — the point of this method is that nothing stays warm while unseen. */
+  private _disposePlanetBodyTextures() {
+    this._planetSurfaceTex?.dispose();
+    this._planetSurfaceTex = undefined;
+    this._planetHeightTex?.dispose();
+    this._planetHeightTex = undefined;
+    this._planetNormalTex?.dispose();
+    this._planetNormalTex = undefined;
+    this._planetCloudTex?.dispose();
+    this._planetCloudTex = undefined;
+    this._planetNightTex?.dispose();
+    this._planetNightTex = undefined;
+    this._planetSpecularTex?.dispose();
+    this._planetSpecularTex = undefined;
+    this._planetDetailTex?.dispose();
+    this._planetDetailTex = undefined;
+    this._planetVtRect = null;
+    this._planetVtLoaded = 0;
+    this._planetSurfaceTier = "high";
+    const mat = this._planetMat;
+    if (!mat) return;
+    if (this._planetPlaceholderTex) {
+      mat.setTexture("surfaceTex", this._planetPlaceholderTex);
+      mat.setTexture("heightTex", this._planetPlaceholderTex);
+      mat.setTexture("detailTex", this._planetPlaceholderTex);
+    }
+    if (this._planetFlatNormalTex) {
+      mat.setTexture("normalTex", this._planetFlatNormalTex);
+    }
+    if (this._planetBlackTex) {
+      mat.setTexture("cloudTex", this._planetBlackTex);
+      mat.setTexture("specularTex", this._planetBlackTex);
+      mat.setTexture("nightTex", this._planetBlackTex);
+    }
+    mat.setFloat("uHasHeight", 0);
+    mat.setFloat("uHasNormal", 0);
+    mat.setFloat("uHasCloud", 0);
+    mat.setFloat("uAtmosphere", 0);
+    mat.setFloat("uHasNight", 0);
+    mat.setFloat("uHasDetail", 0);
+  }
+
   /** Destination gating for the planet sphere, called per frame.
    *
    * Mirrors `_tickNebula`'s arrival-keyed structure rather than inventing a second "what am I at"
@@ -3302,6 +3725,7 @@ class BabylonScene extends HTMLElement {
     const manifest = this._planetManifest;
     const arrived = this.arrivedId;
     if (!manifest) {
+      if (this._planetBodyId !== null) this._disposePlanetBodyTextures();
       mesh.isVisible = false;
       this._planetBodyId = null;
       return;
@@ -3322,15 +3746,14 @@ class BabylonScene extends HTMLElement {
     const atHome = this._isAtHomeVantage();
     const homeReveal = !arrived && atHome && !!manifest.bodies.earth;
 
-    const body = arrived
-      ? this.bodies.find((b) => b.e.id === arrived)
-      : undefined;
+    const body = arrived ? this._bodyById.get(arrived) : undefined;
     const key = homeReveal
       ? "earth"
       : body
         ? sphereIdFor(body.e, manifest.bodies)
         : null;
     if (!key || (!body && !homeReveal)) {
+      if (this._planetBodyId !== null) this._disposePlanetBodyTextures();
       mesh.isVisible = false;
       this._planetBodyId = null;
       return;
@@ -3424,8 +3847,16 @@ class BabylonScene extends HTMLElement {
       // PF-11 D6.3.2: gated on the tier reaching `ultra-progressive`. Below that the upgrade is
       // not merely skipped — it is never FETCHED, which is the whole point on a constrained
       // device: the 4-6 MB download was previously unconditional regardless of tier.
+      // PF-11 D9.1: the Render Console's `planet-hires` toggle is a SECOND gate on top of the
+      // tier ceiling — a visitor on `full` who explicitly disabled it never pays for the ultra
+      // fetch either, read live here rather than pushed through `_applyLayerToggle` (this only
+      // takes effect on the NEXT body dressed, not the one currently on screen — an accepted v1
+      // limitation, recorded in the TR, since retroactively dropping an already-loaded texture
+      // would need its own departure-style disposal path).
       const ultraFile =
-        ladder === "ultra-progressive" ? entry.surface.ultra : undefined;
+        ladder === "ultra-progressive" && this._layerOn("planet-hires")
+          ? entry.surface.ultra
+          : undefined;
       if (ultraFile) {
         const pending = key;
         const ultra = new Texture(`/assets/planets/${ultraFile}`, this._scene);
@@ -3684,6 +4115,10 @@ class BabylonScene extends HTMLElement {
     this._bandMat?.setTexture("uTex", tex);
     this._bandPlaceholderTex?.dispose();
     this._bandPlaceholderTex = undefined;
+    // PF-11 D7.6: `builder.buf` (the ~2 MB CPU-side equirect RGBA buffer) has now been
+    // uploaded to `tex` — the builder itself, and the buffer it retains, serve no further
+    // purpose (`bandProgress`'s `_bandReady` short-circuit above never reads it again).
+    this._bandBuilder = undefined;
   }
 
   /** Per-frame entry point: one build slice while the texture is still being
@@ -3776,8 +4211,35 @@ class BabylonScene extends HTMLElement {
     // Belt Havok sleeps once the belt is gone (D2.1). The band's own uFade is
     // handled in _tickMilkyWay, the constellation alpha in _pushAberration —
     // both read `_localFieldFade` (and, for the figures, `_figureFade`) directly.
-    this._beltPhysicsAwake = this._furnitureFade > 0;
+    // PF-11 D9.1: the Render Console's `belt-physics` toggle is a SECOND, independent gate —
+    // both the distance fade AND the layer state must want it awake for it to actually run.
+    // A visitor who explicitly disabled belt physics stays disabled even parked at Mars; the
+    // fade alone never overrides that preference.
+    this._setBeltPhysicsAwake(
+      this._furnitureFade > 0 && this._layerOn("belt-physics"),
+    );
     this._updateImpostor();
+  }
+
+  /** PF-11 D7.5: `_tickAsteroids`'s existing `!_beltPhysicsAwake` guard (D2.1) already skips
+   * OUR per-frame force-application loop while the belt is faded — but Havok's own solver was
+   * still stepping and integrating every one of those bodies regardless, since skipping our
+   * force loop doesn't stop the physics WORLD from simulating them. Setting every body STATIC
+   * on fade-out actually halts that (Babylon's own docs: "unaffected by forces or collisions"),
+   * and DYNAMIC on fade-in resumes it — this is the "measured refinement" `_tickAsteroids`'s own
+   * comment named as deferred to this slice.
+   *
+   * Only touches the bodies when the awake state actually FLIPS (called every frame from
+   * `_updateFrameLadder`, and `setMotionType` is a real Havok call per body, not a flag write —
+   * looping 100+ bodies every single frame just to re-set the same value would be its own waste). */
+  private _setBeltPhysicsAwake(awake: boolean) {
+    if (awake === this._beltPhysicsAwake) return;
+    this._beltPhysicsAwake = awake;
+    if (this._physicsMode !== "havok" || !this._physicsMotionType) return;
+    const motion = awake
+      ? this._physicsMotionType.DYNAMIC
+      : this._physicsMotionType.STATIC;
+    for (const body of this._asteroidBodies) body.setMotionType(motion);
   }
 
   /** Places, sizes and reveals the external-galaxy impostor from the live
@@ -3844,9 +4306,13 @@ class BabylonScene extends HTMLElement {
     // must not clobber it. `_localFieldFade` is 1 for every in-galaxy target,
     // so this is a no-op change everywhere except extragalactic travel.
     if (this.warp.mode !== "ascent") {
+      // PF-11 D9.1: `_bandLayerEnabled` is a third multiplicand alongside the boot ramp and
+      // the D2.2 extragalactic collapse — 1 unless the Render Console (or `?layers=`) turned
+      // this layer off, in which case the whole product is forced to 0 regardless of the
+      // other two.
       this._bandMat?.setFloat(
         "uFade",
-        this._bandFadeAmt * this._localFieldFade,
+        this._bandLayerEnabled ? this._bandFadeAmt * this._localFieldFade : 0,
       );
     }
   }
@@ -3988,6 +4454,9 @@ class BabylonScene extends HTMLElement {
     mat.fillMode = Material.LineListDrawMode;
     mat.alphaMode = Constants.ALPHA_ADD;
     mesh.material = mat;
+    // PF-11 D9.1: honour a layer state resolved (URL/localStorage/tier) before boot reached
+    // here — e.g. `?layers=gd1-trail:0`.
+    mesh.setEnabled(this._layerState["gd1-trail"] !== false);
   }
 
   // --- GAP-05: warp star trails ---
@@ -4199,6 +4668,8 @@ class BabylonScene extends HTMLElement {
     mesh.material = mat;
     this._nebulaMat = mat;
     this._nebulaMesh = mesh;
+    // PF-11 D9.1: honour a layer state resolved before boot reached here.
+    mesh.setEnabled(this._nebulaLayerEnabled);
   }
 
   /** Per-frame producer update: camera ray basis from the same _camQuat that
@@ -4836,17 +5307,24 @@ class BabylonScene extends HTMLElement {
     for (const m of this._shipMeshes) m.visibility = vis;
 
     const p = plume ?? plumeParamsIdle(this._reduced, tS);
-    plumeBuffersForWrapper(
-      plumeFlareLength(p),
-      this._plumeScratch,
-      this._plumePos,
-      this._plumeMeta,
-    );
-    this._plumeMesh?.updateVerticesData(
-      VertexBuffer.PositionKind,
-      this._plumePos,
-    );
-    this._plumeMesh?.updateVerticesData("plumeMeta", this._plumeMeta);
+    // PF-11 D7.4: rebuild + re-upload the plume geometry only when the flare length that
+    // drives it actually changed — see _lastPlumeFlareLen's own comment for why this mostly
+    // matters under reduced motion, where the shape genuinely holds steady between phases.
+    const flareLen = plumeFlareLength(p);
+    if (flareLen !== this._lastPlumeFlareLen) {
+      this._lastPlumeFlareLen = flareLen;
+      plumeBuffersForWrapper(
+        flareLen,
+        this._plumeScratch,
+        this._plumePos,
+        this._plumeMeta,
+      );
+      this._plumeMesh?.updateVerticesData(
+        VertexBuffer.PositionKind,
+        this._plumePos,
+      );
+      this._plumeMesh?.updateVerticesData("plumeMeta", this._plumeMeta);
+    }
     const throttle = plumeThrottle(p);
     this._plumeMat?.setFloat("uTime", this._reduced ? 0 : tS);
     this._plumeMat?.setFloat("uThrottle", throttle);
@@ -4890,12 +5368,19 @@ class BabylonScene extends HTMLElement {
       for (const e of this._embers) if (stepEmber(e, this._dtS)) live.push(e);
       this._embers = live;
     }
-    emberBillboards(this._embers, this._emberPos, this._emberMeta);
-    this._emberMesh?.updateVerticesData(
-      VertexBuffer.PositionKind,
-      this._emberPos,
-    );
-    this._emberMesh?.updateVerticesData("emberMeta", this._emberMeta);
+    // PF-11 D7.4: bursts are momentary — most frames have zero live embers, and re-uploading
+    // an all-empty buffer forever after the burst ends was pure waste. Rebuild + upload
+    // whenever there's anything live (positions genuinely move every frame) OR the count just
+    // dropped to zero (the one frame that must clear whatever was still showing).
+    if (this._embers.length || this._lastEmberCount !== 0) {
+      emberBillboards(this._embers, this._emberPos, this._emberMeta);
+      this._emberMesh?.updateVerticesData(
+        VertexBuffer.PositionKind,
+        this._emberPos,
+      );
+      this._emberMesh?.updateVerticesData("emberMeta", this._emberMeta);
+    }
+    this._lastEmberCount = this._embers.length;
 
     // shimmer anchor: mean nozzle point (unit-ship stern +Z → wrapper -Z),
     // projected onto the screen with the same camera basis the raymarch uses
@@ -5074,6 +5559,9 @@ class BabylonScene extends HTMLElement {
       // zero gravity: space — the belt-pull herding force is applied per
       // frame in _tickAsteroids, not via global gravity
       scene.enablePhysics(new Vector3(0, 0, 0), plugin);
+      // PF-11 D7.5: same already-imported module `shapeTypes` reads PhysicsShapeType from —
+      // captured once here so _setBeltPhysicsAwake can toggle motion type with no further import.
+      this._physicsMotionType = shapeTypes.PhysicsMotionType;
       for (let i = 0; i < field.count; i++) {
         const agg = new PhysicsAggregate(
           this._asteroidInstances[i],
@@ -5145,27 +5633,34 @@ class BabylonScene extends HTMLElement {
    * every render-loop frame — allocates nothing. */
   private _warpDirScratch = new Vector3(0, 0, 1);
   private _conColorScratch = new Color4(0.55, 0.61, 0.88, 0.34);
+  /** PF-11 D7.4: applies aberration/Doppler uniforms to one material, or does nothing for a
+   * clone that hasn't been created yet (`_beltMat`/`_bandMat` land post-boot). Factored out of
+   * `_pushAberration` so that per-frame call — every frame, unconditionally, from `_tickWarp` —
+   * no longer builds a fresh 7-element array just to iterate it once. */
+  private _setAberrationUniforms(
+    m: ShaderMaterial | undefined,
+    beta: number,
+    gamma: number,
+  ) {
+    if (!m) return;
+    m.setFloat("uBeta", beta);
+    m.setFloat("uGamma", gamma);
+    m.setVector3("uWarpDir", this._warpDirScratch);
+  }
+
   private _pushAberration(wd: readonly [number, number, number]) {
     const beta = this._beta;
     const gamma = beta > 0 ? 1 / Math.sqrt(1 - beta * beta) : 1;
     this._warpDirScratch.copyFromFloats(wd[0], wd[1], wd[2]);
-    const mats: (ShaderMaterial | undefined)[] = [
-      this._starMat,
-      // PF-11 D2: the frame-ladder clones share the same aberration/Doppler
-      // uniforms as the base — they differ only in `uLayerFade`.
-      this._localMat,
-      this._beltMat,
-      this._bodyMat,
-      this._photoMat,
-      this._trailMat,
-      this._bandMat,
-    ];
-    for (const m of mats) {
-      if (!m) continue;
-      m.setFloat("uBeta", beta);
-      m.setFloat("uGamma", gamma);
-      m.setVector3("uWarpDir", this._warpDirScratch);
-    }
+    this._setAberrationUniforms(this._starMat, beta, gamma);
+    // PF-11 D2: the frame-ladder clones share the same aberration/Doppler
+    // uniforms as the base — they differ only in `uLayerFade`.
+    this._setAberrationUniforms(this._localMat, beta, gamma);
+    this._setAberrationUniforms(this._beltMat, beta, gamma);
+    this._setAberrationUniforms(this._bodyMat, beta, gamma);
+    this._setAberrationUniforms(this._photoMat, beta, gamma);
+    this._setAberrationUniforms(this._trailMat, beta, gamma);
+    this._setAberrationUniforms(this._bandMat, beta, gamma);
     // Constellation figures fade during relativistic transit — matches
     // space-engine.js's `uColor(..., 0.34 * (1 - beta))` exactly. No
     // aberration/Doppler on this pass (out of GAP-06's scope per the gap
@@ -5237,10 +5732,12 @@ class BabylonScene extends HTMLElement {
     // PF-11 D2.1: when the belt has faded out (any DSO/extragalactic
     // destination) its physics sleeps — Astra §2: stepping belt physics while
     // parked at an SDSS galaxy is pure waste, and the belt is invisible anyway.
-    // Skipping the force loop is the correct, low-risk sleep; the collision
-    // callback is likewise gated (below) so invisible rocks never shake the
-    // camera. Halting Havok integration outright (setMotionType STATIC / a zero
-    // timestep) is D7.5's measured refinement — recorded, not done here.
+    // Skipping the force loop below is the low-risk half of that sleep; the collision
+    // callback is likewise gated (below) so invisible rocks never shake the camera.
+    // PF-11 D7.5: Havok itself now actually stops integrating these bodies too —
+    // `_setBeltPhysicsAwake` (called from `_updateFrameLadder`) sets every body STATIC on the
+    // same fade-out this flag reflects, DYNAMIC again on fade-in. This early return stays: even
+    // with the bodies STATIC, there is no reason to run the per-rock loop below at all.
     if (!this._beltPhysicsAwake) return;
     if (this._physicsMode === "havok") {
       const f = this._asteroidField;
@@ -5250,12 +5747,21 @@ class BabylonScene extends HTMLElement {
       const sw = this.warp.mode === "warp" ? this._shipWorld : null;
       for (let i = 0; i < this._asteroidBodies.length; i++) {
         const p = this._asteroidInstances[i].position;
-        const [ax, ay, az] = beltPullAccel(p.x, p.y, p.z);
+        // 2026-07-29 code review, finding 3: the `Into` variant writes into the reused
+        // `_beltPullScratch` — the tuple-returning `beltPullAccel` allocated once per rock per
+        // frame in this loop. Same math, same function; see babylon-asteroids.ts's own note.
+        beltPullAccelInto(p.x, p.y, p.z, this._beltPullScratch);
         const m = f.masses[i];
-        this._asteroidPull.set(ax * m, ay * m, az * m);
+        this._asteroidPull.set(
+          this._beltPullScratch[0] * m,
+          this._beltPullScratch[1] * m,
+          this._beltPullScratch[2] * m,
+        );
         this._asteroidBodies[i].applyForce(this._asteroidPull, p);
         if (sw) {
-          const [fx, fy, fz] = passageDeflectForce(
+          // PF-11 D7.4: `Into` variant, same reasoning as beltPullAccelInto above — this branch
+          // is live for every rock for the whole duration of a warp through the belt.
+          passageDeflectForceInto(
             sw[0],
             sw[1],
             sw[2],
@@ -5263,7 +5769,11 @@ class BabylonScene extends HTMLElement {
             p.y,
             p.z,
             m,
+            this._deflectScratch,
           );
+          const fx = this._deflectScratch[0];
+          const fy = this._deflectScratch[1];
+          const fz = this._deflectScratch[2];
           if (fx !== 0 || fy !== 0 || fz !== 0) {
             this._asteroidPull.set(fx, fy, fz);
             this._asteroidBodies[i].applyForce(this._asteroidPull, p);
@@ -5590,6 +6100,30 @@ class BabylonScene extends HTMLElement {
     };
   }
 
+  /** PF-11 D5.3 — nearest field-catalog entry of a given deep-layer population byte
+   * (`FIELD_TYPES` in spaceHelpers.ts: 1=OC, 2=WD, 3=SDSS, 4=GD-1, 5=EXO, 6=AST, 7=OORT) to the
+   * ship's current position, for the search console's "A WHITE DWARF · NEAREST INSTANCE"-style
+   * class rows. Returns the field index (pass to `travelTo("fs-"+i)` via D4.2's already-shipped
+   * branch) or -1 if the field isn't loaded yet or has no member of that type. The actual scan
+   * is `star-catalog.ts`'s pure `nearestOfType` (unit-tested off-GPU, same reasoning TR-097
+   * used for `raySphereDist`); this method's own job is only the per-camera-epoch memoization
+   * (see `_classEpochCache`), since it runs once per class row on every search keystroke, not
+   * once per frame. */
+  nearestFieldOfType(typeByte: number): number {
+    const f = this._field;
+    if (!f || !f.count) return -1;
+    const [cx, cy, cz] = this.cam;
+    const epoch = `${Math.round(cx / 5)},${Math.round(cy / 5)},${Math.round(cz / 5)}`;
+    if (!this._classEpochCache || this._classEpochCache.epoch !== epoch) {
+      this._classEpochCache = { epoch, byType: new Map() };
+    }
+    const cached = this._classEpochCache.byType.get(typeByte);
+    if (cached !== undefined) return cached;
+    const result = nearestOfType(f, typeByte, this.cam);
+    this._classEpochCache.byType.set(typeByte, result);
+    return result;
+  }
+
   /** PF-11 D6.4 bug fix: the planet sphere occludes ray-based picking, or `Infinity` when
    * nothing is currently rendered there. See ship-dynamics.ts's header comment for why this
    * exists — the picker below is screen-space-nearest, not depth-aware, so without this a
@@ -5776,7 +6310,7 @@ class BabylonScene extends HTMLElement {
       return;
     }
     const b =
-      this.bodies.find((x) => x.e.id === id) ??
+      this._bodyById.get(id) ??
       this.stations.find((x) => x.e.id === id) ??
       // PF-11 D4.2: resolved BEFORE the D3.3 policy gate below, so a field object picked
       // mid-journey QUEUES like any other destination instead of falling out the `!b` return
@@ -6110,8 +6644,7 @@ class BabylonScene extends HTMLElement {
       // instead of calling `travelTo` directly and proving only that the method exists.
       // Field objects are billboard instances, never `bodies` entries, so the ?? is the only
       // way this hook can reach the ~168,883 objects D4.2 makes travelable.
-      const b =
-        this.bodies.find((x) => x.e.id === bodyId) ?? this._fieldBody(bodyId);
+      const b = this._bodyById.get(bodyId) ?? this._fieldBody(bodyId);
       if (!b) return false;
       pos = b.pos;
     }
@@ -6592,15 +7125,27 @@ class BabylonScene extends HTMLElement {
         const lyTotal = w.lyTotal ?? 0;
         const vC =
           lyTotal > 0 ? (lyTotal * dsdk) / (warpDur / 1000) / 3.1688e-8 : 0;
-        emit("cosmos:warp", {
-          id: w.target?.e.id ?? "__home",
-          t: k,
-          ly: w.home ? 0 : lyTotal * (1 - e),
-          vC,
-          phase: wphase,
-          home: !!w.home,
-          quiet: !!w.quiet,
-        });
+        // PF-11 D7.4: throttled to WARP_EVENT_MIN_INTERVAL_MS, except a phase change always
+        // emits immediately — see _lastWarpEmitPhase's own comment for why that carve-out
+        // exists. Internal state above (β, FOV, warp.prog) is computed every frame regardless;
+        // only this DOM dispatch (and the React re-render it drives) is rate-limited.
+        const phaseChanged = wphase !== this._lastWarpEmitPhase;
+        if (
+          phaseChanged ||
+          now - this._lastWarpEmitMs >= WARP_EVENT_MIN_INTERVAL_MS
+        ) {
+          this._lastWarpEmitMs = now;
+          this._lastWarpEmitPhase = wphase;
+          emit("cosmos:warp", {
+            id: w.target?.e.id ?? "__home",
+            t: k,
+            ly: w.home ? 0 : lyTotal * (1 - e),
+            vC,
+            phase: wphase,
+            home: !!w.home,
+            quiet: !!w.quiet,
+          });
+        }
       }
     }
 

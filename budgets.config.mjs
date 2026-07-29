@@ -35,8 +35,18 @@ export const bundle = {
    * engine budget is subsumed). Measured 1031 KB on 2026-07-19 (TR-052); ~15% headroom.
    * Raised 1200 -> 1205 on 2026-07-25 (TR-101): PF-11 D4.4 batch 2 (41 owner-approved,
    * sourced NGC2000 nebula field-notes/lore) measured 1200.9 KB, 0.9 KB over the prior
-   * ceiling — deliberate content growth, not drift; ~4 KB headroom restored. */
-  totalJsGz: 1205,
+   * ceiling — deliberate content growth, not drift; ~4 KB headroom restored.
+   * Raised 1205 -> 1215 on 2026-07-29 (TR-108): PF-11 D5 (destination-search.ts ranked
+   * search/combobox, D5.3 class-row engine surface, D5.4's 5 new curated moon entries) +
+   * D6.2 (belt obliquity basis transform) measured 1206.1 KB, 1.1 KB over the prior ceiling —
+   * deliberate feature/content growth, not drift; ~9 KB headroom restored.
+   * Raised 1215 -> 1225 on 2026-07-29 (TR-111): PF-11 D7 (catalog-decode.worker.ts, the new
+   * SDSS-decode worker chunk) + D9.1-D9.3 (render-layers.ts's registry, the new
+   * RenderConsole.tsx panel, engine setLayers() surface) measured 1210.7 KB, 4.3 KB under the
+   * prior ceiling but genuinely tight after two feature slices in one session — raised ahead
+   * of D9.4's remaining defaults-calibration work rather than landing exactly at the wire;
+   * ~14 KB headroom restored. */
+  totalJsGz: 1225,
 
   /** The TR-027 canary, and the most important number in this file. An accidental
    * `@babylonjs/core` BARREL import materializes as a single ~1.1 MB chunk and trips this
@@ -106,8 +116,17 @@ export const assets = {
    * payload came back, so the ceiling follows it back up — the same rule working in the other
    * direction. The measured cost is far smaller than budgeted for: **0.25 MB**, because the map
    * is mostly black and JPEG compresses it to almost nothing. Owner approved up to ~2 MB for
-   * this; it needed 0.5. Base + high only (MAP_TIER_CAP in build-planet-textures.mjs). */
-  totalMB: 257.0,
+   * this; it needed 0.5. Base + high only (MAP_TIER_CAP in build-planet-textures.mjs).
+   *
+   * RAISED 257.0 -> 257.4, 2026-07-29 (PF-11 D6.2 + D6.6, TR-108/109) — two independent,
+   * deliberate `assets/(root)` growths landed in the same pass: D6.2 regenerated
+   * `asteroids-dr3.png` in the corrected (real, obliquity-inclined) belt frame — the byte
+   * layout is unchanged, so the size shift is incidental to the frame fix, not a new asset;
+   * D6.6a's `patch-atlas.mjs` composited 3 new 128px moon cells (Tethys/Dione/Rhea) into
+   * `atlas.jpg`, which forces a full 4096x4096 re-encode (measured 0.23 MB growth at
+   * mozjpeg quality 90 — see that script's own comment for why not a smaller/larger
+   * quality). Combined measured total: 256.80 MB; 0.6 MB headroom restored. */
+  totalMB: 257.4,
 
   /** The largest single file. Attribution, not a second total: a 45 MB asset appearing where the
    * previous maximum was 8 MB is a different kind of event from the total drifting up by 45 MB
@@ -151,7 +170,10 @@ export const assets = {
     // base + high, measured 0.25 MB total (0.05 + 0.20). See `totalMB` for why the earlier
     // ratchet-down that removed them no longer applies.
     planets: 170.0,
-    "(root)": 59.7,
+    // RAISED 59.7 -> 60.0, 2026-07-29 (PF-11 D6.2 + D6.6, TR-108/109) — see `totalMB`'s entry
+    // of the same date for the two causes (asteroids-dr3.png reframe, atlas.jpg's 3 new
+    // moon cells); both land in this group. Measured 59.87 MB; 0.13 MB headroom restored.
+    "(root)": 60.0,
     dso3: 15.0,
     dso2: 7.2,
     dso: 3.9,
@@ -159,4 +181,24 @@ export const assets = {
   },
 };
 
-export default { bundle, assets };
+/** PF-11 D9.3 — real measured byte sizes for the Render Console's fetch-on-enable layers
+ * (`src/lib/render-layers.ts`'s `LAYERS[].assetBytes` reads these, rather than restating its
+ * own copy), so the panel's per-row cost label and this file's asset gate can never quietly
+ * diverge. Layers not listed here are computed/procedural/derived (0 bytes — see
+ * render-layers.ts's own per-layer comments for why each one specifically has nothing to
+ * fetch). Measured on-disk 2026-07-29: `stars-hip.png` + `deep.png` (star-field),
+ * `whitedwarfs-edr3.png` + `cns5.png` + `oortcloud.png` + `clusters-bg.png` (bonus-stars),
+ * `sdss18.png` (sdss-field), `asteroids-dr3.png` (belt-visual). `planetHires` is a
+ * representative per-body figure (measured range 4-6 MB, D6.3.2), not a fixed total — unlike
+ * the others, this cost is paid per body visited, not once for the whole catalog. A unit test
+ * (`render-layers.test.ts`) asserts these against both `LAYERS` and the real files on disk, so
+ * a future asset regen that changes a size either updates both sides here or fails loudly. */
+export const layerBytes = {
+  starField: 2_018_454 + 873_480,
+  bonusStars: 5_415_687 + 79_027 + 135_583 + 163_385,
+  sdssField: 47_125_068,
+  beltVisual: 2_081_206,
+  planetHires: 5_000_000,
+};
+
+export default { bundle, assets, layerBytes };

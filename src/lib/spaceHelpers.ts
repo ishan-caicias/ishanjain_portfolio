@@ -81,7 +81,9 @@ export function figGeom(e: CelestialEntry): FigGeom {
 }
 
 // Typed deep-layer populations (byte 15 of the packed record) - see DATA.md.
-const FIELD_TYPES: Record<
+// PF-11 D5.3: exported so the search console's class rows ("A WHITE DWARF · NEAREST
+// INSTANCE") share these exact labels rather than duplicating them.
+export const FIELD_TYPES: Record<
   number,
   { n: string; d: string; sp: string; c: string; f: string; cat: string }
 > = {

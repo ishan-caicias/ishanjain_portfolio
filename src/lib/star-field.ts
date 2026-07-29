@@ -101,6 +101,25 @@ export function cornerFromVertexId(vertexId: number): [number, number] {
   return [c === 1 || c === 2 ? 1 : -1, c >= 2 ? 1 : -1];
 }
 
+/** PF-11 D7.5: concatenates an already-decoded base field with a freshly-decoded bonus field
+ * without re-running the decode over the base bytes — the bonus-layer merge's other audited
+ * waste (`_loadBonusStarLayers` previously called `decodeStarCatalog` over
+ * `[...baseChunks, ...bonusChunks]` every time, re-parsing the ~168,959 base records it had
+ * already decoded once at boot). Pure array concatenation; the caller still rebuilds billboard
+ * geometry for the WHOLE merged set afterward — splitting base/bonus into separate meshes to
+ * avoid that too is a bigger structural change than this fixes, and is recorded as a follow-up,
+ * not attempted here. */
+export function mergeStarFields(base: StarField, bonus: StarField): StarField {
+  const count = base.count + bonus.count;
+  const positions = new Float32Array(count * 3);
+  const meta = new Float32Array(count * 2);
+  positions.set(base.positions, 0);
+  positions.set(bonus.positions, base.count * 3);
+  meta.set(base.meta, 0);
+  meta.set(bonus.meta, base.count * 2);
+  return { positions, meta, count };
+}
+
 export function buildStarBillboards(field: StarField): StarBillboards {
   const { count } = field;
   const vertexCount = count * 4;

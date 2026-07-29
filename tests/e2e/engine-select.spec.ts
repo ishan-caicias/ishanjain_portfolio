@@ -690,7 +690,11 @@ test("babylon: nebula gas is destination-gated — hidden at idle and through ac
   // same near-zero-margin class TR-080 fixed for GAP-03/04/05, the
   // distance-scaled travel test, and (in this slice) the craft specs. 90s
   // matches those; every assertion below is unchanged.
-  test.setTimeout(90000);
+  //
+  // PF-11 D6.2 raised this to 150s: the belt-crossing assertion at the end now flies TWO more
+  // journeys (home, then Aldebaran) after the original m42 journey — see that block's own
+  // comment for why going home first is required.
+  test.setTimeout(150000);
   // Owner-reported defect (2026-07-19): the gas appeared the instant a nebula
   // destination was selected, during the ACCELERATION burn. The fix gates each
   // volume behind a reveal envelope: 0 until the decel burn (warp k > 0.53),
@@ -775,13 +779,54 @@ test("babylon: nebula gas is destination-gated — hidden at idle and through ac
     expect(arrived.nebulaReveal[i]).toBe(0);
   }
 
-  // B4 step 2: the belt ring is deliberately oriented (X–Y plane, axis Z,
-  // centre z = −13) so that THIS m42 route crosses its tube nearly
-  // dead-centre — raDecToDir puts dec on Z, so m42's dir (0.107, 0.990,
-  // −0.094) reaches z ≈ −16 at planar radius 170 (see ASTEROID_BELT's
-  // orientation note). The proximity slowdown MUST therefore engage during
-  // this journey. warpSlowMin is captured engine-side and persists past
-  // arrival — no timing sensitivity.
+  // PF-11 D6.2 named test change (CLAUDE.md #15): the belt is now correctly inclined to the
+  // real ecliptic (23.44 deg from this catalog's equatorial frame), so m42's route no longer
+  // crosses its tube — measured directly, peak density along the m42 ray fell from ~0.98 to
+  // ~0.0001 once the belt plane moved to match real astronomy (ASTEROID_BELT's ORIENTATION
+  // note has the numbers). A real showcase route that DOES cross the newly-honest belt was
+  // found by testing several already-catalogued destinations, not chosen to make a test pass:
+  // Aldebaran (alpha Tauri) sits genuinely near the ecliptic — Taurus is a zodiac constellation
+  // — so its real ra/dec threads the tube at peak density 0.964, as good as m42's old
+  // (declared, not real) crossing ever was — measured from ORIGIN, since that's where the
+  // straight-line route the density model assumes actually starts. The ship is still parked at
+  // m42 from the nebula-reveal block above, so go home FIRST — travelling straight from m42 to
+  // Aldebaran would fly an entirely different real-space line, not the origin-to-Aldebaran ray
+  // the numbers above were measured against.
+  await page.locator("babylon-scene").evaluate((el) => {
+    (el as HTMLElement & { goHome(): void }).goHome();
+  });
+  await expect
+    .poll(
+      async () =>
+        page.locator("babylon-scene").evaluate(
+          (el) =>
+            (
+              el as HTMLElement & {
+                sceneStats(): { homeOrbit: boolean };
+              }
+            ).sceneStats().homeOrbit,
+        ),
+      { timeout: 60000 },
+    )
+    .toBe(true);
+  // Second journey in this same test, after m42's nebula-reveal assertions and the home return
+  // above, so warpSlowMin below reflects only this leg (the engine resets it at every new
+  // journey's launch).
+  await page.locator("babylon-scene").evaluate((el) => {
+    (el as HTMLElement & { travelTo(id: string): void }).travelTo("aldebaran");
+  });
+  await expect
+    .poll(
+      async () =>
+        page
+          .locator("babylon-scene")
+          .evaluate(
+            (el) =>
+              (el as HTMLElement & { arrivedId: string | null }).arrivedId,
+          ),
+      { timeout: 30000 },
+    )
+    .toBe("aldebaran");
   const slowStats = await page.locator("babylon-scene").evaluate((el) =>
     (
       el as HTMLElement & {
@@ -1385,7 +1430,19 @@ test("perf overlay is opt-in via ?perf=1", async ({ page }) => {
 test("babylon: PF-10 catalog layers — clusters, NGC2000 nebulae, and the GD-1 trail — load and are real travel targets", async ({
   page,
 }) => {
-  test.setTimeout(45000);
+  // TR-107 (declared test change, CLAUDE.md #15): widened 45000->90000 alongside the two
+  // arrival-poll timeouts below. This test does TWO back-to-back real travel journeys
+  // (cluster-pleiades then ngc2000-lagoon-nebula) on the full 555,825+-object PF-10 scene —
+  // the same per-frame-dt-clamped, wall-clock-driven warp state machine documented throughout
+  // this file (e.g. the "distance-scaled travel" test below) stretches multiple-fold under
+  // CI's SwiftShader software rendering, and that stretch compounds across two sequential
+  // journeys instead of one. Observed directly (2026-07-28 full-suite run, TR-106 lineage):
+  // cluster-pleiades arrived at 6.9s against a 10000ms poll (already near the edge), and
+  // ngc2000-lagoon-nebula — the farther, near-WARP_MAX_MS journey — never arrived within its
+  // own 10000ms poll. Isolated reruns of this exact test passed 3/3 in 7.1-10.5s total,
+  // confirming this is the full-run contention class, not a functional regression. Assertions
+  // below are unchanged.
+  test.setTimeout(90000);
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   page.on("console", (m) => {
@@ -1405,6 +1462,7 @@ test("babylon: PF-10 catalog layers — clusters, NGC2000 nebulae, and the GD-1 
       CELESTIAL_GD1_COUNT?: number;
       CELESTIAL_NGC2000_COUNT?: number;
       CELESTIAL_SATURNMOONS_COUNT?: number;
+      CELESTIAL_MISSINGMOONS_COUNT?: number;
     };
     return {
       celestial: w.CELESTIAL?.length,
@@ -1414,6 +1472,7 @@ test("babylon: PF-10 catalog layers — clusters, NGC2000 nebulae, and the GD-1 
       gd1: w.CELESTIAL_GD1_COUNT,
       ngc2000: w.CELESTIAL_NGC2000_COUNT,
       saturnmoons: w.CELESTIAL_SATURNMOONS_COUNT,
+      missingmoons: w.CELESTIAL_MISSINGMOONS_COUNT,
     };
   });
   expect(counts.clusters).toBe(35);
@@ -1429,9 +1488,12 @@ test("babylon: PF-10 catalog layers — clusters, NGC2000 nebulae, and the GD-1 
   // sphere textures with no catalog entry, so 17.5 MB of real imagery could never render — found
   // by live validation, not by a test. Counted individually here per the convention above.
   expect(counts.saturnmoons).toBe(3);
+  // PF-11 D5.4 missing-body audit: Mimas, Iapetus, Phobos, Triton, Charon — real curated
+  // entries (no photograph, img:null), same "counted individually" convention.
+  expect(counts.missingmoons).toBe(5);
   // 2,525 pre-existing + 35 clusters + 4 minor planets + 856 NBG + 1,365 GD-1 + 41 NGC2000
-  // + 3 Saturn moons, none dropped as an id collision.
-  expect(counts.celestial).toBe(4829);
+  // + 3 Saturn moons + 5 D5.4 missing moons, none dropped as an id collision.
+  expect(counts.celestial).toBe(4834);
 
   const pleiades = await page.evaluate(() =>
     (
@@ -1456,13 +1518,15 @@ test("babylon: PF-10 catalog layers — clusters, NGC2000 nebulae, and the GD-1 
   await page.locator("babylon-scene").evaluate((el) => {
     (el as TravelEl).travelTo("cluster-pleiades");
   });
+  // TR-107: 10000->20000 — see the test-level comment above; measured at 6.9s under full-run
+  // contention, close enough to the old 10000ms ceiling to be the same near-zero-margin class.
   await expect
     .poll(
       () =>
         page
           .locator("babylon-scene")
           .evaluate((el) => (el as TravelEl).arrivedId),
-      { timeout: 10000 },
+      { timeout: 20000 },
     )
     .toBe("cluster-pleiades");
 
@@ -1486,13 +1550,17 @@ test("babylon: PF-10 catalog layers — clusters, NGC2000 nebulae, and the GD-1 
   await page.locator("babylon-scene").evaluate((el) => {
     (el as TravelEl).travelTo("ngc2000-lagoon-nebula");
   });
+  // TR-107: 10000->25000 — the actual full-run failure (5199.99 ly is near WARP_MAX_MS's
+  // distance ceiling, ship-dynamics.ts, the longest-configured-duration journey class; sibling
+  // near-max-distance journeys elsewhere in this file (e.g. the ship-track test's m42 poll) are
+  // already given 25000-30000ms for the same reason).
   await expect
     .poll(
       () =>
         page
           .locator("babylon-scene")
           .evaluate((el) => (el as TravelEl).arrivedId),
-      { timeout: 10000 },
+      { timeout: 25000 },
     )
     .toBe("ngc2000-lagoon-nebula");
 

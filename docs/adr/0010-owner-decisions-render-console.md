@@ -80,3 +80,20 @@ full technical design in the
   (CLAUDE.md #24); every layer toggle must define its off-state as cleanly as its on-state
   (dispose/sleep semantics — see D7 interplay in the implementation plan).
 - Exposure: both shader twins gain the Reinhard term together (CLAUDE.md #4/#5 discipline).
+
+## Addendum, 2026-07-29 (TR-111/TR-112) — D9.1-D9.3 shipped; D9.4 remains blocked on D0.3
+
+D9.1 (`src/lib/render-layers.ts`'s layer registry + `babylon-engine.ts`'s `setLayers()`
+surface), D9.2 (`RenderConsole.tsx`), and D9.3 (per-layer `assetBytes` single-sourced from
+`budgets.config.mjs`; the boot-critical-download budget this ADR called for had, in fact,
+already landed alongside D1.1's instrumentation work, ahead of this ADR's own D9 phase) are
+implemented. **D9.4's `defaultByTier` values are NOT the real-device-calibrated numbers this
+ADR anticipates** — D0.3 has still not run. What shipped instead: every `defaultByTier` in
+`render-layers.ts` mirrors CURRENT shipped behaviour made visible and adjustable (every layer
+that ships unconditionally on every tier today defaults to on everywhere; `belt-physics` and
+`planet-hires` mirror their existing `QUALITY_BUDGETS` entries exactly) — a real default, just
+not a newly-measured one. The panel's own header comment states this explicitly so it is never
+mistaken for a calibration result. Re-run D9.4 once D0.3's real-device pass lands; until then,
+the Render Console still does everything ADR-0010 asked for (multi-select, honest cost labels,
+persistence, the resolution order) — only the specific numbers behind "which preset turns
+which layers on" are provisional.

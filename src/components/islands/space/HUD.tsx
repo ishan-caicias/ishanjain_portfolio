@@ -11,6 +11,9 @@ interface HUDProps {
   arrivedId: string | null;
   sector: string;
   onOpenCredits: () => void;
+  /** PF-11 D9.2: undefined (not just a no-op) on the archived WebGL1 engine, which has no
+   * `setLayers()` to drive — the button is absent entirely rather than present-but-broken. */
+  onOpenRenderConsole?: () => void;
   isTravel: boolean;
   onToggleNavMode: () => void;
   /** PF-11 D2.2: true when parked at an extragalactic destination, where the
@@ -35,6 +38,7 @@ export default function HUD({
   arrivedId,
   sector,
   onOpenCredits,
+  onOpenRenderConsole,
   isTravel,
   onToggleNavMode,
   farField,
@@ -88,12 +92,22 @@ export default function HUD({
           </div>
           <div className="mt-1.5 text-[#3f51b5]">ORIGIN · SOL-3 (EARTH)</div>
         </div>
-        <button
-          onClick={onOpenCredits}
-          className="pointer-events-auto mt-1.5 rounded border border-[#3f51b5]/50 px-2.5 py-0.5 text-[10.5px] tracking-widest text-[#7986cb] hover:border-[#ffc107]/40 hover:text-[#ffd54f]"
-        >
-          DATA &amp; LICENSES ▸
-        </button>
+        <div className="pointer-events-auto mt-1.5 flex flex-wrap gap-1.5">
+          <button
+            onClick={onOpenCredits}
+            className="rounded border border-[#3f51b5]/50 px-2.5 py-0.5 text-[10.5px] tracking-widest text-[#7986cb] hover:border-[#ffc107]/40 hover:text-[#ffd54f]"
+          >
+            DATA &amp; LICENSES ▸
+          </button>
+          {onOpenRenderConsole && (
+            <button
+              onClick={onOpenRenderConsole}
+              className="rounded border border-[#3f51b5]/50 px-2.5 py-0.5 text-[10.5px] tracking-widest text-[#7986cb] hover:border-[#ffc107]/40 hover:text-[#ffd54f]"
+            >
+              RENDER ▸
+            </button>
+          )}
+        </div>
         <div className="mt-2.5 max-w-[190px] text-[10px] leading-relaxed tracking-wider text-[#5c6bc0]">
           DRAG TO LOOK 360°
           <br />

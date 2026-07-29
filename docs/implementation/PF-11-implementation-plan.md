@@ -1011,6 +1011,69 @@ FIRST or in the same slice"). Four points recorded rather than silently resolved
    `syncManifestMetadata` reconcile pass and a single `METADATA_FIELDS` list shared with the
    full-build path, so the two modes cannot drift.
 
+#### D6.2 notes as built (2026-07-29, [TR-109](../test-reports/TR-109.md))
+
+Followed steps 1-3 largely as written, with two corrections found during implementation and
+recorded rather than silently absorbed:
+
+1. **Step 1's "transform into belt space, apply the existing math unchanged, transform back"
+   needed a real correction, not just an implementation.** The first draft transformed world
+   points directly via the obliquity rotation with no regard for `ASTEROID_BELT.center`, which
+   silently assumed `center` was itself part of the rotating local frame. It is not:
+   `eclipticToWorld` (the data generator this frame has to match) rotates FIRST, in AU space,
+   THEN translates by `BELT_CENTER_Z` along WORLD Z — the belt-centre placement is a scene/
+   gameplay choice, not real astrometry, and stays a plain world-frame offset. Point conversions
+   therefore need translate-then-rotate one way and rotate-then-translate the other (they don't
+   commute); vector conversions (accelerations, the procedural fallback's velocities) need the
+   rotation only, never a translation. `heliocentricRadius` needed **no change at all** once
+   this was understood — distance to a fixed point doesn't care how the surrounding axes are
+   oriented, which is also the strongest available proof the final design is correct.
+2. **Step 4's "route re-tune" turned out to mean retiring the route, not adjusting a belt
+   constant.** There is no separate "route constant" anywhere in the codebase — the m42
+   crossing was always an emergent property of m42's real (fixed) sky position and the belt's
+   geometry. Measured directly: with `ASTEROID_BELT.center` unchanged, m42's peak belt density
+   collapsed from ~0.98 to ~0.0001 (m42 isn't near the real ecliptic — Orion is not a zodiacal
+   constellation). Retuning `center` to force the crossing back was rejected — computed, it
+   would require moving the belt's centre by ~80 world units along the local pole axis, a
+   drastic change to the belt's overall scene placement for the sake of one showcase route, and
+   the same fitted-coincidence error class this slice exists to remove. Instead: numerically
+   tested several already-catalogued destinations against the corrected belt and found Aldebaran
+   (α Tauri) threads it at peak density ~0.96 — Taurus is a real zodiacal constellation, so this
+   is real astronomy working as predicted, not a new tuning pass. `tests/e2e/engine-select.spec.ts`'s
+   belt-slowdown assertion now flies home first, then to Aldebaran, in the same test (named
+   change, CLAUDE.md #15) — the ship is parked at m42 from that test's own nebula-reveal block,
+   and a straight m42→Aldebaran leg would fly an entirely different real-space line than the
+   origin→Aldebaran ray the crossing was measured against.
+
+Step 5 (Astra REALISM-AUDIT) closed the slice with zero BROKEN PHYSICS findings — see
+[the belt frame review](../analysis/2026-07-29-pf11-d6.2-belt-frame-realism-review.md).
+
+#### D5.2 notes as built (2026-07-29, [TR-108](../test-reports/TR-108.md))
+
+The delivery plan's literal "mid-warp feedback (`IN TRANSIT · ARRIVING AT {dest}`)" wording was
+implemented, then **reverted** after building it: `mid-warp-input.spec.ts`'s existing TR-096
+contract asserts the console shows its **resting label throughout** an abort (`WHERE TO ▸`,
+never a stray in-transit string), which a generic "any active warp shows IN TRANSIT" label would
+have broken. Re-reading the plan's own phrasing in context — "mid-warp: input stays live,
+submission queues via D3.3 (`RETARGET QUEUED`) — the console renders the queue state" — confirms
+the ask was always the QUEUE state specifically (already shipped, TR-095/096), not a second,
+independent in-transit indicator. No code shipped for this; recorded so a future reader doesn't
+re-attempt it and hit the same contract.
+
+#### D6.6a notes as built (2026-07-29, [TR-109](../test-reports/TR-109.md))
+
+The packed 16×16 atlas macro-grid had exactly one genuinely free cell (row 3, col 2 — confirmed
+blank by measurement: a ~800 B re-encoded PNG vs ~148 KB for a real photographic cell at the
+same crop size, not assumed from the JSON alone), subdivided 2×2 for the 3 new moon cells (1
+spare). Compositing forces a full 4096×4096 JPEG re-encode, not just the touched region;
+`sharp`'s default encoder at quality 92 measured +0.76 MB over the committed original — enough
+to trip the asset budget for 3 small 128px tiles. Switched to `mozjpeg: true` at quality 90
+(measured +0.23 MB), the conservative middle point: quality 85-88 with mozjpeg undercuts the
+ORIGINAL file's own size, which risks visibly softening the ~260 already-shipped cells for the
+sake of 3 new ones; quality 92 without mozjpeg was needlessly large. `budgets.config.mjs` raised
+deliberately (`totalMB`/`(root)`) with the measured numbers, same session as D6.2's
+`asteroids-dr3.png` regeneration, which also grew the same asset group.
+
 ### D6.3 C4.3 bundle: sRGB, tier gating, self-shadow, uAtmosphere
 
 1. **sRGB decode (B8, do first):** planet twins decode `surfaceTex` samples

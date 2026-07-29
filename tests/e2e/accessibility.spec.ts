@@ -104,6 +104,16 @@ test.describe("Accessibility — Babylon path (PF-09 B6 re-audit)", () => {
   test("scene chrome stays keyboard-operable on the Babylon path", async ({
     page,
   }) => {
+    // TR-107 (declared test change, CLAUDE.md #15): dismiss the PRE-FLIGHT gate first, as a
+    // real visitor would before ever reaching the mission bar — PF-11 D1.2 put #ij-mission-bar
+    // (the WHERE-TO input and RANDOM JUMP button below) behind body.ij-loading
+    // (opacity:0; pointer-events:none) until a real visitor action; every other Babylon E2E
+    // test that touches this bar already does this (see engine-select.spec.ts's "RNG mission
+    // control button" test). Without it this test also races PreFlight's own arming effect
+    // (moveFocusTo in PreFlight.tsx, fired when the scene's `armed` flips true), which steals
+    // focus to the LAUNCH button mid-test if boot completes during the assertion window —
+    // observed directly as the 2026-07-28 full-suite failure (isolated reruns passed 3/3).
+    await page.getByRole("button", { name: "SKIP INTRO" }).click();
     // The travel input and mission controls must be reachable and usable by
     // keyboard exactly as on the default engine.
     const whereTo = page.getByRole("combobox").or(page.getByRole("textbox"));

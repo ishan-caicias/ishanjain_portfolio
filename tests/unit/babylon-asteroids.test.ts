@@ -8,14 +8,18 @@ import {
   ASTEROID_BELT,
   beltDensityAt,
   beltPullAccel,
+  beltPullAccelInto,
   buildAsteroidField,
   displaceRockVertices,
   IMPACT_SHAKE,
   impactShakeAmplitude,
   passageDeflectForce,
+  passageDeflectForceInto,
   ROCK_BASE_COUNT,
   ROCK_DISPLACEMENT,
   shakeOffset,
+  toBeltSpace,
+  fromBeltSpace,
   visualDriftStep,
   WARP_FIELD,
   minSlowAlongSegment,
@@ -36,17 +40,23 @@ describe("buildAsteroidField", () => {
     expect(Array.from(a.positions)).not.toEqual(Array.from(c.positions));
   });
 
-  it("spawns every body inside the belt torus bounds (ring in X–Y, tube axis Z)", () => {
+  it("spawns every body inside the belt torus bounds (ring in belt-LOCAL X–Y, tube axis = the obliquity-inclined pole)", () => {
+    // PF-11 D6.2 named test change (CLAUDE.md #15): the torus is generated in belt-LOCAL space
+    // and then rotated into world space (see buildAsteroidField's own comment) — the bounds
+    // check has to undo that same rotation (toBeltSpace) before it means anything again, or it's
+    // checking world-frame X/Y/Z against a ring that no longer lies flat in that frame.
     const f = buildAsteroidField(64, 3);
     const b = ASTEROID_BELT;
     for (let i = 0; i < f.count; i++) {
-      const dx = f.positions[i * 3] - b.center[0];
-      const dy = f.positions[i * 3 + 1] - b.center[1];
-      const dz = f.positions[i * 3 + 2] - b.center[2];
-      const planar = Math.hypot(dx, dy);
+      const [lx, ly, lz] = toBeltSpace(
+        f.positions[i * 3] - b.center[0],
+        f.positions[i * 3 + 1] - b.center[1],
+        f.positions[i * 3 + 2] - b.center[2],
+      );
+      const planar = Math.hypot(lx, ly);
       expect(planar).toBeGreaterThanOrEqual(b.radius - b.radialSpread - 1e-6);
       expect(planar).toBeLessThanOrEqual(b.radius + b.radialSpread + 1e-6);
-      expect(Math.abs(dz)).toBeLessThanOrEqual(b.verticalSpread + 1e-6);
+      expect(Math.abs(lz)).toBeLessThanOrEqual(b.verticalSpread + 1e-6);
     }
   });
 
@@ -149,6 +159,55 @@ describe("beltPullAccel", () => {
     const a = beltPullAccel(b.center[0], b.center[1], b.center[2]);
     for (const v of a) expect(Number.isFinite(v)).toBe(true);
   });
+
+  /* 2026-07-29 code-review finding 3: D6.2's first cut called `toBeltSpace`/`fromBeltSpace`
+   * inside this function, allocating two tuples per rock per frame in the kinematic and Havok
+   * loops. The rotation is now INLINED as scalars and written into a caller-owned `out`. The
+   * two tests below are what make that duplication safe: the first pins the inlined copy
+   * against the helpers it replaced, the second pins the convenience wrapper against the
+   * `Into` form. Without them the inline could silently drift from the basis every other belt
+   * function (and both shader twins) still uses. */
+  it("beltPullAccelInto's inlined rotation reproduces toBeltSpace/fromBeltSpace exactly", () => {
+    const probes: [number, number, number][] = [
+      [b.center[0] + b.radius, b.center[1], b.center[2]],
+      [b.center[0] + b.radius * 2, b.center[1] + 30, b.center[2] - 25],
+      [b.center[0] - 90, b.center[1] - 140, b.center[2] + 40],
+      [b.center[0], b.center[1], b.center[2]], // degenerate on-axis
+    ];
+    for (const [px, py, pz] of probes) {
+      // The reference implementation, built only out of the exported helpers.
+      const [lx, ly, lz] = toBeltSpace(
+        px - b.center[0],
+        py - b.center[1],
+        pz - b.center[2],
+      );
+      const planar = Math.hypot(lx, ly);
+      const tx = planar < 1e-6 ? b.radius : (lx / planar) * b.radius;
+      const ty = planar < 1e-6 ? 0 : (ly / planar) * b.radius;
+      const expected = fromBeltSpace(
+        (tx - lx) * b.pull,
+        (ty - ly) * b.pull,
+        -lz * b.pull,
+      );
+      const out = new Float64Array(3);
+      beltPullAccelInto(px, py, pz, out);
+      expect(out[0]).toBeCloseTo(expected[0], 12);
+      expect(out[1]).toBeCloseTo(expected[1], 12);
+      expect(out[2]).toBeCloseTo(expected[2], 12);
+    }
+  });
+
+  it("beltPullAccel (tuple form) and beltPullAccelInto (scratch form) agree bit-for-bit", () => {
+    const out = new Float64Array(3);
+    for (const [px, py, pz] of [
+      [10, -200, 40],
+      [b.center[0] + b.radius, b.center[1], b.center[2] + 40],
+      [0, 0, 0],
+    ] as [number, number, number][]) {
+      beltPullAccelInto(px, py, pz, out);
+      expect(Array.from(out)).toEqual(beltPullAccel(px, py, pz));
+    }
+  });
 });
 
 describe("visualDriftStep", () => {
@@ -204,6 +263,31 @@ describe("beltDensityAt (B4 step 2)", () => {
       );
       expect(d).toBeLessThanOrEqual(prev + 1e-12);
       prev = d;
+    }
+  });
+
+  it("its inlined rotation reproduces toBeltSpace exactly (2026-07-29 finding 3)", () => {
+    // Same reasoning as beltPullAccelInto's pin above: D6.2's `toBeltSpace` call allocated a
+    // tuple per call, and this runs up to 26x per frame during warp (point sample +
+    // minSlowAlongSegment). The rotation is inlined; this keeps the copy honest.
+    const w = WARP_FIELD;
+    for (const [px, py, pz] of [
+      [b.center[0] + b.radius, b.center[1], b.center[2]],
+      [40, -150, 60],
+      [-200, 90, -80],
+      [0, 0, 0],
+    ] as [number, number, number][]) {
+      const [lx, ly, lz] = toBeltSpace(
+        px - b.center[0],
+        py - b.center[1],
+        pz - b.center[2],
+      );
+      const qr = (Math.hypot(lx, ly) - b.radius) / w.densitySigmaRadial;
+      const qz = lz / w.densitySigmaVertical;
+      expect(beltDensityAt(px, py, pz)).toBeCloseTo(
+        Math.exp(-(qr * qr + qz * qz)),
+        12,
+      );
     }
   });
 });
@@ -304,6 +388,22 @@ describe("passageDeflectForce (B4 step 2)", () => {
   it("stays finite for a body exactly at the ship position", () => {
     const f = passageDeflectForce(1, 2, 3, 1, 2, 3, 5);
     for (const v of f) expect(Number.isFinite(v)).toBe(true);
+  });
+
+  it("passageDeflectForce (tuple form) and passageDeflectForceInto (scratch form) agree bit-for-bit — PF-11 D7.4", () => {
+    const out = new Float64Array(3);
+    const cases: [number, number, number, number, number, number, number][] = [
+      [0, 0, 0, 10, 0, 0, 1],
+      [0, 0, 0, 25, 0, 0, 3],
+      [1, 2, 3, 1, 2, 3, 5], // zero-distance edge case
+      [0, 0, 0, WARP_FIELD.deflectRadius * 2.5 + 1, 0, 0, 1], // beyond cutoff
+    ];
+    for (const [sx, sy, sz, bx, by, bz, m] of cases) {
+      passageDeflectForceInto(sx, sy, sz, bx, by, bz, m, out);
+      expect(Array.from(out)).toEqual(
+        passageDeflectForce(sx, sy, sz, bx, by, bz, m),
+      );
+    }
   });
 });
 

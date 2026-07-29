@@ -193,19 +193,24 @@ function emitPhysicsModule(records, meta) {
         `v: [${r.v.map(f6).join(", ")}], a: ${f6(r.a)}, e: ${f6(r.e)}, i: ${f6(r.i)} },`,
     )
     .join("\n");
+  const frameNote =
+    meta.frame === "equatorial"
+      ? "rotated into the scene's EQUATORIAL frame (the real 23.44 deg obliquity applied — PF-11 D6.2, matches the rest of the catalog)"
+      : "the scene's X-Y plane = the ecliptic UNROTATED (DECLARED #1 — see asteroid-kepler.mjs)";
   return `/* asteroids-dr3-physics.ts — GENERATED, DO NOT HAND-EDIT.
  *
- * PF-10 C3. Regenerate with:
- *   node scripts/gaia-asteroids-pngpack.mjs --date ${meta.date} --physics-count ${records.length}
+ * PF-10 C3 (PF-11 D6.2: regenerated in the equatorial frame). Regenerate with:
+ *   node scripts/gaia-asteroids-pngpack.mjs --date ${meta.date} --physics-count ${records.length} --frame ${meta.frame}
  *
  * The bounded physics tier of the real Gaia DR3 asteroid belt: the ${records.length} real
  * asteroids whose real positions at ${meta.date} lie closest to the belt's spine circle
- * (radius ${BELT_RADIUS}, plane z = ${BELT_CENTER_Z}) — the region where the tuned belt density,
- * warp slowdown and passage deflection actually act. Selected out of ${meta.sourceCount} real
- * catalog records by REAL ORBITAL ELEMENTS first (a ${PHYSICS_CUT.aMin}-${PHYSICS_CUT.aMax} AU,
- * e < ${PHYSICS_CUT.eMax}, i < ${PHYSICS_CUT.iMaxDeg}° — epoch-independent, on the catalog's own
- * density peak, per Astra's science brief) and by spine proximity second. Not sampled arbitrarily
- * and not a function of the date the script happened to run.
+ * (radius ${BELT_RADIUS}, plane z = ${BELT_CENTER_Z} in belt-LOCAL space — babylon-asteroids.ts's
+ * toBeltSpace/fromBeltSpace) — the region where the tuned belt density, warp slowdown and
+ * passage deflection actually act. Selected out of ${meta.sourceCount} real catalog records by
+ * REAL ORBITAL ELEMENTS first (a ${PHYSICS_CUT.aMin}-${PHYSICS_CUT.aMax} AU, e < ${PHYSICS_CUT.eMax}, i < ${PHYSICS_CUT.iMaxDeg}°
+ * — epoch-independent, on the catalog's own density peak, per Astra's science brief) and by
+ * spine proximity second (frame-aware — see distanceToBeltSpine). Not sampled arbitrarily and
+ * not a function of the date the script happened to run.
  *
  * Every field here is REAL. Rock radii, spin, base geometry and mass are DECLARED (no size data
  * exists in the source catalog) and are applied separately at runtime by
@@ -213,7 +218,7 @@ function emitPhysicsModule(records, meta) {
  * reader can tell real from declared without cross-referencing.
  *
  *   n  real designation from the catalog
- *   p  world-space position   (1 AU = ${AU_TO_WORLD} world units; scene X-Y plane = the ecliptic)
+ *   p  world-space position   (1 AU = ${AU_TO_WORLD} world units; ${frameNote})
  *   v  world-space velocity   (units/s, real Keplerian velocity x TIME_ACCEL = ${TIME_ACCEL})
  *   a  real semi-major axis, AU
  *   e  real eccentricity
@@ -296,7 +301,7 @@ async function main() {
       )
     ) {
       physicsCandidates++;
-      near.offer(distanceToBeltSpine(p), {
+      near.offer(distanceToBeltSpine(p, args.frame), {
         n: obj.name,
         p,
         v: eclipticVelocityToWorld(state.vel, args.frame),
@@ -358,7 +363,11 @@ async function main() {
   mkdirSync(dirname(args.physics), { recursive: true });
   writeFileSync(
     args.physics,
-    emitPhysicsModule(physics, { date: args.date, sourceCount: count }),
+    emitPhysicsModule(physics, {
+      date: args.date,
+      sourceCount: count,
+      frame: args.frame,
+    }),
   );
   console.log(
     `wrote ${physics.length} real physics bodies -> ${args.physics} ` +

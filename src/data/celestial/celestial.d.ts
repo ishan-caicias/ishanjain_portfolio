@@ -41,6 +41,8 @@ declare global {
     CELESTIAL_NBG_COUNT?: number;
     CELESTIAL_GD1_COUNT?: number;
     CELESTIAL_NGC2000_COUNT?: number;
+    CELESTIAL_SATURNMOONS_COUNT?: number;
+    CELESTIAL_MISSINGMOONS_COUNT?: number;
     CELESTIAL_IMGMAP?: Record<string, [string, string]>;
   }
 }

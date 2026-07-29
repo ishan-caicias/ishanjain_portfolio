@@ -676,9 +676,29 @@ ARRIVING AT {dest}`) — never a silent no-op, whatever D3.3 decides. The combob
 pattern (`combobox`/`listbox`/`aria-activedescendant`) IS the keyboard-nav work item — one
 implementation, spec'd together.
 
+**✅ DELIVERED 2026-07-29 — [TR-108](../test-reports/TR-108.md).** New pure module
+`src/lib/destination-search.ts` (ranked matching, id/designation normalisation, empty-query
+featured list, honest `totalMatches`); `MissionControlBar.tsx` rebuilt as a real ARIA combobox
+(`role="combobox"`/`listbox`/`option`/`aria-activedescendant`, Arrow Up/Down/Enter/Escape owned
+locally); the suggestion dropdown now opens **upward** — the mission bar is fixed to the
+bottom of the viewport at every width, so the old downward-opening dropdown ran off the bottom
+of the screen at every width, not just mobile, a real pre-existing defect this closes rather
+than a mobile-only fix. One drafted scope item (a generic "IN TRANSIT" console label for any
+active warp) was built then **reverted**: it conflicted with TR-096's already-shipped contract
+that the console shows its resting label throughout an abort — the delivery plan's "mid-warp
+feedback" wording turned out to already mean the QUEUE state specifically, which TR-095/096
+already ship.
+
 ### D5.3 Field-object classes in search — decision slice: expose class-level entries
 
 (`A WHITE DWARF · NEAREST INSTANCE`, visually distinct) rather than 168k rows; depends on D4.2.
+
+**✅ DELIVERED 2026-07-29 — [TR-108](../test-reports/TR-108.md).** New optional engine method
+`nearestFieldOfType(typeByte)` (Babylon-only, mirrors the `beginAscent?`/`queuedTargetId?`
+archived-engine-absent convention), memoized per coarse camera-position epoch so it doesn't
+rescan ~200k field records every keystroke; the actual scan is a new pure `nearestOfType` in
+`star-catalog.ts`, extracted for off-GPU unit testing (same reasoning TR-097 used for
+`raySphereDist`). Class rows travel via D4.2's existing `fs-` branch.
 
 ### D5.4 Missing-body audit: either add catalog entries for referenced-but-absent bodies
 
@@ -690,17 +710,31 @@ phone check); every travelable destination reachable through search (R10 satisfi
 literally); mobile suggestion list verified above the soft keyboard (and the
 bottom-dock-opens-upward check — possible live bug folded in here).
 
+**✅ DELIVERED 2026-07-29 — [TR-108](../test-reports/TR-108.md).** All 5 audited-absent bodies
+(Deimos was never in the audit list and stays out of scope) added as real curated entries in
+new `src/data/celestial/celestial-missing-moons.js` — real astrometric/physical data and
+dossier text, `img: null` (none has a source surface image; the same honestly-non-photographic
+state dozens of existing entries already carry). Two real cross-source numeric discrepancies
+resolved rather than silently picked (Mimas's albedo: JPL/Wikipedia's 0.962 used over NASA's
+rounded prose "0.5"; Charon's density: the New Horizons-refined ~1.70 g/cm³ used over JPL's
+older 1.853 table). Positions preserve real orbital-radius rank against already-shipped Saturn
+moons where a sibling exists (Mimas/Iapetus); Phobos/Triton/Charon are each their planet's only
+catalogued moon, so offsets are modest and non-colliding only. Phobos stays NEVER_SPHERE. New
+guard test (D5-AC3: travel surface ⊆ search index) lands and guards forever, per spec.
+D5-AC5 (the D5.1 post-approval label-comprehension check) remains the one standing open item
+across all of Phase D5 — unrelated to this slice, carried forward from TR-097.
+
 ## Phase D6 — PF-10 debt closeout (from the plan tail + handoff B/C sections)
 
-| Slice | Item                                                                                                                                                                                             | Source                       | Note                                                                                                                                                           |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D6.1  | Exposure model: move opposition surge into `refl`, then apply the **Reinhard curve (DECIDED — owner 2026-07-22, ADR-0010)**; ratio compression declared in the license ledger                    | handoff B2                   | **✅ DELIVERED 2026-07-23 — [TR-087](../test-reports/TR-087.md)** (shipped with D6.3; see the note below the table)                                            |
-| D6.2  | Belt 23.44° frame — **GO on inclined-basis re-expression (owner, 2026-07-22)**: model math into the ecliptic basis, `--frame equatorial` data regen, m42 route re-tune, Astra audit closes       | handoff C4 / TR-074          | steps: [implementation plan D6.2](../implementation/PF-11-implementation-plan.md#d62-belt-frame-re-expression--go); sequence after/with D2.1 (same code paths) |
-| D6.3  | C4.3: terminator self-shadowing, tier gating (consume the shipped-but-unfetched 6.58 MB base tier), sRGB decode fix (B8 — CLAUDE.md #10 compliance), `uAtmosphere` per-body flag (B6)            | PF-10 C4.3, handoff B5/B6/B8 | **✅ DELIVERED 2026-07-23 — [TR-087](../test-reports/TR-087.md)** (all four sub-items)                                                                         |
-| D6.4  | Earth `goHome` reveal at 90° phase (terminator, city lights, twilight band — resurrects the deleted night-light assets), feeding D1.3                                                            | handoff B1/C6                | **✅ DELIVERED 2026-07-23 — [TR-088](../test-reports/TR-088.md)** · D1.3 is now unblocked                                                                      |
-| D6.5  | Asset-weight decision — **RESOLVED VIA D9 (owner 2026-07-22, ADR-0010)**: ultra/VT stay in the repo as opt-in fetch-on-enable layers; ADR-0009 gates remain; boot-critical download budget added | handoff C3, ADR-0009/0010    | no longer blocked on D0.3 (D0.3 now calibrates D9 defaults)                                                                                                    |
-| D6.6  | C8 atlas cells for Tethys/Dione/Rhea; C9 Jupiter-moon offset ranks (Io most-separated in catalog, least in reality)                                                                              | handoff C8/C9                | C8 needs an atlas edit path — atlas is vendored, so a documented regeneration/patch pipeline first                                                             |
-| D6.7  | Additive correction of the PF-10 plan header's "221 MB" (actual 256.01/256.34 MB)                                                                                                                | audit finding                | corrections-are-additive                                                                                                                                       |
+| Slice | Item                                                                                                                                                                                             | Source                       | Note                                                                                                                                                                   |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D6.1  | Exposure model: move opposition surge into `refl`, then apply the **Reinhard curve (DECIDED — owner 2026-07-22, ADR-0010)**; ratio compression declared in the license ledger                    | handoff B2                   | **✅ DELIVERED 2026-07-23 — [TR-087](../test-reports/TR-087.md)** (shipped with D6.3; see the note below the table)                                                    |
+| D6.2  | Belt 23.44° frame — **GO on inclined-basis re-expression (owner, 2026-07-22)**: model math into the ecliptic basis, `--frame equatorial` data regen, m42 route re-tune, Astra audit closes       | handoff C4 / TR-074          | **✅ DELIVERED 2026-07-29 — [TR-109](../test-reports/TR-109.md)** (REALISM-AUDIT: [belt frame review](../analysis/2026-07-29-pf11-d6.2-belt-frame-realism-review.md))  |
+| D6.3  | C4.3: terminator self-shadowing, tier gating (consume the shipped-but-unfetched 6.58 MB base tier), sRGB decode fix (B8 — CLAUDE.md #10 compliance), `uAtmosphere` per-body flag (B6)            | PF-10 C4.3, handoff B5/B6/B8 | **✅ DELIVERED 2026-07-23 — [TR-087](../test-reports/TR-087.md)** (all four sub-items)                                                                                 |
+| D6.4  | Earth `goHome` reveal at 90° phase (terminator, city lights, twilight band — resurrects the deleted night-light assets), feeding D1.3                                                            | handoff B1/C6                | **✅ DELIVERED 2026-07-23 — [TR-088](../test-reports/TR-088.md)** · D1.3 is now unblocked                                                                              |
+| D6.5  | Asset-weight decision — **RESOLVED VIA D9 (owner 2026-07-22, ADR-0010)**: ultra/VT stay in the repo as opt-in fetch-on-enable layers; ADR-0009 gates remain; boot-critical download budget added | handoff C3, ADR-0009/0010    | no longer blocked on D0.3 (D0.3 now calibrates D9 defaults)                                                                                                            |
+| D6.6  | C8 atlas cells for Tethys/Dione/Rhea; C9 Jupiter-moon offset ranks (Io most-separated in catalog, least in reality)                                                                              | handoff C8/C9                | **✅ DELIVERED 2026-07-29 — [TR-109](../test-reports/TR-109.md)** — new `scripts/patch-atlas.mjs`, the documented regeneration/patch pipeline C8 needed                |
+| D6.7  | Additive correction of the PF-10 plan header's "221 MB" (actual 256.01/256.34 MB)                                                                                                                | audit finding                | **✅ DELIVERED 2026-07-29 — [TR-109](../test-reports/TR-109.md)** — correction landed in [PF-10's plan header](PF-10-gaia-dataset-realism.md), struck through in place |
 
 **✅ D6.1 + D6.3 DELIVERED 2026-07-23 — [TR-087](../test-reports/TR-087.md)** (REALISM-AUDIT:
 [exposure realism review](../analysis/2026-07-23-pf11-d6.1-exposure-realism-review.md)). They
@@ -751,9 +785,68 @@ run once per pick. Both confirmed via new E2E coverage
 (Playwright's `page.mouse` API hangs against this specific idle scene state; fixed by dispatching
 real `PointerEvent`s directly rather than working around it).
 
-**Still open in D6:** D6.2 (belt frame), D6.6, D6.7.
+**✅ D6.2 DELIVERED 2026-07-29 — [TR-109](../test-reports/TR-109.md)** (REALISM-AUDIT:
+[belt frame review](../analysis/2026-07-29-pf11-d6.2-belt-frame-realism-review.md)). The belt
+model (spine circle, herding pull, gaussian density, orbital rotation) is re-expressed in the
+obliquity-inclined basis: new `toBeltSpace`/`fromBeltSpace` rotation helpers in
+`babylon-asteroids.ts` (mirroring `scripts/lib/asteroid-kepler.mjs`'s `eclipticToEquatorial`
+exactly, translate-then-rotate composition matching `eclipticToWorld`'s own order), both shader
+twins updated with the identical basis-change block, real Gaia DR3 data regenerated with
+`--frame equatorial`. `heliocentricRadius` needed **zero** code change (distance to a fixed
+point is rotation-invariant by construction) and the Kirkwood-gap regression passes byte-for-
+byte unchanged on the regenerated data — both are the proof this is a pure rotation, not
+reasserted trust. **The m42 showcase route is retired, not patched**: measured directly, its
+peak belt density collapsed from ~0.98 to ~0.0001 once the belt moved to its real orientation
+(m42 isn't near the ecliptic). Rather than retuning `ASTEROID_BELT.center` to force the old
+crossing back — which would have re-introduced the exact fitted-coincidence error class this
+slice exists to remove — the showcase route moved to **Aldebaran** (α Tauri), a real zodiacal
+star whose real position threads the newly-honest belt at peak density ~0.96. Astra's audit
+found no BROKEN PHYSICS.
+
+**✅ D6.6 DELIVERED 2026-07-29 — [TR-109](../test-reports/TR-109.md).** New
+`scripts/patch-atlas.mjs` (three-mode, never deletes) composited 3 new 128px atlas cells for
+Tethys/Dione/Rhea — they shipped `img` since TR-079 but `isPhotoEligible` also requires an
+atlas-map entry, so their flat photographic billboard (used at range, before the sphere
+upgrade) silently fell back to a plain point; the one genuinely free macro-cell in the packed
+16×16 grid (confirmed blank by measurement, not assumption) was subdivided for the 3 new
+cells. Jupiter's moon offsets are now rank-honest: Io and Europa's declared visual-spread
+offsets were swapped relative to their real orbital radii (421,700 km vs 671,034 km) — fixed
+by swapping their ra/dec, a minimal data-only change, matching the Saturn-moons precedent this
+system already established. New standing guard test (`moon-offset-rank.test.ts`) covers both
+systems going forward.
+
+**✅ D6.7 DELIVERED 2026-07-29 — [TR-109](../test-reports/TR-109.md).** Additive correction
+landed in [PF-10's own plan header](PF-10-gaia-dataset-realism.md) — the stale "221 MB" figure
+struck through in place with a dated forward pointer to the real measured 256.01/256.34 MB
+figures, per this repo's corrections-are-additive convention; the same edit also resolved the
+adjacent belt-frame-decision reference now that D6.2 is GO-and-delivered.
+
+**Phase D6 is now fully complete** except D6.5, which was never a code item (resolved into D9
+by owner decision, ADR-0010) — D9 itself remains future scope.
+
+**🔧 D5 + D6 code-review remediation, 2026-07-29 — [TR-110](../test-reports/TR-110.md).** A
+REVIEW pass over the delivered D5/D6 tree ([review doc](../analysis/2026-07-29-pf11-d5-d6-code-review.md))
+found ten defects; the owner directed all ten fixed before the plan continues. One was
+user-visible (pressing Escape then continuing to type left the Where-To box dead — missed by all
+six of D5.2's E2E specs, reproduced by an RTL test in seconds); four were allocation/idempotency
+defects, including D6.2's basis helpers having put per-frame allocation back into the render
+loop and `patch-atlas.mjs`'s default mode generation-lossing the whole atlas on a second run.
+Also: `MissionControlBar.tsx` got its first unit tests (10), Aldebaran's belt-crossing density was
+**re-measured** to settle a 0.96-vs-0.97 split between this plan and the source comment (0.9639
+— this plan's figure was the correct one) and is now pinned by test, and **CLAUDE.md
+non-negotiable #22 was rewritten** after D6.6b's direct catalog edit and D5.4's overlay module
+turned out to follow contradictory rules. 828/828 unit, budgets unmoved. **E2E is the owner's
+manual run and TR-110 is not a closed #25 gate without it.** The named theme for the phases
+still to come: the D5 UI slice was measurably less rigorous than the D6 engine slice — worth
+correcting before D9 ships a whole new Render Console UI.
 
 ## Phase D7 — Memory & runtime optimisation (owner R13; audited opportunities, ranked)
+
+**✅ ALL 6 SLICES IMPLEMENTED 2026-07-29 — [TR-111](../test-reports/TR-111.md).** D7.2's
+unconditional-ultra-fetch half and part of D7.4 (`beltPullAccel`'s allocation) were found
+already fixed by D6.3.2/TR-110 respectively during implementation — corrected, not re-done.
+**Real-device heap/VRAM measurement itself has NOT run** — every number below is the original
+audit's estimate or a structural argument, not a measured delta; that remains owner-pending.
 
 Measured before/after via `perf-telemetry` + browser memory tooling; each slice records real
 numbers, not assertions. No behavioural change is acceptable collateral — full gate per slice.
@@ -801,6 +894,11 @@ chunked, fetch-on-enable layer; D0.3's real-device data sets the per-device _def
 
 ## Phase D9 — Render Console: user-configurable layer rendering (ADR-0010)
 
+**✅ D9.1-D9.3 DELIVERED 2026-07-29 — [TR-112](../test-reports/TR-112.md).** D9.4 shipped as
+**owner-pending defaults** (current shipped behaviour made visible/adjustable, not yet
+D0.3-calibrated) rather than a completed real-device calibration — see below and the
+ADR-0010 addendum.
+
 **Owner requirement (R15, 2026-07-22):** a dossier-format settings control panel where the
 visitor multi-selects which DSO/celestial layers render, matched to their machine's
 capability — a machine that can handle complex graphics but not all layers at once lets the
@@ -810,26 +908,39 @@ tiers become the _default preset_, not the ceiling.**
 → Full technical design:
 [implementation plan D9](../implementation/PF-11-implementation-plan.md#d9--render-console).
 
-- **D9.1 Layer registry + engine surface:** a typed registry of toggleable layers (star
-  field, bonus layers, SDSS DR18, belt visual, belt Havok physics, NGC2000 volumes, GD-1
-  trail, constellation figures, Milky Way band, planet hi-res/VT textures, DR3 Tiny) with
-  per-layer cost metadata (bytes, vertices), a `setLayers()`/attribute engine API following
-  the existing `observedAttributes` pattern, enable = lazy fetch-on-first-enable (ADR-0007
-  post-boot discipline), disable = hide + dispose/sleep semantics (with D7's lifecycle work).
-- **D9.2 The panel UI:** dossier-format dialog (`RENDER CONSOLE`, matching the DATA &
-  LICENSES precedent), multi-select with honest per-layer cost labels and live measured fps
-  (perf-telemetry made user-facing — "measure, don't assert" as UX), presets row
-  (LITE / BALANCED / FULL / EVERYTHING) seeded from the device policy, persistence in
-  `localStorage` (`ij-layers`) with the standard resolution order (URL `?layers=` → stored →
-  device default), shared focus utility (D4.3), full a11y.
-- **D9.3 Budget reframing:** `budgets.config.mjs` gains a **boot-critical download budget**
-  (what a default visitor fetches before LAUNCH arms); ADR-0009's repo-weight gates remain;
-  per-layer byte labels in the panel must match the budget data (single source).
-- **D9.4 Defaults calibration** from D0.3's real-device pass (per-device preset selection),
-  recorded in a TR.
-  **Exit:** every layer toggles live without reload; disable actually releases (heap/VRAM
-  measured); persistence + URL override verified; E2E per layer class; reduced-motion +
-  no-WebGL contracts defined; manual regression on a real phone.
+- **✅ D9.1 Layer registry + engine surface** — new `src/lib/render-layers.ts` (11 layers,
+  per-layer cost metadata) + `babylon-engine.ts`'s `setLayers()`/`layers` attribute
+  (`observedAttributes` pattern). Enable = lazy fetch-on-first-enable for `sdss-field`/
+  `belt-visual`; disable = dispose + guard reset (D7.1/D7.2 lifecycle discipline reused, not
+  reinvented). `belt-physics` folds into D2.1's existing `_setBeltPhysicsAwake` call as a
+  second AND-gate rather than a separate mechanism. **3 of 11 layers are honestly
+  `implemented: false`** — `star-field` (always on, by this phase's own design), `bonus-stars`
+  (discovered mid-implementation: merged permanently into the base star mesh for one draw
+  call — a real structural constraint, not attempted this pass), `gaia-tiny` (D8 hasn't
+  shipped its data yet). Recorded as follow-ups, not silently faked.
+- **✅ D9.2 The panel UI** — new `RenderConsole.tsx`, matching the DATA & LICENSES dossier
+  precedent and its `CraftQualityControl` arm's-length engine-access pattern. Presets
+  (LITE/BALANCED/FULL/EVERYTHING), RESET TO AUTO (live, no reload), live fps via the existing
+  `?perf=1` `cosmos:perf` event pair, `ij-layers` persistence with the standard URL → stored →
+  device-default resolution order, `focus-utils.ts`'s trap/moveFocusTo (the same trio
+  `CollectorCard` established), reduced-motion covered by the existing global CSS rule,
+  no-WebGL covered by the HUD button being absent outside the Babylon engine. **Known gap:**
+  no mobile-menu entry point yet (desktop HUD cluster only, unlike credits' two entry points).
+- **✅ D9.3 Budget reframing** — `budgets.config.mjs` gains `layerBytes` (the single source
+  `LAYERS[].assetBytes` reads from, cross-checked against real on-disk file sizes by a unit
+  test). The **boot-critical download budget itself already existed** (`bootCriticalDownloadKB`,
+  landed with D1.1 ahead of this phase) — found already-satisfied during implementation, not
+  built fresh. Deliberate `totalJsGz` 1215→1225 raise (measured 1210.7 KB).
+- **⚠ D9.4 Defaults calibration** — NOT YET real-device calibrated; D0.3 has not run. Shipped
+  instead: every `defaultByTier` mirrors CURRENT behaviour (everything-on for the
+  always-shipped layers; `QUALITY_BUDGETS[tier].asteroids`/`.planetTexture` exactly for
+  `belt-physics`/`planet-hires`) — a real default, explicitly not a measured one (ADR-0010
+  addendum, `render-layers.ts`'s own header comment). Re-run once D0.3 lands.
+  **Exit:** every IMPLEMENTED layer toggles live without reload (✅, E2E written); disable
+  actually releases GPU/CPU geometry structurally (dispose + guard reset — heap/VRAM
+  measurement itself is owner-pending, same as D7); persistence + URL override verified (✅
+  E2E written); E2E per layer class (✅ written, not run); reduced-motion + no-WebGL contracts
+  defined (✅); manual regression on a real phone (owner-pending).
 
 ## Sequencing
 

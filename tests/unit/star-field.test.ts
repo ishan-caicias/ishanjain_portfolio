@@ -8,8 +8,9 @@ import {
   cornerFromVertexId,
   CORNERS,
   LIVE_STAR_COUNT,
+  mergeStarFields,
 } from "@/lib/star-field";
-import { unpackTypeAndColour } from "@/lib/star-catalog";
+import { unpackTypeAndColour, decodeStarCatalog } from "@/lib/star-catalog";
 
 describe("buildStarField", () => {
   it("produces the requested count with matching buffer lengths", () => {
@@ -124,5 +125,57 @@ describe("buildStarField", () => {
     let faint = 0;
     for (let i = 0; i < f.count; i++) if (f.meta[i * 2] < 0.25) faint++;
     expect(faint / f.count).toBeGreaterThan(0.5);
+  });
+});
+
+describe("mergeStarFields (PF-11 D7.5 — bonus-layer merge without re-decoding the base catalog)", () => {
+  it("matches decoding both chunks together in one decodeStarCatalog call", () => {
+    const base = buildStarField(50, 100, 3);
+    const bonus = buildStarField(30, 100, 9);
+    const merged = mergeStarFields(base, bonus);
+    expect(merged.count).toBe(80);
+    expect(Array.from(merged.positions.slice(0, base.count * 3))).toEqual(
+      Array.from(base.positions),
+    );
+    expect(Array.from(merged.positions.slice(base.count * 3))).toEqual(
+      Array.from(bonus.positions),
+    );
+    expect(Array.from(merged.meta.slice(0, base.count * 2))).toEqual(
+      Array.from(base.meta),
+    );
+    expect(Array.from(merged.meta.slice(base.count * 2))).toEqual(
+      Array.from(bonus.meta),
+    );
+  });
+
+  it("produces the same result as re-decoding base+bonus chunks together", () => {
+    // The real call site: base decoded once at boot, bonus chunks decoded fresh, merged without
+    // re-parsing the base bytes. This proves that split is equivalent to the old single
+    // decodeStarCatalog([...base, ...bonus]) call it replaces.
+    const baseChunk = new Uint8Array(15 * 4);
+    const bonusChunk = new Uint8Array(15 * 3);
+    for (let i = 0; i < baseChunk.length; i++) baseChunk[i] = (i * 7) % 256;
+    for (let i = 0; i < bonusChunk.length; i++) bonusChunk[i] = (i * 13) % 256;
+    const base = decodeStarCatalog([baseChunk]);
+    const bonus = decodeStarCatalog([bonusChunk]);
+    const merged = mergeStarFields(base, bonus);
+    const reference = decodeStarCatalog([baseChunk, bonusChunk]);
+    expect(Array.from(merged.positions)).toEqual(
+      Array.from(reference.positions),
+    );
+    expect(Array.from(merged.meta)).toEqual(Array.from(reference.meta));
+    expect(merged.count).toBe(reference.count);
+  });
+
+  it("handles an empty base or bonus field", () => {
+    const base = buildStarField(10, 100, 1);
+    const empty: ReturnType<typeof buildStarField> = {
+      positions: new Float32Array(0),
+      meta: new Float32Array(0),
+      count: 0,
+    };
+    const merged = mergeStarFields(base, empty);
+    expect(merged.count).toBe(10);
+    expect(Array.from(merged.positions)).toEqual(Array.from(base.positions));
   });
 });

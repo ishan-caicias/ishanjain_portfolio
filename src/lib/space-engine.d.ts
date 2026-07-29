@@ -60,6 +60,11 @@ export interface SpaceEngineElement extends HTMLElement {
     list: { id: string; ra: number; dec: number; ly: number }[],
   ): void;
   fieldInfo(index: number): SpaceEngineFieldInfo | null;
+  /** PF-11 D5.3 (Babylon engine only — the archived WebGL engine has no field-catalog scan of
+   * this kind; readers must null-check): nearest field-catalog index of the given deep-layer
+   * population byte to the ship's current position, or -1 if none/not loaded. Feeds the search
+   * console's "A WHITE DWARF · NEAREST INSTANCE" class rows. */
+  nearestFieldOfType?(typeByte: number): number;
   bodies: SpaceEngineBody[];
   stations: SpaceEngineBody[];
   cam: [number, number, number];

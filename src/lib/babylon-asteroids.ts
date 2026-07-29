@@ -29,16 +29,86 @@
  */
 import type { RealAsteroidCatalog } from "../data/asteroids-dr3-physics";
 
-/** Belt geometry (world units, same space as the star shell / bodies).
+/** PF-11 D6.2 (GO) — the real Gaia DR3 asteroid elements are heliocentric ECLIPTIC, but the rest
+ * of this scene's catalog (stars, DSOs) is EQUATORIAL — leaving the belt in the ecliptic frame
+ * put it 23.44 deg off the real zodiac (Astra, science brief; `scripts/lib/asteroid-kepler.mjs`'s
+ * header DECLARED #1). `--frame equatorial` now rotates the BAKED real positions/velocities into
+ * the scene's equatorial/world frame via that module's `eclipticToEquatorial` + `eclipticToWorld`
+ * — ROTATE about world X by `OBLIQUITY_J2000_DEG` FIRST (in AU space), THEN translate by
+ * `BELT_CENTER_Z` along world Z (the belt-centre placement is a scene/gameplay choice, not real
+ * astrometry, so it stays a plain world-frame offset applied after the real rotation — same
+ * order `eclipticToWorld` already uses). `toBeltSpace`/`fromBeltSpace` below are the ROTATION
+ * half only — pure, no translation, correct for both points AND vectors (accelerations,
+ * velocities, displacements never take a translation). Every belt-model function below handles
+ * the `ASTEROID_BELT.center` translation itself, in the right place for what it's converting:
+ * subtract center, rotate, run the tuned math (POSITION in); rotate the tuned math's result, add
+ * center back (POSITION out); or just rotate with no translation at all (VECTOR either way).
+ * Mirrors `eclipticToEquatorial` exactly (same axis, same angle) so real baked equatorial-frame
+ * positions round-trip through the tuned geometry correctly; a unit test pins the two constants
+ * against each other (the .mjs build script cannot be imported into shipped runtime code, so,
+ * like KEPLER_K below, the duplication is structural, not accidental). */
+const OBLIQ_D2R = Math.PI / 180;
+/** Mirrors `scripts/lib/asteroid-kepler.mjs`'s `OBLIQUITY_J2000_DEG` exactly. */
+export const OBLIQUITY_J2000_DEG = 23.439281;
+export const BELT_OBLIQ_COS = Math.cos(OBLIQUITY_J2000_DEG * OBLIQ_D2R);
+export const BELT_OBLIQ_SIN = Math.sin(OBLIQUITY_J2000_DEG * OBLIQ_D2R);
+
+/** Equatorial (world) -> ecliptic-aligned (the frame every belt-model function below was tuned
+ * in) rotation ONLY — no translation. The inverse of `fromBeltSpace`/`eclipticToEquatorial`:
+ * rotation about world X by -OBLIQUITY_J2000_DEG. */
+export function toBeltSpace(
+  x: number,
+  y: number,
+  z: number,
+): [number, number, number] {
+  return [
+    x,
+    y * BELT_OBLIQ_COS + z * BELT_OBLIQ_SIN,
+    -y * BELT_OBLIQ_SIN + z * BELT_OBLIQ_COS,
+  ];
+}
+
+/** Ecliptic-aligned -> equatorial (world) rotation ONLY — no translation. IDENTICAL rotation to
+ * `scripts/lib/asteroid-kepler.mjs`'s `eclipticToEquatorial` (about world X, by
+ * +OBLIQUITY_J2000_DEG) — kept as its own copy rather than importing a build script into
+ * shipped runtime code, same reasoning as KEPLER_K's duplication below. */
+export function fromBeltSpace(
+  x: number,
+  y: number,
+  z: number,
+): [number, number, number] {
+  return [
+    x,
+    y * BELT_OBLIQ_COS - z * BELT_OBLIQ_SIN,
+    y * BELT_OBLIQ_SIN + z * BELT_OBLIQ_COS,
+  ];
+}
+
+/** Belt geometry (world units, in belt-LOCAL space — see `toBeltSpace`/`fromBeltSpace` above).
  *
- * ORIENTATION: the ring lies in the X–Y plane (axis = world Z). This is a
- * deliberate choice, not aesthetics: `raDecToDir` maps declination onto Z,
- * and the m42 (Orion Nebula) showcase route — dir ≈ (0.107, 0.990, −0.094) —
- * crosses this ring's tube almost dead-centre (z ≈ −16 at planar radius 170
- * vs tube centre −13), so the B4 proximity-slowdown has a guaranteed,
- * E2E-assertable crossing on the same journey the nebula-reveal test flies.
- * A Y-axis ring (the first draft) is crossed by almost no catalog route,
- * because routes' Y components are cd·sin(ra) — large for most bodies. */
+ * ORIENTATION: the ring lies in the belt-local X–Y plane (local axis = the obliquity-inclined
+ * pole, PF-11 D6.2). Originally (PF-09 B4) this WAS world Z directly — a deliberate choice
+ * (`raDecToDir` maps declination onto Z, and a Y-axis ring is crossed by almost no catalog
+ * route, since routes' Y components are cd·sin(ra), large for most bodies) but an ASTRONOMICALLY
+ * WRONG one: the real Gaia DR3 belt is heliocentric ECLIPTIC, not equatorial, so an unrotated
+ * ring sat 23.44° off the true zodiac (Astra, science brief). D6.2 re-expressed this same ring
+ * — same center/radius/spread, only the frame it's embedded in moved — in the real ecliptic
+ * plane, rotated into the scene's equatorial world frame by `OBLIQUITY_J2000_DEG`.
+ *
+ * SHOWCASE ROUTE, re-measured after the move (numerically, not assumed): m42 (Orion Nebula)'s
+ * old dead-centre crossing (dir ≈ (0.107, 0.990, −0.094), peak density ~0.98 at the old,
+ * unrotated plane) fell to 0.0002 once the belt moved to its real orientation — m42 simply
+ * isn't near the ecliptic. Aldebaran (α Tauri, dir from ra 68.980°/dec 16.509°) is: Taurus is a
+ * zodiac constellation, and its real position threads the newly-honest tube at peak density
+ * 0.964 (at r ≈ 165 along the origin ray) — as good a crossing as m42's ever was, and for the
+ * physically real reason this move exists. `tests/e2e/engine-select.spec.ts`'s
+ * belt-proximity-slowdown assertion travels there.
+ *
+ * The two figures above are RE-MEASURED (2026-07-29 code review, finding 9): D6.2 recorded
+ * "~0.97" here and in the E2E comment but "~0.96" in TR-109 and the delivery plan — one
+ * measured number with two values. Re-swept along each destination's origin ray at 0.05-unit
+ * steps: Aldebaran 0.9639, m42 0.0002. The docs' 0.96 was the correct one; a regression test
+ * (`asteroid-dr3-belt.test.ts`) now pins both so this can't drift again. */
 export const ASTEROID_BELT = {
   center: [0, 0, -13] as readonly [number, number, number],
   /** Spine-circle radius. */
@@ -95,7 +165,14 @@ export interface AsteroidField {
 }
 
 /** Builds a deterministic belt: positions on the torus, tangential-biased
- * drift, random spin, cubic-scaled mass. */
+ * drift, random spin, cubic-scaled mass.
+ *
+ * PF-11 D6.2: the torus itself is still generated in belt-LOCAL space (the tuned
+ * center/radius/spread constants below are unchanged), then each position and velocity is
+ * rotated into world space via `fromBeltSpace` before being stored — the procedural fallback
+ * used by the kinematic (no-Havok) tier must sit in the same inclined ring the real Gaia DR3
+ * field and `beltPullAccel`/`beltDensityAt` now expect, or a device without SIMD would see its
+ * fallback rocks floating in the old (wrong) unrotated plane while everything else moved. */
 export function buildAsteroidField(count: number, seed = 1): AsteroidField {
   const b = ASTEROID_BELT;
   const rnd = makeRng(seed);
@@ -109,18 +186,25 @@ export function buildAsteroidField(count: number, seed = 1): AsteroidField {
   for (let i = 0; i < count; i++) {
     const theta = rnd() * Math.PI * 2;
     const r = b.radius + (rnd() * 2 - 1) * b.radialSpread;
-    // ring in the X–Y plane; Z is the tube's vertical axis (see ASTEROID_BELT)
-    const z = b.center[2] + (rnd() * 2 - 1) * b.verticalSpread;
-    positions[i * 3] = b.center[0] + Math.cos(theta) * r;
-    positions[i * 3 + 1] = b.center[1] + Math.sin(theta) * r;
-    positions[i * 3 + 2] = z;
+    // Ring in the belt-LOCAL X–Y plane, relative to the centre (added back after rotating —
+    // position out: rotate, then translate, same order `beltOrbitPosition` uses); local Z is
+    // the tube's vertical axis (see ASTEROID_BELT).
+    const lz = (rnd() * 2 - 1) * b.verticalSpread;
+    const lx = Math.cos(theta) * r;
+    const ly = Math.sin(theta) * r;
+    const [wx, wy, wz] = fromBeltSpace(lx, ly, lz);
+    positions[i * 3] = wx + b.center[0];
+    positions[i * 3 + 1] = wy + b.center[1];
+    positions[i * 3 + 2] = wz + b.center[2];
 
     const scale = b.scaleMin + rnd() * (b.scaleMax - b.scaleMin);
     scales[i] = scale;
     baseIndex[i] = Math.floor(rnd() * ROCK_BASE_COUNT) % ROCK_BASE_COUNT;
     masses[i] = scale * scale * scale;
 
-    // tangential-biased drift: mostly along the ring, some radial/vertical
+    // tangential-biased drift: mostly along the ring, some radial/vertical (belt-local, then
+    // rotated to world with the position above — a velocity is a vector, so the same rotation
+    // applies with no translation term).
     const speed = b.speedMin + rnd() * (b.speedMax - b.speedMin);
     const tx = -Math.sin(theta);
     const ty = Math.cos(theta);
@@ -128,9 +212,10 @@ export function buildAsteroidField(count: number, seed = 1): AsteroidField {
     const jx = (rnd() * 2 - 1) * 0.35;
     const jy = (rnd() * 2 - 1) * 0.35;
     const jz = (rnd() * 2 - 1) * 0.35;
-    const vx = tx * dirSign + jx;
-    const vy = ty * dirSign + jy;
-    const vz = jz;
+    const lvx = tx * dirSign + jx;
+    const lvy = ty * dirSign + jy;
+    const lvz = jz;
+    const [vx, vy, vz] = fromBeltSpace(lvx, lvy, lvz);
     const vl = Math.hypot(vx, vy, vz) || 1;
     linVel[i * 3] = (vx / vl) * speed;
     linVel[i * 3 + 1] = (vy / vl) * speed;
@@ -208,8 +293,15 @@ export const BELT_ORBIT = {
   minRadius: 1,
 } as const;
 
-/** True heliocentric distance of a world-space point — the Sun sits at the belt plane's centre,
- * (0, 0, BELT_CENTER_Z), not at the world origin.
+/** True heliocentric distance of a WORLD-space point — the Sun sits at the FIXED world position
+ * (0, 0, ASTEROID_BELT.center[2]). PF-11 D6.2: still needs NO rotation, and deliberately does
+ * none — `ASTEROID_BELT.center` is a plain world-frame translation applied AFTER the obliquity
+ * rotation (mirroring `eclipticToWorld`'s translate-after-rotate order exactly), so the Sun's
+ * own world position never moves when the belt's plane tilts; only its surrounding ring does.
+ * Distance to a fixed point is unaffected by how the axes around it are oriented, so this
+ * function is identical before and after D6.2 — recorded here so a future reader doesn't "fix"
+ * it into calling `toBeltSpace` the way `beltPullAccel`/`beltDensityAt`/`beltOrbitPosition`
+ * below do (which need the rotation because a SPINE POINT, unlike the Sun, moves with the tilt).
  *
  * ASTRA REFINEMENT (orbital-motion brief, 2026-07-20): the first draft fed the rate law the
  * PLANAR radius `hypot(x, y)`, which is the right answer only for an asteroid sitting exactly in
@@ -229,23 +321,35 @@ export function beltAngularRate(r: number): number {
   return BELT_ORBIT.omegaK * r ** -1.5;
 }
 
-/** One speck's position after `tS` seconds of orbital motion: a prograde rotation about world Z
- * (the declared ecliptic pole) at the rate its true heliocentric distance implies. The rotation
- * itself preserves planar radius and height exactly, so the belt's radial structure — the
- * Kirkwood gaps, the Hilda island, the 4.05–5.00 AU void — is invariant frame to frame. JS mirror
- * of the shader's rotation, same identifiers. */
+/** One speck's position after `tS` seconds of orbital motion: a prograde rotation about the
+ * belt's own (obliquity-inclined, PF-11 D6.2) pole at the rate its true heliocentric distance
+ * implies. POSITION in: subtract the world-frame centre translation, THEN rotate into belt-local
+ * space (this order matters — translation and rotation don't commute, and `eclipticToWorld`
+ * always rotates first when going the other way, so undoing it correctly means translating
+ * first here). Applies the ORIGINAL rotation about local Z unchanged (preserving planar radius
+ * and height exactly, so the belt's radial structure — the Kirkwood gaps, the Hilda island, the
+ * 4.05-5.00 AU void — is invariant frame to frame). POSITION out: rotate back to world, then
+ * re-apply the centre translation. JS mirror of the shader's rotation, same identifiers/
+ * structure either side of the basis change. */
 export function beltOrbitPosition(
   x: number,
   y: number,
   z: number,
   tS: number,
 ): [number, number, number] {
-  const r = heliocentricRadius(x, y, z);
+  const b = ASTEROID_BELT;
+  const [lx, ly, lz] = toBeltSpace(
+    x - b.center[0],
+    y - b.center[1],
+    z - b.center[2],
+  );
+  const r = Math.hypot(lx, ly, lz); // == heliocentricRadius(x, y, z)
   const ang = beltAngularRate(r) * tS;
   if (ang === 0) return [x, y, z];
   const c = Math.cos(ang);
   const s = Math.sin(ang);
-  return [x * c - y * s, x * s + y * c, z];
+  const [wx, wy, wz] = fromBeltSpace(lx * c - ly * s, lx * s + ly * c, lz);
+  return [wx + b.center[0], wy + b.center[1], wz + b.center[2]];
 }
 
 /** Builds the physics field from REAL Gaia DR3 catalog records.
@@ -351,32 +455,72 @@ export function displaceRockVertices(
   return positions;
 }
 
-/** Weak herding acceleration toward the nearest point on the belt's SPINE
- * CIRCLE (radius R in the X–Y plane at z = centerZ) — preserves the ring
- * shape, unlike a pull to the centre point. Returns [ax, ay, az]. */
+/** Weak herding acceleration toward the nearest point on the belt's SPINE CIRCLE (radius R in
+ * the belt-LOCAL X–Y plane at local z = 0, i.e. AT the centre once the input below has already
+ * had `ASTEROID_BELT.center` subtracted) — preserves the ring shape, unlike a pull to the centre
+ * point. Takes a WORLD-space POSITION, returns a WORLD-space acceleration VECTOR (PF-11 D6.2):
+ * position in — subtract the centre translation, THEN rotate into belt-local space (translation
+ * before rotation, undoing `eclipticToWorld`'s rotate-then-translate order); runs the ORIGINAL
+ * unchanged math there; vector out — rotate the resulting acceleration back to world space with
+ * NO translation (a delta/acceleration is a vector, not a point — translations never apply).
+ *
+ * ALLOCATION (2026-07-29 code review, finding 3): this runs once per rock per frame from
+ * `visualDriftStep` and from the engine's Havok force loop, so it must not allocate. D6.2's
+ * first cut called `toBeltSpace`/`fromBeltSpace`, which return fresh tuples — two arrays per
+ * rock per frame where there had been one. The rotation is six multiply-adds; it is inlined
+ * below and the result is written into a caller-owned `out`, so the hot loops allocate NOTHING.
+ * `beltPullAccel` keeps its original tuple-returning signature as the pure, tested API for
+ * callers outside the render loop — it just delegates. A unit test pins the two against each
+ * other, and both against `toBeltSpace`/`fromBeltSpace`, so the inlined copy cannot drift. */
+export function beltPullAccelInto(
+  px: number,
+  py: number,
+  pz: number,
+  out: Float64Array | number[],
+): void {
+  const b = ASTEROID_BELT;
+  // toBeltSpace(px - cx, py - cy, pz - cz), inlined.
+  const rx = px - b.center[0];
+  const ry = py - b.center[1];
+  const rz = pz - b.center[2];
+  const lx = rx;
+  const ly = ry * BELT_OBLIQ_COS + rz * BELT_OBLIQ_SIN;
+  const lz = -ry * BELT_OBLIQ_SIN + rz * BELT_OBLIQ_COS;
+  const planar = Math.hypot(lx, ly);
+  let tx: number, ty: number;
+  if (planar < 1e-6) {
+    // on the axis: nearest spine point is ambiguous — pick +X
+    tx = b.radius;
+    ty = 0;
+  } else {
+    tx = (lx / planar) * b.radius;
+    ty = (ly / planar) * b.radius;
+  }
+  const ax = (tx - lx) * b.pull;
+  const ay = (ty - ly) * b.pull;
+  const az = -lz * b.pull;
+  // fromBeltSpace(ax, ay, az), inlined — vector out, no translation term.
+  out[0] = ax;
+  out[1] = ay * BELT_OBLIQ_COS - az * BELT_OBLIQ_SIN;
+  out[2] = ay * BELT_OBLIQ_SIN + az * BELT_OBLIQ_COS;
+}
+
 export function beltPullAccel(
   px: number,
   py: number,
   pz: number,
 ): [number, number, number] {
-  const b = ASTEROID_BELT;
-  const dx = px - b.center[0];
-  const dy = py - b.center[1];
-  const planar = Math.hypot(dx, dy);
-  let tx: number, ty: number;
-  if (planar < 1e-6) {
-    // on the axis: nearest spine point is ambiguous — pick +X
-    tx = b.center[0] + b.radius;
-    ty = b.center[1];
-  } else {
-    tx = b.center[0] + (dx / planar) * b.radius;
-    ty = b.center[1] + (dy / planar) * b.radius;
-  }
-  return [(tx - px) * b.pull, (ty - py) * b.pull, (b.center[2] - pz) * b.pull];
+  const out: [number, number, number] = [0, 0, 0];
+  beltPullAccelInto(px, py, pz, out);
+  return out;
 }
 
 /** Kinematic fallback integrator for the no-SIMD/visual-only tier: Euler
- * drift + the same belt pull, no collisions. Mutates pos/vel in place. */
+ * drift + the same belt pull, no collisions. Mutates pos/vel in place.
+ *
+ * Uses the module-scratch `beltPullAccelInto` path (see above) rather than `beltPullAccel` —
+ * this loop runs over every rock every frame, and the tuple return was the allocation. */
+const _pullScratch = new Float64Array(3);
 export function visualDriftStep(
   pos: Float32Array,
   vel: Float32Array,
@@ -385,10 +529,10 @@ export function visualDriftStep(
 ): void {
   for (let i = 0; i < count; i++) {
     const o = i * 3;
-    const [ax, ay, az] = beltPullAccel(pos[o], pos[o + 1], pos[o + 2]);
-    vel[o] += ax * dtS;
-    vel[o + 1] += ay * dtS;
-    vel[o + 2] += az * dtS;
+    beltPullAccelInto(pos[o], pos[o + 1], pos[o + 2], _pullScratch);
+    vel[o] += _pullScratch[0] * dtS;
+    vel[o + 1] += _pullScratch[1] * dtS;
+    vel[o + 2] += _pullScratch[2] * dtS;
     pos[o] += vel[o] * dtS;
     pos[o + 1] += vel[o + 1] * dtS;
     pos[o + 2] += vel[o + 2] * dtS;
@@ -413,16 +557,29 @@ export const WARP_FIELD = {
   deflectAccel: 60,
 } as const;
 
-/** Smooth belt density 0..1 at a world point: gaussian falloff from the
- * spine circle (radially and vertically). 1 on the spine, ~0 well outside
- * the tube. Pure — drives the warp slowdown on every tier, physics or not. */
+/** Smooth belt density 0..1 at a WORLD point: gaussian falloff from the spine circle (radially
+ * and vertically, in belt-LOCAL space — PF-11 D6.2: subtracts the centre translation, THEN
+ * rotates via `toBeltSpace`, same position-in order `beltPullAccel` uses). 1 on the spine, ~0
+ * well outside the tube. Pure — drives the warp slowdown on every tier, physics or not. Returns
+ * a scalar, so no conversion back to world space is needed.
+ *
+ * ALLOCATION (2026-07-29 code review, finding 3): this returned a plain number and allocated
+ * NOTHING before D6.2; calling `toBeltSpace` made it allocate one tuple per call, and during
+ * warp it runs once per frame for the point sample PLUS up to 25 more times inside
+ * `minSlowAlongSegment`. The rotation is inlined below — back to zero allocation, same math,
+ * same `toBeltSpace` composition (a unit test pins the inlined copy against the helper). */
 export function beltDensityAt(px: number, py: number, pz: number): number {
   const b = ASTEROID_BELT;
   const w = WARP_FIELD;
-  const dx = px - b.center[0];
-  const dy = py - b.center[1];
-  const dr = Math.hypot(dx, dy) - b.radius; // signed radial dist from spine
-  const dz = pz - b.center[2]; // tube axis is world Z (see ASTEROID_BELT)
+  // toBeltSpace(px - cx, py - cy, pz - cz), inlined.
+  const rx = px - b.center[0];
+  const ry = py - b.center[1];
+  const rz = pz - b.center[2];
+  const lx = rx;
+  const ly = ry * BELT_OBLIQ_COS + rz * BELT_OBLIQ_SIN;
+  const lz = -ry * BELT_OBLIQ_SIN + rz * BELT_OBLIQ_COS;
+  const dr = Math.hypot(lx, ly) - b.radius; // signed radial dist from spine (belt-local)
+  const dz = lz; // already relative to centre (see the position-in subtraction above)
   const qr = dr / w.densitySigmaRadial;
   const qz = dz / w.densitySigmaVertical;
   return Math.exp(-(qr * qr + qz * qz));
@@ -489,6 +646,44 @@ export function advanceWarpProgress(
   return Math.min(1, prog + (dtS / dur) * slowFactor);
 }
 
+/** PF-11 D7.4: same math as `passageDeflectForce` below, written into a caller-owned `out`
+ * instead of returning a fresh tuple. Called once per asteroid Havok body per frame during warp
+ * (`_tickAsteroids`'s passage-deflection branch) — the tuple return was one more allocation in
+ * that same per-rock loop `beltPullAccelInto` was already extracted for (2026-07-29 code review,
+ * finding 3). `passageDeflectForce` keeps its tuple-returning signature as the tested pure API
+ * and now just delegates; a unit test pins the two against each other. */
+export function passageDeflectForceInto(
+  shipX: number,
+  shipY: number,
+  shipZ: number,
+  bodyX: number,
+  bodyY: number,
+  bodyZ: number,
+  mass: number,
+  out: Float64Array | number[],
+): void {
+  const w = WARP_FIELD;
+  const dx = bodyX - shipX;
+  const dy = bodyY - shipY;
+  const dz = bodyZ - shipZ;
+  const d = Math.hypot(dx, dy, dz);
+  if (d >= w.deflectRadius * 2.5) {
+    out[0] = 0;
+    out[1] = 0;
+    out[2] = 0;
+    return;
+  }
+  const q = d / w.deflectRadius;
+  const fall = Math.exp(-q * q);
+  // clamp the direction denominator so a body AT the ship still gets a
+  // finite, arbitrary-but-stable push instead of NaN
+  const inv = 1 / Math.max(d, 0.5);
+  const s = w.deflectAccel * mass * fall * inv;
+  out[0] = dx * s;
+  out[1] = dy * s;
+  out[2] = dz * s;
+}
+
 /** Deflection force the passing ship exerts on one body: radially away from
  * the ship, gaussian falloff over deflectRadius, scaled by body mass so the
  * Havok acceleration is mass-independent (a plough, not a popgun on big
@@ -502,19 +697,9 @@ export function passageDeflectForce(
   bodyZ: number,
   mass: number,
 ): [number, number, number] {
-  const w = WARP_FIELD;
-  const dx = bodyX - shipX;
-  const dy = bodyY - shipY;
-  const dz = bodyZ - shipZ;
-  const d = Math.hypot(dx, dy, dz);
-  if (d >= w.deflectRadius * 2.5) return [0, 0, 0];
-  const q = d / w.deflectRadius;
-  const fall = Math.exp(-q * q);
-  // clamp the direction denominator so a body AT the ship still gets a
-  // finite, arbitrary-but-stable push instead of NaN
-  const inv = 1 / Math.max(d, 0.5);
-  const s = w.deflectAccel * mass * fall * inv;
-  return [dx * s, dy * s, dz * s];
+  const out: [number, number, number] = [0, 0, 0];
+  passageDeflectForceInto(shipX, shipY, shipZ, bodyX, bodyY, bodyZ, mass, out);
+  return out;
 }
 
 /* ---------- B4 step 3: impulse-driven camera shake ----------------------- */

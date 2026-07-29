@@ -1,9 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CelestialEntry } from "@/data/celestial/celestial.d.ts";
 import type { SpaceEngineElement } from "@/lib/space-engine.d.ts";
-import { entryForFieldStar, fmtDist, rarityColor } from "@/lib/spaceHelpers";
+import {
+  entryForFieldStar,
+  fmtDist,
+  rarityColor,
+  FIELD_TYPES,
+} from "@/lib/spaceHelpers";
 import { SHORT_BIO } from "@/content/links";
 import { EXTRAGALACTIC_LY } from "@/lib/ship-dynamics";
+import {
+  buildIndex,
+  withClassEntries,
+  searchWithTotal,
+  totalMatches as totalIndexMatches,
+  featuredEntries,
+  type SearchEntry,
+  type SearchIndex,
+} from "@/lib/destination-search";
 import { INITIAL_SCENE_STATE, SECTOR_BODIES, STATIONS } from "./space/types";
 import type {
   CardStyleMode,
@@ -38,6 +52,7 @@ import WarpOverlay from "./space/WarpOverlay";
 import ArrivalVista from "./space/ArrivalVista";
 import CollectorCard from "./space/CollectorCard";
 import SectionOverlay from "./space/SectionOverlay";
+import RenderConsole from "./space/RenderConsole";
 import StationSprites from "./space/StationSprites";
 import type { SpriteRefMap } from "./space/StationSprites";
 import type { SpaceEngineBody } from "@/lib/space-engine.d.ts";
@@ -116,29 +131,175 @@ const NAV_NOTICE_MS = 2200;
  * traced back to the vista having no real dismiss surface at all (TR-086). */
 const VISTA_CLICK_SWALLOW_MS = 300;
 
+/** PF-11 D5.2 — badge color for station rows in the search list; bodies keep their existing
+ * rarity-derived colors (`rarityColor`), so a station needs a color of its own that isn't one
+ * of those rarities. Matches the amber accent already used for the RANDOM JUMP/RETURN HOME
+ * buttons' hover state, reused here rather than inventing a new token. */
+const STATION_BADGE_COLOR = "#ffc107";
+
+/** PF-11 D5.3 — badge color for the search console's synthesized "nearest instance" class
+ * rows, distinct from both the station accent above and every rarity color a real catalog
+ * body can have. */
+const CLASS_BADGE_COLOR = "#ba68c8";
+
+/** PF-11 D5.3 — one `kind:"class"` search row per deep-layer population (`FIELD_TYPES`),
+ * naming the field-catalog member of that type nearest the ship right now (e.g.
+ * "A WHITE DWARF · NEAREST INSTANCE") rather than exposing ~200k individual uncurated field
+ * rows. Babylon-only (`nearestFieldOfType` is an optional engine method — the archived WebGL
+ * engine has no field-catalog scan of this kind); returns [] until the field is loaded or on
+ * the legacy engine. */
+function classSearchEntries(): SearchEntry[] {
+  const en = engineEl();
+  if (!en?.nearestFieldOfType) return [];
+  const out: SearchEntry[] = [];
+  for (const key of Object.keys(FIELD_TYPES)) {
+    const typeByte = Number(key);
+    const idx = en.nearestFieldOfType(typeByte);
+    if (idx < 0) continue;
+    const fi = en.fieldInfo(idx);
+    if (!fi) continue;
+    const noun = FIELD_TYPES[typeByte].sp;
+    const article = /^[aeiou]/i.test(noun) ? "AN" : "A";
+    out.push({
+      id: "fs-" + idx,
+      name: `${article} ${noun.toUpperCase()}`,
+      designation: "NEAREST INSTANCE",
+      type: "CLASS",
+      kind: "class",
+      ly: fi.ly,
+      rarity: "field",
+    });
+  }
+  return out;
+}
+
+/** PF-11 D5.2 — the search index rebuilds only when the catalog actually grows (D0.1/D1.1's
+ * progressive layer loading only ever appends to `window.CELESTIAL`, never mutates existing
+ * entries), not on every render — this component re-renders ~7.5×/s while idle (the GAP-14 aim
+ * readout), and rebuilding a ~4,829-entry index on 5-7 renders it can't possibly need to change
+ * on is waste. `STATIONS` is a static module-level const, so it's folded in unconditionally.
+ * Mirrors the `farFieldCache` pattern above for the same reason (module closure, not a hook —
+ * this file's `if (!engineReady) return null` early exit rules out `useMemo`, see D1.4/#310). */
+let searchCache:
+  | {
+      catalogLen: number;
+      index: SearchIndex;
+      byId: Map<string, CelestialEntry>;
+      /** The empty-query "NOTABLE DESTINATIONS" rows, resolved once per index (2026-07-29 code
+       * review, finding 4). `FEATURED_DESTINATION_IDS` is a fixed six-element list and
+       * `featuredEntries` builds a lookup map over the whole index to resolve it, so computing
+       * this per render — which is what shipped — cost a ~4,834-entry Map plus its intermediate
+       * array 7.5×/s forever, whether or not the console was ever focused. It can only change
+       * when the index does, which is exactly this cache's invalidation key. Caching also gives
+       * MissionControlBar a STABLE array reference across renders. */
+      featured: CommandSuggestion[];
+    }
+  | undefined;
+function getSearchState() {
+  const cat = catalog();
+  if (!searchCache || searchCache.catalogLen !== cat.length) {
+    const index = buildIndex(
+      cat,
+      STATIONS.map((st) => ({
+        id: "st-" + st.sec,
+        label: st.label,
+        sub: st.sub,
+      })),
+    );
+    const byId = new Map(cat.map((e) => [e.id, e]));
+    searchCache = {
+      catalogLen: cat.length,
+      index,
+      byId,
+      featured: featuredEntries(index).map((e) => toSuggestion(e, byId)),
+    };
+  }
+  return searchCache;
+}
+
+function toSuggestion(
+  entry: SearchEntry,
+  byId: Map<string, CelestialEntry>,
+): CommandSuggestion {
+  if (entry.kind === "station") {
+    return {
+      id: entry.id,
+      name: entry.name,
+      type: entry.type,
+      // Stations' `sub` text already reads e.g. "BETELGEUSE · 548 LY" — reused as-is rather
+      // than fabricating a second distance computation for a fixed, already-authored set.
+      dist: entry.designation,
+      color: STATION_BADGE_COLOR,
+      kind: "station",
+    };
+  }
+  if (entry.kind === "class") {
+    return {
+      id: entry.id,
+      name: entry.name,
+      type: entry.type,
+      dist: entry.designation, // "NEAREST INSTANCE" — the point of this row, not a distance
+      color: CLASS_BADGE_COLOR,
+      kind: "class",
+    };
+  }
+  const full = byId.get(entry.id);
+  return {
+    id: entry.id,
+    name: entry.name,
+    type: entry.type,
+    dist: full
+      ? fmtDist(full)
+      : entry.ly != null
+        ? entry.ly + " ly"
+        : "distance —",
+    color: rarityColor(entry.rarity),
+    kind: entry.kind,
+  };
+}
+
 /** Extracted so PF-11 D1.4 can compute an accurate result count for the value a keystroke is
  * ABOUT to produce, synchronously inside the `onCmdChange` callback — a `useEffect` reacting
  * to `state.cmd` would sit after this component's `if (!engineReady) return null` early exit
  * once state settles, which is a Rules-of-Hooks violation (React error #310), not a scope
- * choice. Kept behaviorally identical to the inline expression it replaces. */
-function computeSuggestions(cmd: string): CommandSuggestion[] {
-  const q = cmd.trim().toLowerCase();
-  if (q.length < 1) return [];
-  return catalog()
-    .filter(
-      (e) =>
-        e.n.toLowerCase().includes(q) ||
-        e.d.toLowerCase().includes(q) ||
-        e.t.toLowerCase().includes(q),
-    )
-    .slice(0, 6)
-    .map((e) => ({
-      id: e.id,
-      name: e.n,
-      type: e.t,
-      dist: fmtDist(e),
-      color: rarityColor(e.r),
-    }));
+ * choice. PF-11 D5.2 retargeted these onto `destination-search.ts`'s ranked index (was a raw
+ * `.filter().slice(0,6)` over `window.CELESTIAL` alone — no stations, no ranking, no id match). */
+const NO_SUGGESTIONS: { suggestions: CommandSuggestion[]; total: number } = {
+  suggestions: [],
+  total: 0,
+};
+
+/** Both halves of the suggestion state from ONE ranking pass and ONE class-row build
+ * (2026-07-29 code review, finding 8 — the shipped version called `searchSuggestions` and
+ * `searchTotalMatches` separately from the render body, so a live query cost two full rankings
+ * and two ~4,841-entry `withClassEntries` spreads per render). The honest-truncation guarantee
+ * is unchanged: `total` is still the UNCAPPED count, never derived from the capped list. */
+function searchSuggestions(cmd: string): {
+  suggestions: CommandSuggestion[];
+  total: number;
+} {
+  // PF-11 D5.3: class rows cost an engine call per FIELD_TYPES entry (cheap once the
+  // per-camera-epoch cache is warm, but still real work) plus a fresh ~4,800-entry array
+  // spread (`withClassEntries`) — skip both on every idle re-render (~7.5/s) and only pay for
+  // them while a query is actually live, matching `destination-search.ts`'s own empty-query
+  // short-circuit one level up.
+  if (!cmd.trim()) return NO_SUGGESTIONS;
+  const { index, byId } = getSearchState();
+  const withClasses = withClassEntries(index, classSearchEntries());
+  const { results, total } = searchWithTotal(withClasses, cmd, 10);
+  return { suggestions: results.map((e) => toSuggestion(e, byId)), total };
+}
+
+/** Count only — used by the D1.4 funnel record, which needs the count for the value a keystroke
+ * is ABOUT to produce and never renders a list for it. */
+function searchTotalMatches(cmd: string): number {
+  if (!cmd.trim()) return 0;
+  const { index } = getSearchState();
+  return totalIndexMatches(withClassEntries(index, classSearchEntries()), cmd);
+}
+
+function getFeaturedSuggestions(): CommandSuggestion[] {
+  return getSearchState().featured;
 }
 
 function entryFor(id: string | null): CelestialEntry | null {
@@ -328,6 +489,12 @@ export default function SpaceScene({
 
   const openCredits = useCallback(() => {
     patch({ sectionOpen: "credits", vista: null, cardId: null });
+  }, [patch]);
+
+  // PF-11 D9.2: same "close everything else that competes for focus" discipline openCredits
+  // already follows.
+  const openRenderConsole = useCallback(() => {
+    patch({ renderConsoleOpen: true, vista: null, cardId: null });
   }, [patch]);
 
   // --- Phase 4: body.ij-travel class toggles CSS that hides scrollable sections/footer ---
@@ -549,6 +716,7 @@ export default function SpaceScene({
       import("@/data/celestial/celestial-gd1.js"),
       import("@/data/celestial/celestial-ngc2000.js"),
       import("@/data/celestial/celestial-saturn-moons.js"),
+      import("@/data/celestial/celestial-missing-moons.js"),
     ])
       .then(
         // PF-11 D4.4: sequenced as its own .then, NOT inside the Promise.all above.
@@ -1057,6 +1225,10 @@ export default function SpaceScene({
       active: !!state.cardId,
       onEscape: () => patch({ cardId: null, mcOpen: false }),
     },
+    {
+      active: state.renderConsoleOpen,
+      onEscape: () => patch({ renderConsoleOpen: false }),
+    },
     { active: !!state.vista, onEscape: () => dismissVista("escape") },
     { active: !!state.cmd, onEscape: () => patch({ cmd: "" }) },
     {
@@ -1104,7 +1276,8 @@ export default function SpaceScene({
   const vistaEntry = state.vista ? entryFor(state.vista.id) : null;
   const cardEntry = state.cardId ? entryFor(state.cardId) : null;
 
-  const suggestions: CommandSuggestion[] = computeSuggestions(state.cmd);
+  const { suggestions, total: suggestionTotal } = searchSuggestions(state.cmd);
+  const featuredSuggestions: CommandSuggestion[] = getFeaturedSuggestions();
 
   const engineStyle = {
     position: "fixed",
@@ -1170,6 +1343,9 @@ export default function SpaceScene({
         arrivedId={state.arrivedId}
         sector={state.sector}
         onOpenCredits={openCredits}
+        onOpenRenderConsole={
+          engineKind === "babylon" ? openRenderConsole : undefined
+        }
         isTravel={isTravel}
         onToggleNavMode={toggleNavMode}
         farField={!state.warp && isFarField(state.arrivedId)}
@@ -1199,6 +1375,8 @@ export default function SpaceScene({
         <MissionControlBar
           cmd={state.cmd}
           suggestions={suggestions}
+          totalMatches={suggestionTotal}
+          featured={featuredSuggestions}
           onCmdChange={(value) => {
             patch({ cmd: value });
             // PF-11 D1.4: computed synchronously against THIS keystroke's value, not the
@@ -1209,17 +1387,15 @@ export default function SpaceScene({
             if (trimmed) {
               funnelRef.current?.record("search-keystroke", {
                 query: trimmed,
-                resultCount: computeSuggestions(value).length,
+                resultCount: searchTotalMatches(value),
               });
             }
           }}
           onCmdKeyDown={(e) => {
-            if (e.key === "Enter" && suggestions.length) {
-              const s = suggestions[0];
-              funnelRef.current?.record("search-travel", { id: s.id });
-              patch({ cmd: "", hover: null });
-              engineEl()?.travelTo(s.id);
-            }
+            // PF-11 D5.2 — Enter/ArrowUp/ArrowDown are now owned by MissionControlBar's own
+            // combobox (activates the highlighted option directly via onSuggestionSelect);
+            // Escape is the one key it still delegates back up, since clearing `cmd` is host
+            // state MissionControlBar doesn't own.
             if (e.key === "Escape") patch({ cmd: "" });
           }}
           onSuggestionSelect={(s) => {
@@ -1310,6 +1486,10 @@ export default function SpaceScene({
             setTimeout(() => patch({ copied: false }), 2000);
           }}
         />
+      )}
+
+      {state.renderConsoleOpen && engineKind === "babylon" && (
+        <RenderConsole onClose={() => patch({ renderConsoleOpen: false })} />
       )}
     </>
   );

@@ -166,3 +166,9 @@ Interactive Outerspace Portfolio/
 # 4K texture exports). Conversion input for scripts/build-craft-assets.mjs, which produces
 # the committed runtime GLBs in public/assets/craft/. Never commit the originals.
 resources/
+
+# Local agent-harness scratch state (ruflo / claude-flow). Never ours to ship, and — added
+# 2026-07-29 after a code review found it sitting untracked in `git status` — one `git add -A`
+# away from being committed. `.prettierignore` already skips it; that stops it being FORMATTED,
+# not COMMITTED, which is the risk that actually matters.
+.claude-flow/

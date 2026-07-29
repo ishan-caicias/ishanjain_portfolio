@@ -15,8 +15,11 @@ export default [
   {
     // "Interactive Outerspace Portfolio/" and "gaia_datasets/" are untracked
     // reference material (PF-07 prototype source + raw dataset pipeline, not
-    // shipped app code). The celestial data files are verbatim ports kept
-    // byte-identical to that source - see PF-07 delivery plan Phase 1.
+    // shipped app code). The celestial data files are hand-curated data ported
+    // from that source - see PF-07 delivery plan Phase 1. (They were described
+    // here as "kept byte-identical" until 2026-07-29; PF-11 D6.6b corrected
+    // Io/Europa's RA/Dec, so that is now a strong default rather than an
+    // invariant - CLAUDE.md non-negotiable #22 carries the full rule.)
     // space-engine.js was formerly in this list; the ship-v2 plan (ADR-0002)
     // deliberately forks it from the prototype, so it is linted like any other
     // source file since 2026-07-17.
