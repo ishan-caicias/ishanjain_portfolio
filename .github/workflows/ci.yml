@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+# Least-privilege default (2026-07-29 CI/CD audit): none of these jobs push commits, comment
+# on PRs, or touch any other repo resource — read-only checkout is all any of them need. Left
+# unset, the workflow token defaults to the repo's (potentially broader) default permission
+# setting; declaring it here means a future job that DOES need write access has to say so
+# explicitly at the job level, rather than silently inheriting whatever the repo default happens
+# to be.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint & Format
@@ -79,7 +88,27 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
+      # Git LFS with caching (TR-105/TR-111 pattern — required here too, found broken live on
+      # PR #6 2026-07-29): PF-11 D9.3 added tests (render-layers.test.ts) that statSync() real
+      # files under public/assets to cross-check budgets.config.mjs's layerBytes against actual
+      # on-disk sizes. This job's checkout previously had no `git lfs pull`, so every *.png
+      # under public/assets was its ~132-byte LFS pointer stub, not real bytes — the exact
+      # "vacuous pass / spurious fail" class TR-105 already fixed for the asset-verify and
+      # budget:check gates, just newly reached by a unit test instead. Same cache-keyed pattern
+      # as every other job here; SAFETY note there applies unchanged.
       - uses: actions/checkout@v5
+        with:
+          lfs: false
+      - name: Compute LFS cache key
+        id: lfskey
+        run: echo "k=$(git lfs ls-files --long | cut -d ' ' -f1 | sort | sha256sum | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Restore LFS object cache
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: ${{ runner.os }}-lfs-${{ steps.lfskey.outputs.k }}
+          restore-keys: ${{ runner.os }}-lfs-
+      - run: git lfs pull
       - uses: actions/setup-node@v5
         with:
           node-version: 22

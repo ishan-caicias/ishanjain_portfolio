@@ -185,6 +185,22 @@ implementing on top of it (a 60-second probe disproved D0.1's prescribed mechani
 implementation was already written), and pin under-specified exit criteria at PLAN time — "green
 under load" with no load level named is what sent D0.1 down the wrong path.
 
+**CI/CD**
+
+28. **A CI job's `name:` and the branch-protection ruleset's `required_status_checks` context
+    must match exactly, and change together.** A mismatch never fails loudly — the stale
+    context simply stops reporting, so every future PR waits forever on a check that no longer
+    exists. Found live 2026-07-29: `.github/rulesets/main-protection.json` still required
+    `"E2E Tests"` four days after TR-106 renamed the job to `"E2E Smoke Tests"` — undetected
+    only because `main` had never actually had the ruleset applied (`gh api` showed zero live
+    protection despite the file existing since 2026-07-19). Renaming a `ci.yml` job is a
+    two-file change: the workflow AND the ruleset, re-applied via `gh api` (see
+    `.github/rulesets/README.md`). Also: every CI job that reads real files under
+    `public/assets/` needs its own Git-LFS-pull step, not just the jobs that already have one —
+    a default `actions/checkout` gets ~130-byte pointer stubs, not real bytes, and a job added
+    later (D9.3's on-disk asset-size unit tests, added to `unit-test`) can reach that gap even
+    though older jobs already worked around it. (docs/cicd/2026-07-29-cicd-devops-audit.md)
+
 ## Measurement discipline
 
 **Measure, don't assert.** Perf claims come from `perf-telemetry.ts` on the device class in

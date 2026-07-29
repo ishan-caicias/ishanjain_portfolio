@@ -13,28 +13,29 @@ npm run dev        # Start dev server at localhost:4321
 
 ## Scripts
 
-| Command                     | Description                                                        |
-| --------------------------- | ------------------------------------------------------------------ |
-| `npm run dev`               | Start development server                                           |
-| `npm run build`             | Lint + typecheck + production build to `dist/`                     |
-| `npm run preview`           | Preview production build locally                                   |
-| `npm run check`             | Run Astro type checking                                            |
-| `npm run lint`              | Run ESLint + Prettier check                                        |
-| `npm run lint:fix`          | Auto-fix lint and formatting issues                                |
-| `npm run format`            | Format all files with Prettier                                     |
-| `npm run test`              | Run unit tests (Vitest)                                            |
-| `npm run test:watch`        | Run unit tests in watch mode                                       |
-| `npm run test:coverage`     | Unit tests with coverage thresholds                                |
-| `npm run test:e2e`          | Run E2E tests (Playwright; build first)                            |
-| `npm run test:e2e:ui`       | Run E2E tests with Playwright UI                                   |
-| `npm run assets:craft`      | Rebuild the tiered ship GLB assets                                 |
-| `npm run assets:planets`    | Rebuild planet surface textures (needs source pack)                |
-| `npm run assets:planets:vt` | Rebuild the virtual-texture tile pyramids                          |
-| `npm run assets:sync`       | Regenerate stale planet/VT assets (auto via `predev`/`prepreview`) |
-| `npm run assets:verify`     | Source-free asset gate (auto via `prebuild`, CI)                   |
-| `npm run gaia:pipeline`     | Gaia Sky dataset → site-format conversion                          |
-| `npm run budget:check`      | CI bundle + asset weight gate (needs `dist/`)                      |
-| `npm run docs:check`        | Documentation-drift gate (indexes, links)                          |
+| Command                       | Description                                                        |
+| ----------------------------- | ------------------------------------------------------------------ |
+| `npm run dev`                 | Start development server                                           |
+| `npm run build`               | Lint + typecheck + production build to `dist/`                     |
+| `npm run preview`             | Preview production build locally                                   |
+| `npm run check`               | Run Astro type checking                                            |
+| `npm run lint`                | Run ESLint + Prettier check                                        |
+| `npm run lint:fix`            | Auto-fix lint and formatting issues                                |
+| `npm run format`              | Format all files with Prettier                                     |
+| `npm run test`                | Run unit tests (Vitest)                                            |
+| `npm run test:watch`          | Run unit tests in watch mode                                       |
+| `npm run test:coverage`       | Unit tests with coverage thresholds                                |
+| `npm run test:e2e`            | Run E2E tests (Playwright; build first)                            |
+| `npm run test:e2e:ui`         | Run E2E tests with Playwright UI                                   |
+| `npm run assets:craft`        | Rebuild the tiered ship GLB assets                                 |
+| `npm run assets:planets`      | Rebuild planet surface textures (needs source pack)                |
+| `npm run assets:planets:vt`   | Rebuild the virtual-texture tile pyramids                          |
+| `npm run assets:sync`         | Regenerate stale planet/VT assets (auto via `predev`/`prepreview`) |
+| `npm run assets:verify`       | Source-free asset gate (auto via `prebuild`, CI)                   |
+| `npm run gaia:pipeline`       | Gaia Sky dataset → site-format conversion                          |
+| `npm run budget:check`        | CI bundle + asset weight gate (needs `dist/`)                      |
+| `npm run budget:check:assets` | Asset-weight-only gate (no build needed; runs in CI's lint job)    |
+| `npm run docs:check`          | Documentation-drift gate (indexes, links)                          |
 
 ## Tech Stack
 
@@ -52,7 +53,9 @@ npm run dev        # Start dev server at localhost:4321
   still shipped behind `?engine=webgl` as the cutover rollback lever
 - **Animation**: CSS animations + [Motion](https://motion.dev) (React islands)
 - **Testing**: [Vitest](https://vitest.dev) + React Testing Library + [Playwright](https://playwright.dev)
-- **CI**: GitHub Actions (lint → typecheck → unit test → build → E2E)
+- **CI**: GitHub Actions (lint → typecheck → unit test → build → E2E smoke subset), CodeQL,
+  Dependabot, and a branch-protection ruleset on `main` — see
+  [CI/CD & Repo Governance](#cicd--repo-governance) below
 - **Deploy**: Netlify (static, Node 22)
 
 ## The Dual-Engine Seam
@@ -100,16 +103,28 @@ project's source of truth for decisions and verification history.
 
 ## Interactive Features
 
+- **Pre-flight & launch**: a real-progress loading dossier (byte-accurate, never a timed
+  animation) followed by a launch-from-Earth cinematic ascent, revealing Earth's real day/night
+  terminator on the way up.
 - **Space Scene**: star-flight hero with warp travel between portfolio sections, each docked to
   a real celestial object. Degrades to a static CSS starfield with full navigation if WebGL is
   unavailable.
 - **Cinematic flight** (default Babylon path): chase-camera journeys with accel/flip/decel
   burns, a GLB fighter with layered thruster plume + heat shimmer, volumetric nebulae that
   reveal on approach, and a rigid-body asteroid belt with idle collisions (Havok).
+- **Frame ladder (sky honesty by destination)**: solar-system furniture (the asteroid belt) and
+  the local Milky Way collapse out of view at DSO/extragalactic range, the way the real sky
+  actually would, with an external-galaxy impostor standing in beyond the local group.
 - **Curated destinations**: 4,800+ charted bodies render as type-shaded beacons (star, planet,
   nebula, galaxy, cluster, deep field), with real NASA/ESA photographic imagery for the
   267-body atlas-mapped subset and real textured, sun-lit, rotating planet spheres (with real
   MOLA/LOLA topography and a Venus cloud-deck descent) for the arrival views of 16 bodies.
+- **Where-To console**: a ranked, ARIA-combobox search across the full catalog (bodies,
+  stations, and field-star classes), with an arrival dossier card per destination.
+- **Render Console**: a settings panel that turns automatic device-quality tiers into
+  user-adjustable presets — multi-select which layers render (the SDSS deep field, the DR3
+  asteroid belt's visual/physics halves, nebulae, the Milky Way band, and more), each with an
+  honest byte/vertex cost label and live measured fps, persisted across visits.
 - **Real-data sky**: the star field, asteroid belt, galaxy deep field, star clusters, white
   dwarfs, GD-1 stellar stream, and NGC2000 nebulae all derive from real Gaia/SDSS/survey
   catalogs — real positions, real photometry, real orbital mechanics (the belt's Kirkwood gaps
@@ -151,6 +166,24 @@ Configured for Netlify with `netlify.toml`. Push to `main` triggers auto-deploy.
 - **Build command**: `npm run build`
 - **Publish directory**: `dist`
 - **Node version**: 22 (engine requirement `>=22.12.0`)
+
+## CI/CD & Repo Governance
+
+- **CI** (`.github/workflows/ci.yml`): lint/format → typecheck → unit tests → build (+ bundle/
+  asset budget gate) → an E2E smoke subset (Playwright, chromium). Every job pulls real Git LFS
+  asset bytes rather than the ~130-byte pointer stubs a default checkout gets — see the
+  workflow's own comments if a job needs asset files it doesn't already fetch them for.
+- **CodeQL** (`.github/workflows/codeql.yml`): static security analysis on push/PR to `main`
+  and weekly; results surface in the repo's Security tab, not as a required merge check.
+- **Dependabot** (`.github/dependabot.yml`): weekly grouped update PRs for npm and GitHub
+  Actions dependencies.
+- **Branch protection**: `main` requires a PR (no direct pushes), a linear history (squash/
+  rebase only), and all five CI jobs green — see [`.github/rulesets/`](.github/rulesets/) for
+  the versioned ruleset source and how to re-apply it.
+- The **full** local test suite (`npm run build && npm run test && npm run test:e2e &&
+npm run budget:check`) remains the authoritative pre-push gate (CLAUDE.md #25) — CI's E2E
+  job is a smaller, fast correctness canary, not a replacement for it. See
+  [`docs/cicd/`](docs/cicd/README.md) for the full history of why.
 
 ## License
 

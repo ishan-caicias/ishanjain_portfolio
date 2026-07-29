@@ -33,7 +33,7 @@
           { "context": "Type Check" },
           { "context": "Unit Tests" },
           { "context": "Build" },
-          { "context": "E2E Tests" }
+          { "context": "E2E Smoke Tests" }
         ]
       }
     }

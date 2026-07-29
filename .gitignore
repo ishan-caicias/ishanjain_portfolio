@@ -172,3 +172,17 @@ resources/
 # away from being committed. `.prettierignore` already skips it; that stops it being FORMATTED,
 # not COMMITTED, which is the risk that actually matters.
 .claude-flow/
+
+# OS / editor cruft (2026-07-29 CI/CD audit). The dev box is Windows (CLAUDE.md), so Thumbs.db
+# and desktop.ini are the ones that actually show up here; .DS_Store covers a macOS clone or
+# contributor. No .vscode/ or .idea/ committed today — blanket-ignored so neither can land by
+# accident; if shared editor settings are ever wanted, add a narrow `!.vscode/settings.json`
+# exception deliberately rather than removing the ignore.
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
