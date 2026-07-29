@@ -38,7 +38,7 @@ export type LayerId =
   | "constellations" // constellation figure lines
   | "milky-way-band" // the 360° galactic band
   | "planet-hires" // per-body ultra/virtual-texture surface detail ladder
-  | "gaia-tiny"; // PF-11 D8 — all 2,552,302 Gaia DR3 Tiny stars. NOT YET IMPLEMENTED (see below)
+  | "gaia-tiny"; // PF-11 D8 — 2,439,417 Gaia DR3 Tiny stars (post-dedup), 8 chunks, off by default
 
 export interface LayerMeta {
   id: LayerId;
@@ -73,8 +73,8 @@ export interface LayerMeta {
    *                  star mesh for one draw call (`_applyStarFieldGeometry`), so it cannot be
    *                  un-merged live, but the boot-time merge CAN be skipped. Splitting it into
    *                  an independently-disposable mesh stays a D9 follow-up.
-   *   "unavailable"— declared for forward-compatibility; no data exists yet (`gaia-tiny`
-   *                  until D8 ships its pipeline). Renders off and disabled. */
+   *   "unavailable"— declared for forward-compatibility; no data exists yet for this id.
+   *                  Renders off and disabled. */
   status: LayerStatus;
 }
 
@@ -193,12 +193,21 @@ export const LAYERS: LayerMeta[] = [
   },
   {
     id: "gaia-tiny",
-    label: "GAIA DR3 TINY · FULL BACKGROUND FIELD (2.55M STARS)",
-    assetBytes: 36_000_000, // D8's own estimate: ~31-42 MiB PNG-pack — not yet built
-    vertsApprox: 2_552_302 * 4,
-    defaultByTier: { full: false, balanced: false, lite: false }, // off everywhere: doesn't exist yet
+    label: "GAIA DR3 TINY · FULL BACKGROUND FIELD (2.44M STARS)",
+    // PF-11 D8 (ADR-0012, TR-114): 8 magnitude-sorted chunks, 2,439,455 stars post dedup against
+    // the shipped Hipparcos base field (112,847 of 117,904 HIP-tagged candidates matched —
+    // position crossmatch, not the originally-planned magnitude-gated one; see the ADR for why).
+    assetBytes: layerBytes.gaiaTiny,
+    vertsApprox: 2_439_455 * 4,
+    // Off by default on every tier — an opt-in heavy layer until D0.3's real-device pass sets a
+    // measured default (D9.4 note applies here too: this is current shipped behaviour — nothing
+    // — made visible and adjustable, not a measured recommendation).
+    defaultByTier: { full: 0, balanced: 0, lite: 0 },
+    // 8 chunks total (GAIA_TINY_CHUNK_COUNT in babylon-engine.ts) — the chunk-prefix count IS
+    // the whole field once fully enabled, unlike belt-physics's headroom-above-tier ceiling.
+    maxCount: 8,
     bootCritical: false,
-    status: "unavailable", // PF-11 D8 — flip to "live" once its data pipeline lands
+    status: "live", // PF-11 D8 — data pipeline shipped (ADR-0012)
   },
 ];
 

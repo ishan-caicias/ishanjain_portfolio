@@ -53,19 +53,19 @@ describe("LAYERS registry", () => {
     expect(bonus.status).toBe("reload");
     expect(isLiveToggleable(star)).toBe(false);
     expect(isLiveToggleable(bonus)).toBe(false);
-    // Both are genuinely rendered — unlike gaia-tiny below.
     expect(isAvailable(star)).toBe(true);
     expect(isAvailable(bonus)).toBe(true);
   });
 
-  it("gaia-tiny is unavailable and defaults to off on every tier (D8 hasn't shipped the data)", () => {
+  it("gaia-tiny is live, chunk-prefix countable, and off by default on every tier (PF-11 D8, ADR-0012)", () => {
     const tiny = LAYERS.find((l) => l.id === "gaia-tiny")!;
-    expect(tiny.status).toBe("unavailable");
-    expect(isAvailable(tiny)).toBe(false);
-    expect(isLiveToggleable(tiny)).toBe(false);
-    expect(tiny.defaultByTier.full).toBe(false);
-    expect(tiny.defaultByTier.balanced).toBe(false);
-    expect(tiny.defaultByTier.lite).toBe(false);
+    expect(tiny.status).toBe("live");
+    expect(isAvailable(tiny)).toBe(true);
+    expect(isLiveToggleable(tiny)).toBe(true);
+    expect(tiny.defaultByTier.full).toBe(0);
+    expect(tiny.defaultByTier.balanced).toBe(0);
+    expect(tiny.defaultByTier.lite).toBe(0);
+    expect(tiny.maxCount).toBe(8);
   });
 
   it("every layer declares a status, and every live layer is available", () => {
@@ -234,6 +234,7 @@ describe("D9.3 — LAYERS' assetBytes is single-sourced from budgets.config.mjs'
     expect(byId("sdss-field").assetBytes).toBe(layerBytes.sdssField);
     expect(byId("belt-visual").assetBytes).toBe(layerBytes.beltVisual);
     expect(byId("planet-hires").assetBytes).toBe(layerBytes.planetHires);
+    expect(byId("gaia-tiny").assetBytes).toBe(layerBytes.gaiaTiny);
   });
 
   // Real on-disk sizes, not the recorded numbers — a future asset regen that changes a size
@@ -276,5 +277,18 @@ describe("D9.3 — LAYERS' assetBytes is single-sourced from budgets.config.mjs'
       resolve(process.cwd(), "public/assets/asteroids-dr3.png"),
     ).size;
     expect(size).toBe(layerBytes.beltVisual);
+  });
+
+  it("layerBytes.gaiaTiny matches the real 8 gaia-tiny-NN.png chunk files on disk (PF-11 D8)", () => {
+    const files = Array.from(
+      { length: 8 },
+      (_, i) => `gaia-tiny-${String(i).padStart(2, "0")}.png`,
+    );
+    const total = files.reduce(
+      (sum, f) =>
+        sum + statSync(resolve(process.cwd(), "public/assets", f)).size,
+      0,
+    );
+    expect(total).toBe(layerBytes.gaiaTiny);
   });
 });

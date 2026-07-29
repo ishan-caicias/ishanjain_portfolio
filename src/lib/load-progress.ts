@@ -24,7 +24,8 @@ export type LoadStage =
   | "bonus-layers"
   | "sdss-field"
   | "asteroid-belt"
-  | "atlas-photo";
+  | "atlas-photo"
+  | "gaia-tiny";
 
 /** A single progress reading for one stage. `totalBytes` is null until the server's
  * `Content-Length` is known (or, for the final `done` event, falls back to `loadedBytes` so a

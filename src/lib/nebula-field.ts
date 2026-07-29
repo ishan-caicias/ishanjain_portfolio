@@ -266,10 +266,26 @@ export const NEBULA_REVEAL = {
   // (the blast-radius sweep found it); left at 0.53 the destination gas would
   // start revealing while the ship is still mid-rotation.
   decelStart: 0.56,
-  /** Reveal level at the instant of arrival (the swell continues from here). */
-  decelMax: 0.7,
-  /** Seconds for the post-arrival swell from decelMax to 1. */
-  arriveSwellS: 1.8,
+  /** Reveal level at the instant of arrival (the swell continues from here).
+   *
+   * PF-11 post-D8 (Vega SHOT-BRIEF 2026-07-29, docs/experience-design/
+   * 2026-07-29-dso-arrival-framing-shot-spec.md): raised 0.7 → 0.85 as the TAIL half of the
+   * re-key that accompanies the new volumetric arrival standoff. `decelStart` deliberately did
+   * NOT move — it is coupled to the D3.2 flip window (see the note above) and `smooth01`'s zero
+   * onset slope already staggers the gas clear of the retro relight.
+   *
+   * The reason the tail had to move: the ship now stops OUTSIDE the cloud (3.5 volume radii
+   * out) instead of half-way inside it, so the old envelope — which relied on the final
+   * approach continuing to loom into the gas — left the cloud visibly still building while the
+   * arrival dossier was already up. At 0.85 the volume is essentially complete at rest and the
+   * swell reads as a settle rather than as the subject still arriving after the ship stopped. */
+  decelMax: 0.85,
+  /** Seconds for the post-arrival swell from decelMax to 1.
+   *
+   * Shortened 1.8 → 1.2 in the same pass and for the same reason: there is far less left to
+   * swell through (0.15 instead of 0.30), and holding the old duration over half the range
+   * would read as a slow fade-up under a dossier the visitor is already reading. */
+  arriveSwellS: 1.2,
   /** Exp-decay rate (1/s) for fading a volume out when it stops being the
    * destination (goHome / travel elsewhere). */
   fadeOutLambda: 2.2,

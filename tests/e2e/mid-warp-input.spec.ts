@@ -392,4 +392,117 @@ test.describe("PF-11 D3.3 mid-journey input — HUD/console strings", () => {
     // itself has cleared too.
     await expect(page.getByTestId("nav-notice")).toHaveCount(0);
   });
+  test("the abort control is not painted over by the warp letterbox (owner-reported P0, 2026-07-29)", async ({
+    page,
+  }) => {
+    test.setTimeout(60000);
+    // THE DEFECT THIS PINS: `◂ RETURN HOME` IS the mid-warp abort (ADR-0010), and it was
+    // rendered, enabled and clickable throughout every flight — while the WarpOverlay's bottom
+    // letterbox (64px of opaque #05081a at z-70) painted over the entire button row of a bar
+    // docked at bottom-8/z-62. Abort worked; it was invisible in the one state it exists for.
+    //
+    // The assertion is GEOMETRIC, deliberately. A hit-test cannot see this: the overlay is
+    // `pointer-events-none`, so `elementFromPoint` skips it and every click landed on the
+    // button exactly as intended — and Playwright's own `toBeVisible()` checks CSS/box
+    // visibility, not occlusion by a higher-z sibling. Both would pass against the bug. That is
+    // why nine specs in this file and ten in render-console.spec.ts all missed it.
+    //
+    // Measured INSIDE one page.evaluate off the page's own rAF, for this file's own documented
+    // reason (see the header): a Playwright-side poll-then-query round-trip loses the race —
+    // on SwiftShader a whole journey can render in ~10 frames, the overlay unmounts, and
+    // `boundingBox()` then waits forever on an element that is legitimately gone.
+    const en = await boot(page);
+
+    const geom = await en.evaluate(
+      (el, id) =>
+        new Promise<{
+          barTop: number;
+          barBottom: number;
+          btnBottom: number;
+          lbTop: number;
+          readoutBottom: number | null;
+          mode: string;
+        } | null>((resolve) => {
+          const eng = el as unknown as EngineHandle;
+          eng.travelTo(id);
+          const deadline = performance.now() + 20000;
+          let settledAt = 0;
+          const tick = () => {
+            const bar = document.querySelector("#ij-mission-bar");
+            const btn = document.querySelector(
+              'button[aria-label="Return home to Earth orbit"]',
+            );
+            const lb = document.querySelector(
+              '[data-testid="warp-letterbox-bottom"]',
+            );
+            // TWO gates, both learned from this spec's own failed drafts:
+            //  1. WARP CHROME live, not just the engine's mode. `cosmos:warp` -> React is
+            //     throttled to 10 Hz (PF-11 D7.4), so on the engine's first non-idle frame
+            //     `body.ij-warping` is not set and the console is still in its at-home dock —
+            //     measuring there asserts the invariant against a layout this rule doesn't own.
+            //  2. The `bottom` TRANSITION SETTLED. `#ij-mission-bar` carries
+            //     `transition: bottom 0.6s ease`, so the console is mid-flight to its docked
+            //     position for the first 600ms. A draft that measured immediately passed
+            //     against the UNFIXED build too — i.e. it was vacuous — because the bar had not
+            //     yet animated DOWN into the letterbox. Verified by negative control: with the
+            //     fix reverted to the old `bottom: 2rem`, an unsettled read still passed; a
+            //     settled read fails, which is what makes this guard real.
+            const warping = document.body.classList.contains("ij-warping");
+            if (warping && settledAt === 0) settledAt = performance.now() + 750;
+            if (
+              eng.warp.mode !== "idle" &&
+              warping &&
+              settledAt !== 0 &&
+              performance.now() >= settledAt &&
+              bar &&
+              btn &&
+              lb
+            ) {
+              const b = bar.getBoundingClientRect();
+              const bt = btn.getBoundingClientRect();
+              const l = lb.getBoundingClientRect();
+              // The ongoing warp readout, to prove the console was not simply shoved up into it.
+              const ro = document.querySelector('[data-testid="warp-readout"]');
+              resolve({
+                barTop: b.top,
+                barBottom: b.bottom,
+                btnBottom: bt.bottom,
+                lbTop: l.top,
+                readoutBottom: ro ? ro.getBoundingClientRect().bottom : null,
+                mode: eng.warp.mode,
+              });
+              return;
+            }
+            if (performance.now() > deadline) {
+              resolve(null);
+              return;
+            }
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        }),
+      THIRD,
+    );
+
+    expect(geom, "captured a frame with the warp overlay live").not.toBeNull();
+    const g = geom!;
+
+    // The console's LOWEST pixel must sit above the letterbox's TOP edge. Asserting the whole
+    // bar (not just the button) is strictly stronger — the button is inset within it.
+    expect(
+      g.barBottom,
+      `the mission console's bottom edge (${g.barBottom}) overlaps the warp letterbox's top edge (${g.lbTop}) at warp mode "${g.mode}" — the only mid-flight abort control is painted over`,
+    ).toBeLessThanOrEqual(g.lbTop);
+    expect(g.btnBottom).toBeLessThanOrEqual(g.lbTop);
+
+    // ...and the console must not have been lifted INTO the warp readout to achieve it.
+    expect(
+      g.readoutBottom,
+      "the warp readout must be present to prove the console was not lifted into it",
+    ).not.toBeNull();
+    expect(
+      g.readoutBottom!,
+      `the warp readout's bottom edge (${g.readoutBottom}) collides with the lifted console's top edge (${g.barTop}) — clearing the letterbox must not just move the collision somewhere else`,
+    ).toBeLessThanOrEqual(g.barTop);
+  });
 });

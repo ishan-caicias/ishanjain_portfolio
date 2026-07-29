@@ -360,6 +360,35 @@ body.ij-travel.ij-at-home #ij-mission-bar {
     bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
   }
 }
+/* PF-11 post-D8 (owner-reported P0, 2026-07-29): during a warp the console LIFTS clear of the
+   WarpOverlay's bottom letterbox bar.
+   THE DEFECT: the bar docks at `bottom-8` (32px) and is ~48px tall, so it occupies y=32..80px.
+   WarpOverlay's bottom letterbox is `h-16` — 64px of OPAQUE #05081a at z-70 against the bar's
+   z-62, and painted later in the DOM. So the entire button row, including `◂ RETURN HOME`,
+   was covered for the whole flight. Because the overlay is `pointer-events-none` the click
+   still landed, so abort WORKED — it was simply invisible in the one state it exists for
+   (ADR-0010: goHome IS the mid-warp abort). The TOP letterbox was accounted for when it
+   shipped (HUD.tsx parks its readouts at `top-[clamp(72px,12vh,78px)]`); the bottom one never
+   got the equivalent treatment, and no test caught it because Playwright's `toBeVisible()`
+   checks CSS/box visibility, not occlusion by a higher-z sibling.
+   WHY THE READOUT MOVED TOO (WarpOverlay.tsx): the fix is forced, not chosen. Clearing the
+   letterbox needs `bottom >= 64`; staying under the readout's old floor needs
+   `bottom + 48 <= 112`. There is no solution, so the readout's floor had to rise with the bar.
+   Reduced motion: `#ij-mission-bar`'s transition block below is already disabled under
+   `prefers-reduced-motion`, so this becomes an instant reposition rather than a slide — the
+   contract holds with no extra rule.
+   `top: auto` is NOT redundant, and the E2E spec caught why: `body.ij-travel.ij-at-home`
+   above sets `top: clamp(45vh,54vh,...)` with `bottom: auto`. `ij-at-home` is cleared by React
+   when the warp starts, but for ONE frame both classes are live — and with only `bottom` set
+   here the element had `top` AND `bottom` simultaneously and stretched to 252px tall instead of
+   its natural ~48px. The doubled selector matches the at-home rule's specificity (two body
+   classes) and, coming later, wins the cascade — so the console's geometry never depends on
+   which class React happens to remove first. */
+body.ij-warping #ij-mission-bar,
+body.ij-travel.ij-warping #ij-mission-bar {
+  top: auto;
+  bottom: clamp(76px, 11vh, 92px);
+}
 @media (prefers-reduced-motion: reduce) {
   #ij-mission-bar {
     transition: none;

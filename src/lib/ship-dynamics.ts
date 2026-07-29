@@ -740,6 +740,44 @@ export const ARRIVE_STANDOFF = 38;
  * for all of them, not a per-body formula. */
 export const PLANET_ARRIVE_STANDOFF = 80;
 
+/** Volumetric-nebula arrival standoff, as a MULTIPLE of that nebula's own rendered volume
+ * radius (`NEBULA_VOLUMES[i].radius` = `depth * NEBULA_RADIUS_FACTOR`, i.e. 71-91 units for the
+ * 11 shipped volumes) rather than an absolute distance — unlike planets, whose sphere radius is
+ * normalized to one shared 26, every nebula volume is a different size, so one shared distance
+ * cannot be right for all of them.
+ *
+ * WHY THIS EXISTS (owner-reported P0, 2026-07-29): at the previous universal `ARRIVE_STANDOFF`
+ * of 38 the camera parked 38 units from the CORE of a ~77-unit-radius cloud — i.e. through the
+ * near wall and roughly half-way in, inside the full-density shell (`shellInner: 0.55`). The
+ * raymarcher handles origin-inside, so the gas rendered all around and behind the camera while
+ * the target's own billboard sat ahead clamped to =<130px. Owner's words: "the ship travels past
+ * it and then stops way past it... this happens with almost all travellable DSOs."
+ *
+ * WHY 3.5, from BOTH sisters, and why it is forced rather than chosen:
+ *   - Astra SCIENCE-BRIEF (docs/analysis/2026-07-29-dso-arrival-science-brief.md) signed off a
+ *     physics band of 2.5-4.0 R, hard floor 1.5 R. Her key correction to the working assumption:
+ *     a close-range nebula is NOT invisible — surface brightness is conserved along a ray, and
+ *     from inside M42 every sight-line still crosses ~12.7 ly of the same cloud, so it glows at
+ *     ~0.75 mag below the Earth view. Inside you lose STRUCTURE, not light. The arrival premise
+ *     is real, not a declared license.
+ *   - Vega SHOT-BRIEF (docs/experience-design/2026-07-29-dso-arrival-framing-shot-spec.md)
+ *     showed the lower bound is an ENGINEERING constraint, not taste: `clampZoomDistance`'s
+ *     floor for a non-planet target is `restDist * ZOOM_MIN_MULT` (0.3), so any factor below
+ *     `1/0.3 = 3.33` lets the visitor zoom straight back INSIDE the gas by hand. 3.5 clears that
+ *     by 5% (0.3x -> 1.05 R, just outside the near wall) and needs NO new zoom-floor policy —
+ *     the existing multiplicative floor moves with the standoff for free.
+ * 3.5 is the only value in Astra's band that also satisfies Vega's floor. Framing at 3.5: the
+ * rim subtends 33.2 deg = 0.71 of frame height — deliberately more sky around it than the
+ * planet precedent's 3.08x, because a soft-edged emission cloud loses objecthood at the frame
+ * boundary and the surrounding starfield ring is this shot's only scale reference (PF-11 is
+ * "scale honesty").
+ *
+ * NOT applied by object TYPE. The branch that consumes this keys on whether the body actually
+ * HAS a shipped volume (`NEBULA_VOLUMES.find`), because the catalogs carry far more nebula-typed
+ * entries than the 11 rendered volumes — a type check would push dozens of billboard-only
+ * objects to a standoff derived from a volume that does not exist. */
+export const NEBULA_ARRIVE_STANDOFF_FACTOR = 3.5;
+
 /** Literal duplicate of planet-sphere.ts's `PLANET_SPHERE_RADIUS` — same reasoning as
  * this file's other duplicated constants (kept import-free/pure for unit-testability);
  * a unit test asserts the two agree. Zoom's near floor for a planet-class body keeps

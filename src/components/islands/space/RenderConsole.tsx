@@ -112,10 +112,16 @@ export default function RenderConsole({ onClose }: { onClose: () => void }) {
         // the engine persists the choice for the next boot even though it can't act now.
         // `always-on` and `unavailable` are not settable at all.
         if (!isLiveToggleable(l) && l.status !== "reload") continue;
+        // A count-type layer (belt-physics, gaia-tiny, ...) has no boolean "everything" — EVERY-
+        // THING uses its own tier's measured-safe budget instead of the absolute maxCount
+        // ceiling, exactly like belt-physics already did. Checking the SHAPE of
+        // defaultByTier.full (not a hardcoded id list) means a future count layer is covered
+        // automatically; PF-11 D8 found this the hard way when gaia-tiny went live and the old
+        // `l.id !== "belt-physics"` check sent it a bare `true`, desyncing the panel's numeric
+        // input from the engine's real state.
+        const isCount = typeof l.defaultByTier.full === "number";
         config[l.id] =
-          preset === "everything" && l.id !== "belt-physics"
-            ? true
-            : source[l.id];
+          preset === "everything" && !isCount ? true : source[l.id];
       }
       apply(config, persist);
     },

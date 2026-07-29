@@ -1,0 +1,41 @@
+{
+  "generatedFrom": "resources/gaia_datasets/catalog-gaia-dr3-tiny/catalog/gaia-dr3-tiny",
+  "totalSourceStars": 2552302,
+  "keptAfterDedup": 2439455,
+  "droppedAsDuplicate": 112847,
+  "chunkCount": 8,
+  "chunks": [
+    {
+      "chunk": 0,
+      "recordCount": 304932
+    },
+    {
+      "chunk": 1,
+      "recordCount": 304932
+    },
+    {
+      "chunk": 2,
+      "recordCount": 304932
+    },
+    {
+      "chunk": 3,
+      "recordCount": 304932
+    },
+    {
+      "chunk": 4,
+      "recordCount": 304932
+    },
+    {
+      "chunk": 5,
+      "recordCount": 304932
+    },
+    {
+      "chunk": 6,
+      "recordCount": 304932
+    },
+    {
+      "chunk": 7,
+      "recordCount": 304931
+    }
+  ]
+}

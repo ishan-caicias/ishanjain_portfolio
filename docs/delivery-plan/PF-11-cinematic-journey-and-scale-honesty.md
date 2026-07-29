@@ -7,6 +7,10 @@ requirement added (the **Render Console**, phase D9): see the Decisions log belo
 [ADR-0010](../adr/0010-owner-decisions-render-console.md). ~~D6.2 (belt frame) remains the one
 open decision.~~ **D6.2 approved hours later, same day: GO on re-expression (ADR-0010
 update) — ALL owner decisions are now taken.** IMPLEMENT starts at D0.
+**2026-07-29: every phase D0.1-D9 is now implemented** (D8, [TR-114](../test-reports/TR-114.md),
+was the last per the plan's own sequencing). **D0.3's real-device pass remains the one
+owner-scheduled item standing across the whole plan** (ADR-0008) — it calibrates D9's presets,
+D6.3's tier gating, and D8's defaults, none of which it blocks from shipping.
 **Implementation companion (bidirectional — for coding agents):**
 [docs/implementation/PF-11-implementation-plan.md](../implementation/PF-11-implementation-plan.md)
 holds the full technical detail per phase; each phase below links to its implementation
@@ -865,6 +869,9 @@ backends (TR-045/059 discipline); E2E green.
 
 ## Phase D8 — Gaia DR3 Tiny background field (owner R12 — the 15× conversation, now scoped)
 
+**✅ D8.1-D8.3 DELIVERED 2026-07-29 — [TR-114](../test-reports/TR-114.md), [ADR-0012](../adr/0012-gaia-tiny-chunked-layer.md).**
+PF-11's last remaining phase; every phase D0.1-D9 is now implemented.
+
 **Inventory (audited):** `resources/gaia_datasets/catalog-gaia-dr3-tiny` — 2,552,302 stars,
 206.5 MB, Gaia Sky **OctreeLoader** binary (a sixth local serialization; reader needed). At the
 shipped 15-byte layout: ~36.5 MiB raw → ~31–42 MiB PNG-pack asset (13–15× today's 2.76 MiB
@@ -877,20 +884,37 @@ decimated cut. Delivery mechanism is the D9 Render Console: the full field is a 
 chunked, fetch-on-enable layer; D0.3's real-device data sets the per-device _default_
 (on/off/partial-chunk-count), never a hard cap.
 
-- **D8.1 ADR first** (this is the "own budget/ADR conversation" PF-10 promised): chunking
-  design — magnitude-sorted chunked asset so the layer streams in brightness order and any
-  device can stop at its default prefix while the panel offers the rest (the existing
-  `_applyDensity` index-trim lever is the runtime knob); asset-budget raise is a deliberate
-  ADR-0009 ceiling decision under the new boot-critical-download framing (the layer is never
-  boot-critical).
-- **D8.2 Pipeline:** OctreeLoader reader (`scripts/lib/`), dedupe against the shipped
-  Hipparcos-based field (the tiny pack _includes_ all Hipparcos stars — overlap must be
-  deduped by source id, not position), magnitude-sorted PNG-pack emit; unit-tested round-trip
-  against the production decoder (C0 discipline).
-- **D8.3 Implementation** as a D9 layer; E2E asserts full-count enable, chunked partial
-  enable, and per-device defaults; budget gates raised deliberately; real-device
-  re-measurement closes the phase.
-  **Depends on D9 (layer mechanism) + D0.3 (defaults only).** Ships last.
+- **✅ D8.1 ADR** ([ADR-0012](../adr/0012-gaia-tiny-chunked-layer.md), written before code, per
+  this row's own requirement): reverse-engineered and byte-verified the OctreeLoader binary
+  format — `metadata.bin` v1 and `particles_*.bin` v3, the latter undocumented on the public
+  Gaia Sky docs site at this version; derived and SIMBAD/parallax-verified the octree's axis
+  convention and distance unit (neither documented anywhere); found the record's `color` field
+  100% sentinel and substituted a Ballesteros-formula `tEff`→B-V conversion instead. **8
+  magnitude-sorted chunks**, not the open-ended "chunked asset" the plan text left unscoped — a
+  round, reviewable, re-runnable number (`--chunks N`), not a measured optimum. Asset-budget
+  raised deliberately in the same commit as the shipped assets (ADR-0009 ratchet).
+- **✅ D8.2 Pipeline** (`scripts/gaia-tiny-pngpack.mjs`, `npm run gaia:tiny`): two-pass
+  typed-array streaming (C0 discipline — 2.55M records never becomes 2.55M JS objects).
+  **Dedup by source id turned out to be impossible** — the shipped base field carries no id of
+  any kind (a real finding, not assumed from the plan text); position-only crossmatch used
+  instead, after a 300-star calibration sample proved the plan's originally-scoped
+  position+magnitude gate was silently rejecting 72% of genuine matches (the base field's
+  brightness byte isn't on a Gaia-G-band-compatible scale). Real run: 2,552,302 source →
+  112,847/117,904 HIP-tagged candidates deduped → 2,439,455 kept, 36.79 MB across 8 chunks.
+  Round-trip unit-tested (16 tests, `tests/unit/gaiasky-octree-particles.test.ts`) against the
+  production decoder, including regression pins on the axis-mapping/distance-unit formulas
+  themselves.
+- **✅ D8.3 Implementation** as a D9 layer (`render-layers.ts` status flip, new
+  `babylon-engine.ts` `_setGaiaTinyChunks` — per-chunk meshes, a deliberate deviation from this
+  row's own `_applyDensity`-index-trim suggestion, see ADR-0012 §4 for why); E2E asserts
+  chunk-prefix partial enable, full enable, instant shrink/regrow, disable-disposes, and the
+  8-chunk ceiling clamp (5 new specs, all passing in the full 176/176 suite). Two real bugs
+  (a missing boot-time trigger; the Render Console's EVERYTHING preset mishandling a second
+  count-type layer) were caught by these new tests before shipping — see TR-114.
+  **Real-device re-measurement (D0.3) has NOT run** — `defaultByTier: 0` everywhere means no
+  device pays for this layer unless a visitor explicitly opts in, so this does not block
+  delivery the way it would for an always-on layer; D0.3 remains the one owner-scheduled item
+  standing across the whole plan (ADR-0008), not a D8-specific gap.
 
 ## Phase D9 — Render Console: user-configurable layer rendering (ADR-0010)
 

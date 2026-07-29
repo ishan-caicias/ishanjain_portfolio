@@ -58,30 +58,42 @@ describe("RenderConsole", () => {
   // NAMED TEST CHANGES (CLAUDE.md #15), TR-113, in this file: (a) the bonus-stars note now
   // reads "APPLIES ON RELOAD" because that layer became a real boot-time toggle rather than an
   // inert row, and (b) `setLayers` gained a second `{ persist }` argument, so the two
-  // call-shape assertions gained it. Neither weakens anything; the block below ADDS the
-  // gaia-tiny checked-state assertion whose absence let the original ship ticked.
-  it("renders each non-live layer per its status: always-on ticked, reload toggleable, unavailable OFF", () => {
+  // call-shape assertions gained it.
+  //
+  // NAMED TEST CHANGE, PF-11 D8 (ADR-0012), TR-114: gaia-tiny flipped from `unavailable` to
+  // `live` — its "COMING IN A FUTURE UPDATE" / disabled-checkbox assertions moved to the
+  // dedicated "gaia-tiny is a live count layer" test below, since it's no longer a non-live row.
+  it("renders each non-live layer per its status: always-on ticked, reload toggleable", () => {
     mountFakeEngine();
     render(<RenderConsole onClose={vi.fn()} />);
     expect(screen.getByText(/ALWAYS ON/)).toBeTruthy();
     expect(screen.getByText(/APPLIES ON RELOAD/)).toBeTruthy();
-    expect(screen.getByText(/COMING IN A FUTURE UPDATE/)).toBeTruthy();
 
-    const tinyCheckbox = screen.getByLabelText(
-      /GAIA DR3 TINY.*\(not adjustable\)/,
-    ) as HTMLInputElement;
-    expect(tinyCheckbox.disabled).toBe(true);
-    // THE REGRESSION THIS FILE MISSED: an unavailable layer must never claim to be rendering.
-    // gaia-tiny shipped as a ticked box asserting 2.55M stars were being drawn from a dataset
-    // that does not exist.
-    expect(tinyCheckbox.checked).toBe(false);
-
-    // star-field is the opposite case — genuinely always on, so ticked AND disabled.
+    // star-field is genuinely always on, so ticked AND disabled.
     const starCheckbox = screen.getByLabelText(
       /STAR FIELD.*\(not adjustable\)/,
     ) as HTMLInputElement;
     expect(starCheckbox.disabled).toBe(true);
     expect(starCheckbox.checked).toBe(true);
+  });
+
+  it("gaia-tiny is a live count layer, matching belt-physics's shape (PF-11 D8, ADR-0012)", () => {
+    mountFakeEngine();
+    render(<RenderConsole onClose={vi.fn()} />);
+    // No longer the disabled "COMING IN A FUTURE UPDATE" row.
+    expect(screen.queryByText(/COMING IN A FUTURE UPDATE/)).toBeNull();
+    const input = screen.getByLabelText(
+      /GAIA DR3 TINY · FULL BACKGROUND FIELD/,
+    ) as HTMLInputElement;
+    expect(input.type).toBe("number");
+    expect(input.disabled).toBe(false);
+    const tiny = LAYERS.find((l) => l.id === "gaia-tiny")!;
+    expect(input.max).toBe(String(tiny.maxCount));
+    fireEvent.change(input, { target: { value: "3" } });
+    expect(setLayersMock).toHaveBeenCalledWith(
+      { "gaia-tiny": 3 },
+      { persist: true },
+    );
   });
 
   it("toggling a live layer's checkbox calls setLayers with just that id", () => {
@@ -141,9 +153,10 @@ describe("RenderConsole", () => {
     const call = setLayersMock.mock.calls.at(-1)![0];
     expect(call["sdss-field"]).toBe(tierDefaults("lite")["sdss-field"]);
     expect(call["belt-physics"]).toBe(tierDefaults("lite")["belt-physics"]);
-    // not-yet-implemented layers are never included in an applied config
+    // gaia-tiny is now live (PF-11 D8) — IS included, at its tier default (0 on every tier).
+    expect(call["gaia-tiny"]).toBe(tierDefaults("lite")["gaia-tiny"]);
+    // always-on/unavailable layers are never included in an applied config.
     expect(call["star-field"]).toBeUndefined();
-    expect(call["gaia-tiny"]).toBeUndefined();
   });
 
   it("the EVERYTHING preset forces every implemented boolean layer on", () => {
@@ -156,6 +169,12 @@ describe("RenderConsole", () => {
     expect(call["nebula-volumes"]).toBe(true);
     // belt-physics is a count, not a boolean — EVERYTHING uses full tier's own budget
     expect(call["belt-physics"]).toBe(tierDefaults("full")["belt-physics"]);
+    // PF-11 D8 regression guard: gaia-tiny is ALSO a count layer (like belt-physics) — EVERYTHING
+    // must send its tier default (0), never a bare `true` (which would desync the panel's
+    // numeric input from the engine's real chunk-prefix state — the real bug this ADR-0012 slice
+    // found and fixed in applyPreset's count-layer detection).
+    expect(call["gaia-tiny"]).toBe(tierDefaults("full")["gaia-tiny"]);
+    expect(typeof call["gaia-tiny"]).toBe("number");
   });
 
   it("RESET TO AUTO clears the persisted override and reapplies the current tier's defaults", () => {

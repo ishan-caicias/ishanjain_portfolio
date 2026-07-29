@@ -82,6 +82,7 @@ describe("isBootCritical", () => {
       "sdss-field",
       "asteroid-belt",
       "atlas-photo",
+      "gaia-tiny",
     ];
     for (const s of critical) expect(isBootCritical(s)).toBe(true);
     for (const s of background) expect(isBootCritical(s)).toBe(false);

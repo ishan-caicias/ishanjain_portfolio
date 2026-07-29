@@ -371,6 +371,7 @@ import {
 import {
   ARRIVE_STANDOFF,
   PLANET_ARRIVE_STANDOFF,
+  NEBULA_ARRIVE_STANDOFF_FACTOR,
   clampZoomDistance,
   dampScalar,
   ZOOM_STEP,
@@ -833,6 +834,20 @@ const BONUS_CATALOG_CHUNKS = [
   "assets/oortcloud.png",
   "assets/clusters-bg.png",
   "assets/whitedwarfs-edr3.png",
+] as const;
+
+/** PF-11 D8 (ADR-0012): the Gaia DR3 Tiny background field, 8 magnitude-sorted chunks (chunk 0 =
+ * brightest 304,928 stars) — `scripts/gaia-tiny-pngpack.mjs`'s output. Chunk count MUST match
+ * `render-layers.ts`'s `gaia-tiny` entry's `maxCount` — a unit test asserts this. */
+const GAIA_TINY_CHUNK_URLS = [
+  "assets/gaia-tiny-00.png",
+  "assets/gaia-tiny-01.png",
+  "assets/gaia-tiny-02.png",
+  "assets/gaia-tiny-03.png",
+  "assets/gaia-tiny-04.png",
+  "assets/gaia-tiny-05.png",
+  "assets/gaia-tiny-06.png",
+  "assets/gaia-tiny-07.png",
 ] as const;
 
 /* Star rendering: BILLBOARD QUADS in one merged indexed mesh, not point sprites.
@@ -1957,6 +1972,20 @@ class BabylonScene extends HTMLElement {
   private _asteroidVisualCount = 0;
   /** Guards `_loadAsteroidVisualLayer` to run at most once per boot. */
   private _asteroidLayerRequested = false;
+  /** PF-11 D8 (ADR-0012): the Gaia DR3 Tiny background field — ONE MESH PER CHUNK, not one
+   * growing merged mesh. Index i holds chunk i's mesh once fetched (undefined = never fetched
+   * this session). Growing the panel's chunk-prefix count `setEnabled(true)`s any
+   * already-fetched-but-hidden chunk (zero network cost) and fetches only the still-missing
+   * ones; shrinking is `setEnabled(false)` on the tail (zero network AND zero rebuild cost) —
+   * see ADR-0012 §4 for why this replaces the plan's literal `_applyDensity`-index-trim text. */
+  private _gaiaTinyChunkMeshes: (Mesh | undefined)[] = [];
+  private _gaiaTinyChunkCounts: number[] = [];
+  /** How many of the FRONT (brightest) chunks are currently `setEnabled(true)`. */
+  private _gaiaTinyEnabledChunks = 0;
+  /** Reentrancy guard: `_setGaiaTinyChunks` fetches asynchronously; a second call (e.g. the
+   * panel input firing twice before the first settles) must not race it. */
+  private _gaiaTinyLoading = false;
+  private _gaiaTinyCount = 0;
   // --- PF-10 C4: the single destination-gated planet sphere ---
   private _planetMesh?: Mesh;
   private _planetMat?: ShaderMaterial;
@@ -2226,11 +2255,31 @@ class BabylonScene extends HTMLElement {
    * have no entry here — both are read LIVE where they're consulted (`_updateFrameLadder`
    * combines `belt-physics` with the existing D2.1 distance fade every frame; `_tickPlanetSphere`
    * reads `planet-hires` each time a body is dressed) rather than needing a push here.
-   * `star-field`/`bonus-stars`/`gaia-tiny` are intentionally absent — see their `status:
-   * false` registry entries for why each one specifically can't be toggled today. */
+   * `star-field`/`bonus-stars` are intentionally absent — see their `status` registry entries
+   * for why each one specifically can't be toggled today. */
   private _applyLayerToggle(id: LayerId, value: boolean | number) {
     const on = value !== false && value !== 0;
     switch (id) {
+      case "gaia-tiny": {
+        const target =
+          typeof value === "number"
+            ? value
+            : value
+              ? GAIA_TINY_CHUNK_URLS.length
+              : 0;
+        if (target === 0) {
+          // D9.1 exit criteria: actually release the geometry, not just hide it — matches
+          // sdss-field/belt-visual's dispose-on-disable above.
+          for (const m of this._gaiaTinyChunkMeshes) m?.dispose();
+          this._gaiaTinyChunkMeshes = [];
+          this._gaiaTinyChunkCounts = [];
+          this._gaiaTinyEnabledChunks = 0;
+          this._gaiaTinyCount = 0;
+        } else if (this._scene && this._engine) {
+          void this._setGaiaTinyChunks(this._scene, this._engine, target);
+        }
+        break;
+      }
       case "sdss-field": {
         const scene = this._scene;
         const engine = this._engine;
@@ -2291,8 +2340,92 @@ class BabylonScene extends HTMLElement {
         break;
       }
       default:
-        break; // belt-physics, planet-hires (read live), star-field/bonus-stars/gaia-tiny (not live-toggleable)
+        break; // belt-physics, planet-hires (read live), star-field/bonus-stars (not live-toggleable)
     }
+  }
+
+  /** PF-11 D8 (ADR-0012): fetches/reveals or hides Gaia DR3 Tiny chunk-prefix `target` (of
+   * `GAIA_TINY_CHUNK_URLS.length`), magnitude-sorted brightest-first. Growing re-enables any
+   * already-fetched chunk instantly and fetches only the still-missing ones; shrinking is a pure
+   * `setEnabled(false)` on the tail chunks — neither direction ever re-fetches or rebuilds an
+   * already-resident chunk's geometry. Each chunk becomes its OWN small mesh, deliberately not
+   * one growing merged mesh (see ADR-0012 §4 for why). */
+  private async _setGaiaTinyChunks(
+    scene: Scene,
+    engine: AbstractEngine,
+    target: number,
+  ) {
+    const total = GAIA_TINY_CHUNK_URLS.length;
+    target = Math.max(0, Math.min(total, Math.round(target)));
+    if (target === this._gaiaTinyEnabledChunks || this._gaiaTinyLoading) return;
+    if (target < this._gaiaTinyEnabledChunks) {
+      for (let i = target; i < this._gaiaTinyEnabledChunks; i++) {
+        this._gaiaTinyChunkMeshes[i]?.setEnabled(false);
+      }
+      this._gaiaTinyEnabledChunks = target;
+      this._recomputeGaiaTinyCount();
+      return;
+    }
+    const toFetch: number[] = [];
+    for (let i = this._gaiaTinyEnabledChunks; i < target; i++) {
+      const mesh = this._gaiaTinyChunkMeshes[i];
+      if (mesh) mesh.setEnabled(true);
+      else toFetch.push(i);
+    }
+    this._gaiaTinyEnabledChunks = target;
+    this._recomputeGaiaTinyCount();
+    if (toFetch.length === 0) return;
+    this._gaiaTinyLoading = true;
+    const stage = new StageAggregator("gaia-tiny", emitStage);
+    try {
+      await Promise.all(
+        toFetch.map(async (i) => {
+          const url = GAIA_TINY_CHUNK_URLS[i];
+          try {
+            const blob = await fetchWithProgress(
+              url,
+              "gaia-tiny",
+              stage.sink(url),
+            );
+            const bb = await this._decodeCatalogInWorker(blob);
+            if (bb.count === 0) return;
+            await this._waitForWarpIdle();
+            const mesh = new Mesh(`gaiaTiny${i}`, scene);
+            const vd = new VertexData();
+            vd.positions = bb.positions;
+            vd.indices = bb.indices;
+            vd.applyToMesh(mesh, false);
+            mesh.setVerticesBuffer(
+              new VertexBuffer(engine, bb.meta, "starMeta", false, false, 2),
+            );
+            mesh.alwaysSelectAsActiveMesh = true;
+            mesh.material = this._starMat ?? null;
+            // The requested count may have shrunk again while this fetch was in flight — honour
+            // the LATEST target, not the one that kicked this fetch off.
+            mesh.setEnabled(i < this._gaiaTinyEnabledChunks);
+            mesh.geometry?.clearCachedData();
+            this._gaiaTinyChunkMeshes[i] = mesh;
+            this._gaiaTinyChunkCounts[i] = bb.count;
+          } catch (e) {
+            console.warn(`[babylon-engine] gaia-tiny chunk ${i} failed`, e);
+          }
+        }),
+      );
+      this._recomputeGaiaTinyCount();
+      stage.finish(this._gaiaTinyCount);
+      emit("cosmos:gaia-tiny", { total: this._gaiaTinyCount });
+    } finally {
+      stage.finish(); // idempotent — closes the all-chunks-failed and error paths
+      this._gaiaTinyLoading = false;
+    }
+  }
+
+  private _recomputeGaiaTinyCount() {
+    let sum = 0;
+    for (let i = 0; i < this._gaiaTinyEnabledChunks; i++) {
+      sum += this._gaiaTinyChunkCounts[i] ?? 0;
+    }
+    this._gaiaTinyCount = sum;
   }
 
   /** Reduces how many of the star mesh's indices actually draw, matching
@@ -2728,6 +2861,15 @@ class BabylonScene extends HTMLElement {
         if (this._layerState["belt-visual"] !== false) {
           void this._loadAsteroidVisualLayer(scene, engine);
         }
+        // PF-11 D8 (ADR-0012): Gaia DR3 Tiny — off by default on every tier, so this only fires
+        // for a `?layers=gaia-tiny:N` URL override or a persisted non-zero choice. `setLayers()`
+        // only calls `_applyLayerToggle` for values that CHANGE from the resolved boot state
+        // (`_layerState[id] === value` short-circuits it), so the initial resolved value needs
+        // its own explicit kick here — exactly like the three layers above it.
+        const gaiaTinyBoot = this._layerState["gaia-tiny"];
+        if (typeof gaiaTinyBoot === "number" && gaiaTinyBoot > 0) {
+          void this._setGaiaTinyChunks(scene, engine, gaiaTinyBoot);
+        }
       }
     });
 
@@ -2821,6 +2963,9 @@ class BabylonScene extends HTMLElement {
       // PF-10 C2: SDSS DR18 galaxy field diagnostics (separate mesh, see _loadSdssGalaxyLayer).
       sdssGalaxyCount: this._sdssGalaxyCount,
       sdssMeshReady: this._sdssMesh ? this._sdssMesh.isReady(true) : false,
+      // PF-11 D8 (ADR-0012): Gaia DR3 Tiny chunk-prefix diagnostics.
+      gaiaTinyCount: this._gaiaTinyCount,
+      gaiaTinyEnabledChunks: this._gaiaTinyEnabledChunks,
       // B3: shooting-star particle diagnostics.
       shootMeshReady: shoot ? shoot.isReady(true) : false,
       shootTotalVertices: shoot ? shoot.getTotalVertices() : -1,
@@ -6383,14 +6528,25 @@ class BabylonScene extends HTMLElement {
       return;
     }
     const dir = b.dir;
-    // TR-103 (Vega SHOT-BRIEF): planet/moon/dwarf bodies get the larger, decoupled
-    // PLANET_ARRIVE_STANDOFF — everything else (stars, DSOs, stations, fs- field
-    // objects, all of which are "star"-typed per entryForFieldStar) keeps the
-    // original ARRIVE_STANDOFF, untouched.
+    // Arrival standoff, three cases. TR-103 (Vega SHOT-BRIEF): planet/moon/dwarf bodies get the
+    // larger, decoupled PLANET_ARRIVE_STANDOFF. TR-115 (Astra SCIENCE-BRIEF + Vega SHOT-BRIEF,
+    // 2026-07-29): a body with a REAL RAYMARCHED VOLUME is parked at a multiple of that
+    // volume's own radius, because 38 units put the camera inside a ~77-unit cloud (see
+    // NEBULA_ARRIVE_STANDOFF_FACTOR's header for the full derivation). Everything else — stars,
+    // billboard-only DSOs, stations, fs- field objects — keeps the original ARRIVE_STANDOFF,
+    // untouched and deliberately so: their sprite is sized in SCREEN space and is already at its
+    // clamp at 38, so backing off would be pure loss (Vega, §"non-volumetric DSOs").
+    //
+    // The volumetric test is PRESENCE OF A VOLUME, never `e.t === "nebula"` — the catalogs carry
+    // far more nebula-typed entries than the 11 shipped volumes, and a type check would hand
+    // dozens of billboard-only objects a standoff derived from a volume they do not have.
+    const vol = NEBULA_VOLUMES.find((v) => v.id === b.e.id);
     const standoff =
       b.e.t === "planet" || b.e.t === "moon" || b.e.t === "dwarf"
         ? PLANET_ARRIVE_STANDOFF
-        : ARRIVE_STANDOFF;
+        : vol
+          ? vol.radius * NEBULA_ARRIVE_STANDOFF_FACTOR
+          : ARRIVE_STANDOFF;
     const to: [number, number, number] = [
       b.pos[0] - dir[0] * standoff,
       b.pos[1] - dir[1] * standoff,

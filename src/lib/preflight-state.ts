@@ -34,6 +34,7 @@ export const STAGE_LABELS: Record<LoadStage, string> = {
   "sdss-field": "SDSS DEEP FIELD",
   "asteroid-belt": "ASTEROID BELT",
   "atlas-photo": "PHOTO ATLAS",
+  "gaia-tiny": "GAIA DR3 TINY",
 };
 
 /** Formats a byte count the way the rest of this codebase's mono-voice overlays do —

@@ -23,7 +23,13 @@ import {
   topTwoReveal,
   valueNoise3,
 } from "@/lib/nebula-field";
-import { bodyWorldPosition, quatFromAxisAngle } from "@/lib/ship-dynamics";
+import {
+  ARRIVE_STANDOFF,
+  NEBULA_ARRIVE_STANDOFF_FACTOR,
+  ZOOM_MIN_MULT,
+  bodyWorldPosition,
+  quatFromAxisAngle,
+} from "@/lib/ship-dynamics";
 
 /** The catalog anchors the volumes must sit on — duplicated from
  * celestial-catalog.js / celestial-extra.js / celestial-extra2.js /
@@ -601,5 +607,63 @@ describe("topTwoReveal", () => {
     expect(r.volB).toBe(2);
     expect(r.revealB).toBe(0.7);
     // index 1 (0.5) is real but dropped — documented graceful degradation
+  });
+});
+
+/**
+ * PF-11 post-D8 (TR-115) — the invariant this suite was MISSING, and whose absence let a P0
+ * ship: nothing anywhere related the arrival standoff to the rendered volume's own radius.
+ * `nebula-field.test.ts` even pinned `radius === depth * NEBULA_RADIUS_FACTOR` — the very
+ * number that caused the overshoot — without ever comparing it to a standoff, and every DSO
+ * arrival E2E spec asserted only `arrivedId === "m42"`. So the whole suite stayed green while
+ * the camera parked at 0.42-0.53 of the volume radius from the core, i.e. inside the gas.
+ */
+describe("volumetric arrival standoff (Astra SCIENCE-BRIEF + Vega SHOT-BRIEF, 2026-07-29)", () => {
+  it("parks the camera OUTSIDE every shipped volume, and keeps it outside even fully zoomed in", () => {
+    expect(NEBULA_VOLUMES.length).toBeGreaterThan(0);
+    for (const v of NEBULA_VOLUMES) {
+      const standoff = v.radius * NEBULA_ARRIVE_STANDOFF_FACTOR;
+      // The arrival itself is clear of the gas.
+      expect(standoff, `${v.id} arrival is outside the volume`).toBeGreaterThan(
+        v.radius,
+      );
+      // ...and so is the closest the visitor can hand-zoom to. This is the binding constraint:
+      // `clampZoomDistance` floors a non-planet target at `restDist * ZOOM_MIN_MULT`, so a
+      // factor below 1/ZOOM_MIN_MULT would let the visitor zoom straight back inside by hand.
+      expect(
+        standoff * ZOOM_MIN_MULT,
+        `${v.id} stays outside the volume at maximum zoom-in`,
+      ).toBeGreaterThan(v.radius);
+    }
+  });
+
+  it("the OLD fixed standoff would have been inside every one of them — this is not a no-op", () => {
+    // Documents the defect numerically so a future "simplification" back to a fixed distance
+    // fails loudly rather than silently reintroducing it.
+    for (const v of NEBULA_VOLUMES) {
+      expect(
+        ARRIVE_STANDOFF,
+        `${v.id} was overshot at the old 38`,
+      ).toBeLessThan(v.radius);
+    }
+  });
+
+  it("the factor sits inside Astra's signed-off physics band AND clears Vega's zoom floor", () => {
+    // Astra: 2.5-4.0 volume radii is the defensible viewing band (hard physics floor 1.5).
+    expect(NEBULA_ARRIVE_STANDOFF_FACTOR).toBeGreaterThanOrEqual(2.5);
+    expect(NEBULA_ARRIVE_STANDOFF_FACTOR).toBeLessThanOrEqual(4.0);
+    // Vega: the zoom floor forces >= 1/ZOOM_MIN_MULT. 3.5 is the only value satisfying both,
+    // which is why it is derived rather than chosen.
+    expect(NEBULA_ARRIVE_STANDOFF_FACTOR).toBeGreaterThanOrEqual(
+      1 / ZOOM_MIN_MULT,
+    );
+  });
+
+  it("the reveal is essentially complete at rest, so the cloud is not still building under the dossier", () => {
+    // The tail half of the same re-key: with the ship stopping outside the cloud there is no
+    // final loom left to carry a low arrival level.
+    expect(NEBULA_REVEAL.decelMax).toBeGreaterThanOrEqual(0.85);
+    // decelStart must NOT move — it is coupled to the D3.2 flip window (ADR-0011).
+    expect(NEBULA_REVEAL.decelStart).toBeCloseTo(0.56, 6);
   });
 });

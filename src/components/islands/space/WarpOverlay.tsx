@@ -68,7 +68,15 @@ export default function WarpOverlay({
       className="pointer-events-none fixed inset-0 z-[70]"
     >
       <div className="absolute inset-x-0 top-0 h-16 origin-top animate-[ij-barin_0.5s_ease-out_both] bg-[#05081a]" />
-      <div className="absolute inset-x-0 bottom-0 h-16 origin-bottom animate-[ij-barin_0.5s_ease-out_both] bg-[#05081a]" />
+      {/* data-testid exists so an E2E spec can assert GEOMETRICALLY that the mission console
+          clears this bar. A hit-test (`elementFromPoint`) cannot catch that class of defect
+          here: this overlay is `pointer-events-none`, so clicks always passed through to the
+          button underneath even while it was completely painted over — which is exactly how
+          the occlusion shipped unnoticed. */}
+      <div
+        data-testid="warp-letterbox-bottom"
+        className="absolute inset-x-0 bottom-0 h-16 origin-bottom animate-[ij-barin_0.5s_ease-out_both] bg-[#05081a]"
+      />
 
       {/* PF-11 D3.3: the one-shot "the press registered" acknowledgement — an abort or a
           queued retarget — sits above the ongoing readout so it reads as a distinct event
@@ -87,7 +95,13 @@ export default function WarpOverlay({
         </div>
       )}
 
-      <div className="absolute bottom-[clamp(112px,17vh,170px)] left-1/2 -translate-x-1/2 text-center font-mono">
+      {/* PF-11 post-D8: floor raised 112px → 148px (and 17vh → 20vh) so the mid-warp readout
+          cannot collide with the mission console, which now lifts to clear the bottom letterbox
+          — see global.css's `body.ij-warping #ij-mission-bar` for why that lift is forced. */}
+      <div
+        data-testid="warp-readout"
+        className="absolute bottom-[clamp(148px,20vh,190px)] left-1/2 -translate-x-1/2 text-center font-mono"
+      >
         <div className="text-xs tracking-[0.3em] text-[#43a047]">
           {warpPhase}
         </div>

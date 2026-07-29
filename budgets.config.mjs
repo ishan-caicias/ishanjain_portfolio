@@ -125,13 +125,20 @@ export const assets = {
    * D6.6a's `patch-atlas.mjs` composited 3 new 128px moon cells (Tethys/Dione/Rhea) into
    * `atlas.jpg`, which forces a full 4096x4096 re-encode (measured 0.23 MB growth at
    * mozjpeg quality 90 — see that script's own comment for why not a smaller/larger
-   * quality). Combined measured total: 256.80 MB; 0.6 MB headroom restored. */
-  totalMB: 257.4,
+   * quality). Combined measured total: 256.80 MB; 0.6 MB headroom restored.
+   *
+   * RAISED 257.4 -> 291.9, 2026-07-29 (PF-11 D8, ADR-0012, TR-114) — `gaia-tiny-00..07.png`,
+   * the 8 magnitude-sorted chunks of the Gaia DR3 Tiny background field (2,439,417 stars post
+   * position-crossmatch dedup against the shipped Hipparcos base field — see ADR-0012 §3),
+   * 36,791,591 bytes (35.09 MB) real measured total on disk. Never boot-critical: fetch-on-enable
+   * only, through the D9 Render Console. Measured 291.89 MB. */
+  totalMB: 291.9,
 
   /** The largest single file. Attribution, not a second total: a 45 MB asset appearing where the
    * previous maximum was 8 MB is a different kind of event from the total drifting up by 45 MB
    * across a thousand tiles, and the two want different conversations. Currently `sdss18.png` at
-   * 44.94 MB (C2's full 3,637,862-record galaxy field). */
+   * 44.94 MB (C2's full 3,637,862-record galaxy field). Each gaia-tiny chunk (D8) is ~4.6 MB,
+   * well under this ceiling — chunking was a deliberate design choice partly for this reason. */
   perFileMB: 45.0,
 
   /** NEW IN PF-11 D1.1 (2026-07-22) — the only ceiling here measured in what a VISITOR WAITS FOR
@@ -173,7 +180,10 @@ export const assets = {
     // RAISED 59.7 -> 60.0, 2026-07-29 (PF-11 D6.2 + D6.6, TR-108/109) — see `totalMB`'s entry
     // of the same date for the two causes (asteroids-dr3.png reframe, atlas.jpg's 3 new
     // moon cells); both land in this group. Measured 59.87 MB; 0.13 MB headroom restored.
-    "(root)": 60.0,
+    // RAISED 60.0 -> 95.0, 2026-07-29 (PF-11 D8, ADR-0012, TR-114) — the 8 gaia-tiny-*.png
+    // chunks (35.09 MB, loose files directly under public/assets, same as every other
+    // top-level catalog PNG). Measured 94.96 MB.
+    "(root)": 95.0,
     dso3: 15.0,
     dso2: 7.2,
     dso: 3.9,
@@ -192,13 +202,18 @@ export const assets = {
  * representative per-body figure (measured range 4-6 MB, D6.3.2), not a fixed total — unlike
  * the others, this cost is paid per body visited, not once for the whole catalog. A unit test
  * (`render-layers.test.ts`) asserts these against both `LAYERS` and the real files on disk, so
- * a future asset regen that changes a size either updates both sides here or fails loudly. */
+ * a future asset regen that changes a size either updates both sides here or fails loudly.
+ *
+ * `gaiaTiny` added PF-11 D8 (ADR-0012, TR-114): the sum of all 8 `gaia-tiny-NN.png` chunks,
+ * 36,792,163 bytes real measured on disk 2026-07-29 — the layer's full-enable cost; a
+ * chunk-prefix partial enable fetches proportionally less (see render-layers.ts's `maxCount`). */
 export const layerBytes = {
   starField: 2_018_454 + 873_480,
   bonusStars: 5_415_687 + 79_027 + 135_583 + 163_385,
   sdssField: 47_125_068,
   beltVisual: 2_081_206,
   planetHires: 5_000_000,
+  gaiaTiny: 36_792_163,
 };
 
 export default { bundle, assets, layerBytes };
