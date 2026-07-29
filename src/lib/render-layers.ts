@@ -52,17 +52,45 @@ export interface LayerMeta {
   /** Per-tier default: `boolean` for a plain on/off layer, `number` for a layer whose default
    * is a COUNT (belt-physics: Havok body budget; gaia-tiny: chunk prefix, once D8 ships it). */
   defaultByTier: Record<QualityTierName, boolean | number>;
+  /** Upper bound for a COUNT layer, enforced by the panel's input AND by `setLayers()` so a
+   * hand-typed `?layers=belt-physics:100000` cannot reach the engine either (TR-113 — the
+   * input originally had `min={0}` and no ceiling, and the value becomes a Havok rigid-body
+   * budget stepped every frame). Absent for boolean layers. */
+  maxCount?: number;
   /** Every layer here loads (or, for `star-field`, already loaded) strictly after
    * `cosmos:ready` — none of this registry's own toggles can ever block LAUNCH. */
   bootCritical: false;
-  /** Whether `babylon-engine.ts`'s `setLayers()` can actually act on this id today. `false`
-   * marks a registry entry that exists for forward-compatibility / documentation but has no
-   * live toggle yet — `gaia-tiny` (the data doesn't exist until D8 ships it) and `bonus-stars`
-   * (merged permanently into the base star mesh for one draw call — see babylon-engine.ts's
-   * `_applyStarFieldGeometry`; separating it into an independently-disposable layer is a real
-   * structural change, recorded as a D9 follow-up, not attempted here). The panel renders
-   * these rows disabled with an explicit reason rather than silently omitting them. */
-  implemented: boolean;
+  /** How this layer can actually be controlled today. TR-113 replaced the original
+   * `implemented: boolean` with this four-way status because one boolean could not tell
+   * "always on, by design" apart from "doesn't exist yet" apart from "controllable, but only
+   * at boot" — and the panel guessed, rendering `gaia-tiny` as a CHECKED row for 2.55M stars
+   * that are not being drawn. Each value has exactly one rendering in the panel and one
+   * meaning for `setLayers()`:
+   *
+   *   "live"       — `setLayers()` acts on it immediately. The normal case.
+   *   "always-on"  — it IS the scene; there is nothing to turn off (`star-field`).
+   *   "reload"     — honoured at boot only. `bonus-stars` merges permanently into the base
+   *                  star mesh for one draw call (`_applyStarFieldGeometry`), so it cannot be
+   *                  un-merged live, but the boot-time merge CAN be skipped. Splitting it into
+   *                  an independently-disposable mesh stays a D9 follow-up.
+   *   "unavailable"— declared for forward-compatibility; no data exists yet (`gaia-tiny`
+   *                  until D8 ships its pipeline). Renders off and disabled. */
+  status: LayerStatus;
+}
+
+export type LayerStatus = "live" | "always-on" | "reload" | "unavailable";
+
+/** Whether `setLayers()` can act on this id in the running scene. `reload` layers are
+ * deliberately excluded — their state is real and persisted, but only read at boot. */
+export function isLiveToggleable(l: LayerMeta): boolean {
+  return l.status === "live";
+}
+
+/** Whether this layer is actually being rendered when its state says "on". `unavailable`
+ * layers are never rendered whatever their stored state claims — the panel must not draw them
+ * as enabled. */
+export function isAvailable(l: LayerMeta): boolean {
+  return l.status !== "unavailable";
 }
 
 export const LAYERS: LayerMeta[] = [
@@ -73,7 +101,7 @@ export const LAYERS: LayerMeta[] = [
     vertsApprox: 168_959 * 4,
     defaultByTier: { full: true, balanced: true, lite: true },
     bootCritical: false,
-    implemented: false, // always on; setLayers() ignores this id by design
+    status: "always-on", // it IS the scene; setLayers() ignores this id by design
   },
   {
     id: "bonus-stars",
@@ -82,7 +110,7 @@ export const LAYERS: LayerMeta[] = [
     vertsApprox: 387_000 * 4, // 359,073 WD (documented) + ~5,931 CNS5 + Oort + clusters
     defaultByTier: { full: true, balanced: true, lite: true },
     bootCritical: false,
-    implemented: false, // merged into the base star mesh — see the field comment above
+    status: "reload", // merged into the base star mesh; boot-time skip only — see LayerStatus
   },
   {
     id: "sdss-field",
@@ -91,7 +119,7 @@ export const LAYERS: LayerMeta[] = [
     vertsApprox: 3_637_836 * 4,
     defaultByTier: { full: true, balanced: true, lite: true },
     bootCritical: false,
-    implemented: true,
+    status: "live",
   },
   {
     id: "belt-visual",
@@ -100,7 +128,7 @@ export const LAYERS: LayerMeta[] = [
     vertsApprox: 154_662 * 4,
     defaultByTier: { full: true, balanced: true, lite: true },
     bootCritical: false,
-    implemented: true,
+    status: "live",
   },
   {
     id: "belt-physics",
@@ -110,8 +138,12 @@ export const LAYERS: LayerMeta[] = [
     // Mirrors QUALITY_BUDGETS[tier].asteroids exactly (babylon-tiers.ts) — the count is a
     // Havok body budget, not a byte one.
     defaultByTier: { full: 48, balanced: 32, lite: 20 },
+    // 4x the `full` tier budget. Deliberately a headroom ceiling for a visitor who wants more
+    // rocks than their tier chose, NOT a measured safe maximum — D9.4/D0.3 owns the real
+    // number. Havok steps every one of these bodies each frame.
+    maxCount: 192,
     bootCritical: false,
-    implemented: true,
+    status: "live",
   },
   {
     id: "nebula-volumes",
@@ -120,7 +152,7 @@ export const LAYERS: LayerMeta[] = [
     vertsApprox: 0,
     defaultByTier: { full: true, balanced: true, lite: true },
     bootCritical: false,
-    implemented: true,
+    status: "live",
   },
   {
     id: "gd1-trail",
@@ -129,7 +161,7 @@ export const LAYERS: LayerMeta[] = [
     vertsApprox: 0, // resolved at boot from however many gd1-member- entries the catalog carries
     defaultByTier: { full: true, balanced: true, lite: true },
     bootCritical: false,
-    implemented: true,
+    status: "live",
   },
   {
     id: "constellations",
@@ -138,7 +170,7 @@ export const LAYERS: LayerMeta[] = [
     vertsApprox: 0,
     defaultByTier: { full: true, balanced: true, lite: true },
     bootCritical: false,
-    implemented: true,
+    status: "live",
   },
   {
     id: "milky-way-band",
@@ -147,7 +179,7 @@ export const LAYERS: LayerMeta[] = [
     vertsApprox: 0,
     defaultByTier: { full: true, balanced: true, lite: true },
     bootCritical: false,
-    implemented: true,
+    status: "live",
   },
   {
     id: "planet-hires",
@@ -157,7 +189,7 @@ export const LAYERS: LayerMeta[] = [
     // Mirrors QUALITY_BUDGETS[tier].planetTexture === "ultra-progressive" exactly.
     defaultByTier: { full: true, balanced: false, lite: false },
     bootCritical: false,
-    implemented: true,
+    status: "live",
   },
   {
     id: "gaia-tiny",
@@ -166,11 +198,30 @@ export const LAYERS: LayerMeta[] = [
     vertsApprox: 2_552_302 * 4,
     defaultByTier: { full: false, balanced: false, lite: false }, // off everywhere: doesn't exist yet
     bootCritical: false,
-    implemented: false, // PF-11 D8 — ships as a D9 layer once its data pipeline lands
+    status: "unavailable", // PF-11 D8 — flip to "live" once its data pipeline lands
   },
 ];
 
 const LAYER_IDS = new Set<LayerId>(LAYERS.map((l) => l.id));
+const LAYER_BY_ID = new Map<LayerId, LayerMeta>(LAYERS.map((l) => [l.id, l]));
+
+export function layerMeta(id: LayerId): LayerMeta | undefined {
+  return LAYER_BY_ID.get(id);
+}
+
+/** Clamps a COUNT layer's value into `[0, maxCount]` and integerises it. Applied at EVERY
+ * entry point into layer state — URL param, stored JSON, the panel's input, and the engine's
+ * own `setLayers()` — so no path can hand the engine a Havok body budget it can't survive
+ * (TR-113). Booleans and layers without a `maxCount` pass through untouched. */
+export function clampLayerValue(
+  id: LayerId,
+  value: boolean | number,
+): boolean | number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return value;
+  const max = LAYER_BY_ID.get(id)?.maxCount;
+  if (max === undefined) return value;
+  return Math.max(0, Math.min(max, Math.round(value)));
+}
 
 /** Parses the `?layers=` URL param: comma-separated `id:value` pairs, e.g.
  * `sdss-field:0,belt-physics:16`. Booleans are `1`/`0`; a plain integer is read as a count
@@ -191,14 +242,15 @@ export function parseLayersParam(
       continue;
     }
     const n = Number(raw);
-    if (Number.isFinite(n) && n >= 0) out[id as LayerId] = n;
+    if (Number.isFinite(n) && n >= 0)
+      out[id as LayerId] = clampLayerValue(id as LayerId, n);
   }
   return out;
 }
 
-/** Serializes a layer config back into the `?layers=` format `parseLayersParam` reads — used
- * by the panel's "copy a link with these settings" affordance and by the URL-override chip's
- * own round-trip test. */
+/** Serializes a layer config back into the `?layers=` format `parseLayersParam` reads — the
+ * inverse of `parseLayersParam`, and what the panel's COPY LINK button hands to the clipboard
+ * so a visitor can share (or bookmark) the exact layer set they are looking at. */
 export function serializeLayersParam(
   config: Partial<Record<LayerId, boolean | number>>,
 ): string {
@@ -241,7 +293,8 @@ export function resolveLayers(
     }
   }
   for (const id of LAYER_IDS) {
-    if (storedConfig[id] !== undefined) resolved[id] = storedConfig[id]!;
+    if (storedConfig[id] !== undefined)
+      resolved[id] = clampLayerValue(id, storedConfig[id]!);
   }
   const urlConfig = parseLayersParam(urlParam);
   for (const id of LAYER_IDS) {

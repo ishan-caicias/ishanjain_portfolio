@@ -1992,3 +1992,52 @@ test("babylon: PF-10 C3 belt holds still under prefers-reduced-motion", async ({
 // NGC2000 billboard nebulae and the GD-1 connected-trail visual are now covered inside the
 // merged "PF-10 catalog layers" test above (2026-07-25 E2E audit, TR-104) — they shared this
 // same full-catalog boot with no reason to pay for it twice.
+
+test("babylon: the star mesh survives the bonus-layer rebuild — the renderer keeps drawing (TR-113 C1)", async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  // THE REGRESSION GUARD THIS SUITE DID NOT HAVE.
+  //
+  // `_applyStarFieldGeometry` runs twice: once at boot, once when `_loadBonusStarLayers`
+  // merges ~387k more records into the base star mesh. PF-11 D7.1 added
+  // `geometry.clearCachedData()` to that method to free the CPU-side vertex copy; on the
+  // SECOND call it left the mesh with no reconstructible `BoundingInfo`, so Babylon's
+  // transparent depth sort threw INSIDE `scene.render()`. The throw landed before
+  // `renderFrames++`, so the renderer froze permanently ~10 frames in, on every load and
+  // every backend — and 880 green unit tests could not see any of it, because none of them
+  // instantiates a GPU.
+  //
+  // This asserts BEHAVIOUR, not readiness (CLAUDE.md #18): frames must still be advancing
+  // after the merge has demonstrably happened. `starCount` growing past the base catalog is
+  // the proof the rebuild ran, so this can never pass by simply never merging.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto("/?engine=babylon");
+  await page.waitForSelector("babylon-scene", { timeout: 15000 });
+  const engine = page.locator("babylon-scene");
+  const frames = () =>
+    engine.evaluate(
+      (el) => (el as unknown as { renderFrames: number }).renderFrames,
+    );
+  const starCount = () =>
+    engine.evaluate((el) => (el as unknown as { starCount: number }).starCount);
+
+  const base = await starCount();
+  // The rebuild actually happened.
+  await expect
+    .poll(starCount, { timeout: 45000, intervals: [500, 1000] })
+    .toBeGreaterThan(base);
+
+  // ...and the renderer is still alive on the far side of it.
+  const afterMerge = await frames();
+  await expect
+    .poll(frames, { timeout: 20000, intervals: [500, 1000] })
+    .toBeGreaterThan(afterMerge);
+
+  expect(
+    errors,
+    "an uncaught exception in the render loop freezes every later frame",
+  ).toEqual([]);
+});

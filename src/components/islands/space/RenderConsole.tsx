@@ -3,8 +3,12 @@ import {
   LAYERS,
   tierDefaults,
   LAYERS_STORAGE_KEY,
+  clampLayerValue,
   formatBytes,
   formatVerts,
+  isAvailable,
+  isLiveToggleable,
+  serializeLayersParam,
   type LayerId,
 } from "@/lib/render-layers";
 import type { QualityTierName } from "@/lib/babylon-tiers";
@@ -14,7 +18,7 @@ type LayerState = Partial<Record<LayerId, boolean | number>>;
 
 interface EngineHandle {
   sceneStats(): Record<string, unknown>;
-  setLayers(config: LayerState): void;
+  setLayers(config: LayerState, opts?: { persist?: boolean }): void;
 }
 
 function getEngine(): EngineHandle | null {
@@ -94,37 +98,59 @@ export default function RenderConsole({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  const apply = useCallback((config: LayerState) => {
-    getEngine()?.setLayers(config);
+  const apply = useCallback((config: LayerState, persist = true) => {
+    getEngine()?.setLayers(config, { persist });
   }, []);
 
   const applyPreset = useCallback(
-    (preset: QualityTierName | "everything") => {
+    (preset: QualityTierName | "everything", persist = true) => {
       const source =
         preset === "everything" ? tierDefaults("full") : tierDefaults(preset);
       const config: LayerState = {};
       for (const l of LAYERS) {
-        if (!l.implemented) continue;
+        // `reload` layers (bonus-stars) ARE included: a preset should be able to set them, and
+        // the engine persists the choice for the next boot even though it can't act now.
+        // `always-on` and `unavailable` are not settable at all.
+        if (!isLiveToggleable(l) && l.status !== "reload") continue;
         config[l.id] =
           preset === "everything" && l.id !== "belt-physics"
             ? true
             : source[l.id];
       }
-      apply(config);
+      apply(config, persist);
     },
     [apply],
   );
 
+  // TR-113: RESET TO AUTO must leave NOTHING stored, so the next load resolves from the device
+  // tier again. It previously deleted the key and then immediately re-persisted the full state
+  // through `setLayers()` — correct for the live session, wrong on reload, and invisible to a
+  // manual check that never reloads. `persist: false` is what makes the removeItem stick.
   const resetToAuto = useCallback(() => {
+    const stats = getEngine()?.sceneStats();
+    const currentTier = (stats?.qualityTier as QualityTierName) ?? "balanced";
+    applyPreset(currentTier, false);
     try {
       localStorage.removeItem(LAYERS_STORAGE_KEY);
     } catch {
-      /* private browsing / storage disabled — the live reset below still applies */
+      /* private browsing / storage disabled — the live reset above still applies */
     }
-    const stats = getEngine()?.sceneStats();
-    const currentTier = (stats?.qualityTier as QualityTierName) ?? "balanced";
-    applyPreset(currentTier);
   }, [applyPreset]);
+
+  const [copied, setCopied] = useState(false);
+  const copyLink = useCallback(() => {
+    const settable: LayerState = {};
+    for (const l of LAYERS) {
+      if (!isLiveToggleable(l) && l.status !== "reload") continue;
+      const v = layers?.[l.id];
+      if (v !== undefined) settable[l.id] = v;
+    }
+    const url = `${window.location.origin}${window.location.pathname}?layers=${serializeLayersParam(settable)}`;
+    void navigator.clipboard?.writeText(url).then(
+      () => setCopied(true),
+      () => setCopied(false),
+    );
+  }, [layers]);
 
   return (
     <div data-screen-label="Render console" className="fixed inset-0 z-[85]">
@@ -214,13 +240,36 @@ export default function RenderConsole({ onClose }: { onClose: () => void }) {
             >
               RESET TO AUTO
             </button>
+            <button
+              onClick={copyLink}
+              className="rounded px-2.5 py-1 font-mono text-[10px] tracking-wider text-[#7986cb] hover:border-[#ffc107]/40 hover:text-[#ffd54f] border border-[#3f51b5]/50"
+            >
+              {copied ? "LINK COPIED ✓" : "COPY LINK"}
+            </button>
           </div>
 
           <div className="mt-4.5 flex flex-col gap-2.5">
             {LAYERS.map((l) => {
               const value = layers?.[l.id];
-              const on = value !== false && value !== 0;
+              // TR-113: an `unavailable` layer is NEVER on, whatever its stored state says —
+              // `gaia-tiny` used to render as a ticked box claiming 2.55M stars were being
+              // drawn from a dataset that does not exist yet. `always-on` is genuinely always
+              // ticked. Everything else reflects real engine state.
+              const on =
+                l.status === "unavailable"
+                  ? false
+                  : l.status === "always-on"
+                    ? true
+                    : value !== false && value !== 0;
               const isCount = typeof l.defaultByTier.full === "number";
+              const note =
+                l.status === "always-on"
+                  ? " · ALWAYS ON"
+                  : l.status === "reload"
+                    ? " · MERGED INTO STAR FIELD — APPLIES ON RELOAD"
+                    : l.status === "unavailable"
+                      ? " · COMING IN A FUTURE UPDATE"
+                      : "";
               return (
                 <div
                   key={l.id}
@@ -236,20 +285,16 @@ export default function RenderConsole({ onClose }: { onClose: () => void }) {
                     <div className="mt-0.5 font-mono text-[10px] tracking-wider text-[#5c6bc0]">
                       {formatBytes(l.assetBytes)}
                       {l.vertsApprox > 0 && ` · ${formatVerts(l.vertsApprox)}`}
-                      {!l.implemented &&
-                        (l.id === "star-field"
-                          ? " · ALWAYS ON"
-                          : l.id === "bonus-stars"
-                            ? " · MERGED INTO STAR FIELD, NOT YET INDEPENDENT"
-                            : " · COMING IN A FUTURE UPDATE")}
+                      {note}
                     </div>
                   </div>
-                  {!l.implemented ? (
+                  {!isAvailable(l) || l.status === "always-on" ? (
                     <input
                       id={`ij-layer-${l.id}`}
                       type="checkbox"
-                      checked
+                      checked={on}
                       disabled
+                      readOnly
                       aria-label={`${l.label} (not adjustable)`}
                       className="h-4 w-4 flex-shrink-0 opacity-40"
                     />
@@ -258,9 +303,12 @@ export default function RenderConsole({ onClose }: { onClose: () => void }) {
                       id={`ij-layer-${l.id}`}
                       type="number"
                       min={0}
+                      max={l.maxCount}
                       value={typeof value === "number" ? value : 0}
                       onChange={(e) =>
-                        apply({ [l.id]: Math.max(0, Number(e.target.value)) })
+                        apply({
+                          [l.id]: clampLayerValue(l.id, Number(e.target.value)),
+                        })
                       }
                       className="w-16 flex-shrink-0 rounded border border-[#3f51b5] bg-[#0d1126] px-2 py-1 text-right font-mono text-[11px] text-[#c5cae9]"
                     />

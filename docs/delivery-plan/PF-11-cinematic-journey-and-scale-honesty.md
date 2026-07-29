@@ -842,7 +842,7 @@ correcting before D9 ships a whole new Render Console UI.
 
 ## Phase D7 — Memory & runtime optimisation (owner R13; audited opportunities, ranked)
 
-**✅ ALL 6 SLICES IMPLEMENTED 2026-07-29 — [TR-111](../test-reports/TR-111.md).** D7.2's
+**✅ ALL 6 SLICES DELIVERED 2026-07-29 — [TR-111](../test-reports/TR-111.md), gate closed by [TR-113](../test-reports/TR-113.md).** ~~IMPLEMENTED (E2E unrun).~~ **The E2E run this slice deferred found 59 failures from ONE defect this slice introduced** — D7.1's `clearCachedData()` froze the renderer ~10 frames into every load (see TR-113 for root cause, proof and fix). D7.1's memory win is retained on the two one-shot meshes and withdrawn on the rebuildable star mesh. **Rule this establishes for D8:** never `clearCachedData()` on a mesh whose geometry will be rebuilt — D8's Gaia DR3 Tiny merge reuses exactly that path, and it is now regression-tested. D7.2's
 unconditional-ultra-fetch half and part of D7.4 (`beltPullAccel`'s allocation) were found
 already fixed by D6.3.2/TR-110 respectively during implementation — corrected, not re-done.
 **Real-device heap/VRAM measurement itself has NOT run** — every number below is the original
@@ -894,7 +894,7 @@ chunked, fetch-on-enable layer; D0.3's real-device data sets the per-device _def
 
 ## Phase D9 — Render Console: user-configurable layer rendering (ADR-0010)
 
-**✅ D9.1-D9.3 DELIVERED 2026-07-29 — [TR-112](../test-reports/TR-112.md).** D9.4 shipped as
+**✅ D9.1-D9.3 DELIVERED 2026-07-29 — [TR-112](../test-reports/TR-112.md), gate closed and four defects fixed by [TR-113](../test-reports/TR-113.md).** TR-113 corrected `RESET TO AUTO` (it re-persisted the override it had just deleted), `gaia-tiny` rendering as a TICKED row for data that does not exist, an unbounded `belt-physics` Havok-body input, and a strict-mode-violating spec locator; it also replaced the registry's `implemented: boolean` with a four-way `status` (`live`/`always-on`/`reload`/`unavailable`) and gave `bonus-stars` a real boot-time escape hatch. **D8 unblock:** shipping `gaia-tiny` is now a one-value change in `render-layers.ts` (`status: "unavailable"` → `"live"`) plus its data pipeline. D9.4 shipped as
 **owner-pending defaults** (current shipped behaviour made visible/adjustable, not yet
 D0.3-calibrated) rather than a completed real-device calibration — see below and the
 ADR-0010 addendum.

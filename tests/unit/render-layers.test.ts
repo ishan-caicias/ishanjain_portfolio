@@ -11,8 +11,11 @@ import {
   tierDefaults,
   resolveLayers,
   LAYERS_STORAGE_KEY,
+  clampLayerValue,
   formatBytes,
   formatVerts,
+  isAvailable,
+  isLiveToggleable,
   type LayerId,
 } from "@/lib/render-layers";
 import { layerBytes } from "../../budgets.config.mjs";
@@ -38,19 +41,53 @@ describe("LAYERS registry", () => {
     }
   });
 
-  it("star-field and bonus-stars are marked not-yet-toggleable, matching the documented architectural reasons", () => {
+  // NAMED TEST CHANGE (CLAUDE.md #15), TR-113: `implemented: boolean` was replaced by the
+  // four-way `status` because one boolean conflated "always on", "boot-time only" and "doesn't
+  // exist" — and the panel, forced to guess, drew `gaia-tiny` as a ticked row. These assertions
+  // are strengthened, not relaxed: each layer now pins its exact status rather than a shared
+  // `false`, and the two helpers that replace the old flag are pinned alongside.
+  it("star-field is always-on and bonus-stars is reload-only, matching the documented architectural reasons", () => {
     const star = LAYERS.find((l) => l.id === "star-field")!;
     const bonus = LAYERS.find((l) => l.id === "bonus-stars")!;
-    expect(star.implemented).toBe(false);
-    expect(bonus.implemented).toBe(false);
+    expect(star.status).toBe("always-on");
+    expect(bonus.status).toBe("reload");
+    expect(isLiveToggleable(star)).toBe(false);
+    expect(isLiveToggleable(bonus)).toBe(false);
+    // Both are genuinely rendered — unlike gaia-tiny below.
+    expect(isAvailable(star)).toBe(true);
+    expect(isAvailable(bonus)).toBe(true);
   });
 
-  it("gaia-tiny defaults to off on every tier (D8 hasn't shipped the data)", () => {
+  it("gaia-tiny is unavailable and defaults to off on every tier (D8 hasn't shipped the data)", () => {
     const tiny = LAYERS.find((l) => l.id === "gaia-tiny")!;
-    expect(tiny.implemented).toBe(false);
+    expect(tiny.status).toBe("unavailable");
+    expect(isAvailable(tiny)).toBe(false);
+    expect(isLiveToggleable(tiny)).toBe(false);
     expect(tiny.defaultByTier.full).toBe(false);
     expect(tiny.defaultByTier.balanced).toBe(false);
     expect(tiny.defaultByTier.lite).toBe(false);
+  });
+
+  it("every layer declares a status, and every live layer is available", () => {
+    const valid = new Set(["live", "always-on", "reload", "unavailable"]);
+    for (const l of LAYERS) {
+      expect(valid.has(l.status), `${l.id} has a valid status`).toBe(true);
+      if (isLiveToggleable(l)) expect(isAvailable(l)).toBe(true);
+    }
+  });
+
+  it("clamps a count layer at both ends, at every entry point", () => {
+    const belt = LAYERS.find((l) => l.id === "belt-physics")!;
+    expect(belt.maxCount).toBeGreaterThan(belt.defaultByTier.full as number);
+    expect(clampLayerValue("belt-physics", 100_000)).toBe(belt.maxCount);
+    expect(clampLayerValue("belt-physics", -5)).toBe(0);
+    expect(clampLayerValue("belt-physics", 12.7)).toBe(13);
+    // Booleans and layers with no ceiling pass straight through.
+    expect(clampLayerValue("sdss-field", true)).toBe(true);
+    // ...and the URL param cannot smuggle an unclamped value past it.
+    expect(parseLayersParam("belt-physics:99999")["belt-physics"]).toBe(
+      belt.maxCount,
+    );
   });
 
   it("belt-physics's default mirrors QUALITY_BUDGETS[tier].asteroids exactly", async () => {

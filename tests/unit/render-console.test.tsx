@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import RenderConsole from "@/components/islands/space/RenderConsole";
-import { tierDefaults, LAYERS_STORAGE_KEY } from "@/lib/render-layers";
+import { LAYERS, tierDefaults, LAYERS_STORAGE_KEY } from "@/lib/render-layers";
 
 // vitest.config sets globals:false, so RTL's auto-cleanup never registers on its own
 // (mission-control-bar.test.tsx's own discovery) — explicit afterEach required.
@@ -55,31 +55,49 @@ describe("RenderConsole", () => {
     expect(screen.getByText(/DEVICE PRESET · BALANCED/)).toBeTruthy();
   });
 
-  it("marks not-yet-toggleable layers as disabled checkboxes with an explanatory label", () => {
+  // NAMED TEST CHANGES (CLAUDE.md #15), TR-113, in this file: (a) the bonus-stars note now
+  // reads "APPLIES ON RELOAD" because that layer became a real boot-time toggle rather than an
+  // inert row, and (b) `setLayers` gained a second `{ persist }` argument, so the two
+  // call-shape assertions gained it. Neither weakens anything; the block below ADDS the
+  // gaia-tiny checked-state assertion whose absence let the original ship ticked.
+  it("renders each non-live layer per its status: always-on ticked, reload toggleable, unavailable OFF", () => {
     mountFakeEngine();
     render(<RenderConsole onClose={vi.fn()} />);
     expect(screen.getByText(/ALWAYS ON/)).toBeTruthy();
-    expect(
-      screen.getByText(/MERGED INTO STAR FIELD, NOT YET INDEPENDENT/),
-    ).toBeTruthy();
+    expect(screen.getByText(/APPLIES ON RELOAD/)).toBeTruthy();
     expect(screen.getByText(/COMING IN A FUTURE UPDATE/)).toBeTruthy();
+
     const tinyCheckbox = screen.getByLabelText(
       /GAIA DR3 TINY.*\(not adjustable\)/,
     ) as HTMLInputElement;
     expect(tinyCheckbox.disabled).toBe(true);
+    // THE REGRESSION THIS FILE MISSED: an unavailable layer must never claim to be rendering.
+    // gaia-tiny shipped as a ticked box asserting 2.55M stars were being drawn from a dataset
+    // that does not exist.
+    expect(tinyCheckbox.checked).toBe(false);
+
+    // star-field is the opposite case — genuinely always on, so ticked AND disabled.
+    const starCheckbox = screen.getByLabelText(
+      /STAR FIELD.*\(not adjustable\)/,
+    ) as HTMLInputElement;
+    expect(starCheckbox.disabled).toBe(true);
+    expect(starCheckbox.checked).toBe(true);
   });
 
-  it("toggling an implemented layer's checkbox calls setLayers with just that id", () => {
+  it("toggling a live layer's checkbox calls setLayers with just that id", () => {
     mountFakeEngine();
     render(<RenderConsole onClose={vi.fn()} />);
     const checkbox = screen.getByLabelText(
       "SDSS DR18 DEEP FIELD",
     ) as HTMLInputElement;
     fireEvent.click(checkbox);
-    expect(setLayersMock).toHaveBeenCalledWith({ "sdss-field": false });
+    expect(setLayersMock).toHaveBeenCalledWith(
+      { "sdss-field": false },
+      { persist: true },
+    );
   });
 
-  it("the belt-physics row is a number input, not a checkbox", () => {
+  it("the belt-physics row is a number input, not a checkbox, and is clamped to its ceiling", () => {
     mountFakeEngine();
     render(<RenderConsole onClose={vi.fn()} />);
     const input = screen.getByLabelText(
@@ -87,7 +105,33 @@ describe("RenderConsole", () => {
     ) as HTMLInputElement;
     expect(input.type).toBe("number");
     fireEvent.change(input, { target: { value: "10" } });
-    expect(setLayersMock).toHaveBeenCalledWith({ "belt-physics": 10 });
+    expect(setLayersMock).toHaveBeenCalledWith(
+      { "belt-physics": 10 },
+      { persist: true },
+    );
+
+    // TR-113: a hand-typed absurd count must not reach the engine as a Havok body budget.
+    const belt = LAYERS.find((l) => l.id === "belt-physics")!;
+    expect(input.max).toBe(String(belt.maxCount));
+    fireEvent.change(input, { target: { value: "100000" } });
+    expect(setLayersMock).toHaveBeenLastCalledWith(
+      { "belt-physics": belt.maxCount },
+      { persist: true },
+    );
+  });
+
+  it("RESET TO AUTO clears the stored override WITHOUT re-persisting it", () => {
+    mountFakeEngine(tierDefaults("balanced"), "balanced");
+    localStorage.setItem(LAYERS_STORAGE_KEY, JSON.stringify({ x: 1 }));
+    render(<RenderConsole onClose={vi.fn()} />);
+    fireEvent.click(screen.getByText("RESET TO AUTO"));
+    // The whole point: the next boot must resolve from the DEVICE TIER, so nothing may remain
+    // in storage. The original implementation removed the key and then immediately wrote the
+    // full state back through setLayers, pinning the visitor off their tier forever.
+    expect(setLayersMock).toHaveBeenLastCalledWith(expect.anything(), {
+      persist: false,
+    });
+    expect(localStorage.getItem(LAYERS_STORAGE_KEY)).toBeNull();
   });
 
   it("a preset button applies every implemented layer's tier default in one setLayers call", () => {

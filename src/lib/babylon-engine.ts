@@ -333,6 +333,7 @@ import {
   type QualityTierName,
 } from "./babylon-tiers";
 import {
+  clampLayerValue,
   LAYERS_STORAGE_KEY,
   resolveLayers,
   type LayerId,
@@ -2109,9 +2110,10 @@ class BabylonScene extends HTMLElement {
   // --- PF-11 D9.1: Render Console layer state ---
   /** Resolved once at boot (URL `?layers=` -> localStorage -> tier default, via
    * `resolveLayers`) and updated live by `setLayers()`/the `layers` attribute. Every id in
-   * `LAYERS` is always present. Layers marked `implemented: false` in the registry
-   * (`star-field`, `bonus-stars`, `gaia-tiny`) have their state tracked here for
-   * forward-compatibility but `_applyLayerToggle` does nothing for them today. */
+   * `LAYERS` is always present. Layers whose registry `status` is not `"live"`
+   * (`star-field` always-on, `bonus-stars` reload-only, `gaia-tiny` unavailable) have their
+   * state tracked here — `bonus-stars` is read at boot to skip the merge, the other two are
+   * inert — but `_applyLayerToggle` does nothing for any of them. */
   private _layerState: Record<LayerId, boolean | number> = resolveLayers(
     null,
     null,
@@ -2175,15 +2177,29 @@ class BabylonScene extends HTMLElement {
    * `cosmos:layers` with the FULL resolved state afterward — even a no-op call — so a UI that
    * calls this speculatively (e.g. applying a preset) can trust the event as the source of
    * truth rather than diffing its own optimistic state. */
-  setLayers(config: Partial<Record<LayerId, boolean | number>>) {
+  setLayers(
+    config: Partial<Record<LayerId, boolean | number>>,
+    opts: { persist?: boolean } = {},
+  ) {
+    const persist = opts.persist !== false;
     for (const entry of Object.entries(config)) {
       const id = entry[0] as LayerId;
-      const value = entry[1];
+      // TR-113: clamped HERE as well as at the panel/URL/storage boundaries, because this is
+      // the method every one of those funnels into — a count that reaches `_applyLayerToggle`
+      // unclamped becomes a per-frame Havok body budget.
+      const value =
+        entry[1] === undefined ? undefined : clampLayerValue(id, entry[1]);
       if (value === undefined || this._layerState[id] === value) continue;
       this._layerState[id] = value;
       this._applyLayerToggle(id, value);
     }
-    if (typeof localStorage !== "undefined") {
+    // TR-113: `persist: false` exists for exactly one caller — the panel's RESET TO AUTO,
+    // which deletes the stored override so the visitor follows the DEVICE TIER again on the
+    // next load. Persisting unconditionally here (the original D9.1 behaviour) silently undid
+    // that `removeItem` one call later and pinned the visitor to whatever tier they happened
+    // to be on, which is the opposite of what the control says and defeats ADR-0010's "tiers
+    // are the default, never the ceiling".
+    if (persist && typeof localStorage !== "undefined") {
       try {
         localStorage.setItem(
           LAYERS_STORAGE_KEY,
@@ -2210,7 +2226,7 @@ class BabylonScene extends HTMLElement {
    * have no entry here — both are read LIVE where they're consulted (`_updateFrameLadder`
    * combines `belt-physics` with the existing D2.1 distance fade every frame; `_tickPlanetSphere`
    * reads `planet-hires` each time a body is dressed) rather than needing a push here.
-   * `star-field`/`bonus-stars`/`gaia-tiny` are intentionally absent — see their `implemented:
+   * `star-field`/`bonus-stars`/`gaia-tiny` are intentionally absent — see their `status:
    * false` registry entries for why each one specifically can't be toggled today. */
   private _applyLayerToggle(id: LayerId, value: boolean | number) {
     const on = value !== false && value !== 0;
@@ -2275,7 +2291,7 @@ class BabylonScene extends HTMLElement {
         break;
       }
       default:
-        break; // belt-physics, planet-hires (read live), star-field/bonus-stars/gaia-tiny (not implemented)
+        break; // belt-physics, planet-hires (read live), star-field/bonus-stars/gaia-tiny (not live-toggleable)
     }
   }
 
@@ -2386,9 +2402,16 @@ class BabylonScene extends HTMLElement {
     // every other override this file has (?layers= URL -> localStorage -> tier default).
     this._layerState = resolveLayers(
       new URLSearchParams(window.location.search).get("layers"),
-      typeof localStorage !== "undefined"
-        ? localStorage.getItem(LAYERS_STORAGE_KEY)
-        : null,
+      // TR-113: a `layers` ATTRIBUTE present before connection is now folded in here, between
+      // the tier default and the URL param. `attributeChangedCallback` fires before
+      // `connectedCallback` for attributes already in the markup, so its `setLayers()` call
+      // used to be overwritten wholesale by this line one tick later — the "future
+      // markup-driven default" the attribute handler documents silently did nothing. Stored
+      // preferences still lose to the attribute, and the URL param still wins over both.
+      this.getAttribute("layers") ??
+        (typeof localStorage !== "undefined"
+          ? localStorage.getItem(LAYERS_STORAGE_KEY)
+          : null),
       this._quality.name,
     );
     this._nebulaLayerEnabled = this._layerState["nebula-volumes"] !== false;
@@ -2680,10 +2703,20 @@ class BabylonScene extends HTMLElement {
         emitStageDone("first-frame");
         emit("cosmos:ready", {});
         // PF-10 C1: kick off the bonus background-layer fetch only after the first real frame
-        // has rendered — never awaited, never gating cosmos:ready itself. Not gated on
-        // `_layerState["bonus-stars"]` — see render-layers.ts's `implemented: false` note,
-        // this layer isn't independently toggleable yet.
-        void this._loadBonusStarLayers();
+        // has rendered — never awaited, never gating cosmos:ready itself.
+        //
+        // TR-113: NOW GATED on the resolved layer state. This layer is `status: "reload"`, not
+        // live-toggleable — once merged into the base star mesh it cannot be un-merged — but
+        // the merge itself can be SKIPPED at boot, and it must be skippable: this is the
+        // heaviest single thing the engine does after first frame (~5.8 MB across four chunks,
+        // +387k billboards, and a full star-mesh geometry rebuild), and until this commit it
+        // was also the one path with no off-switch of any kind. When D7.1's `clearCachedData`
+        // made that rebuild fatal, there was no URL, no toggle and no tier that could avoid
+        // it — the whole scene was unrecoverable and the defect was harder to isolate than it
+        // needed to be. `?layers=bonus-stars:0` is now a real escape hatch.
+        if (this._layerState["bonus-stars"] !== false) {
+          void this._loadBonusStarLayers();
+        }
         // PF-10 C2 / PF-11 D9.1: SDSS DR18 galaxy field — same non-blocking philosophy, own
         // mesh, now gated on the resolved layer state so a visitor who disabled it (or loaded
         // with `?layers=sdss-field:0`) never pays for the 47 MB fetch at all.
@@ -3005,17 +3038,34 @@ class BabylonScene extends HTMLElement {
     );
     this.starCount = field.count;
     this._field = field;
-    // PF-11 D7.1: this mesh is never scene-picked (isPickable=false, see boot setup) — the
-    // custom `_pick`/`_pickField` screen-space search reads `_field` above, a plain typed
-    // array independent of the GPU geometry — so the CPU-side vertex/index copy Babylon
-    // retains after upload (~54-361 MB across the merged/bonus field) serves no purpose once
-    // this frame's buffers are on the GPU. `setVerticesData`/`setVerticesBuffer` (used by
-    // `vd.applyToMesh` and the call above) always build a fresh Geometry rather than reuse the
-    // cleared one, so clearing here cannot break the next bonus-layer rebuild. Trade-off,
-    // undocumented until now: a lost WebGL context can no longer restore this mesh's real data
-    // (Babylon's `_rebuild()` falls back to an empty same-size buffer without a CPU cache) —
-    // accepted for a portfolio site with no existing context-restore recovery path either way.
-    this._stars.geometry?.clearCachedData();
+    // PF-11 D7.1 claimed the CPU-side vertex/index copy could be dropped here too
+    // (`geometry.clearCachedData()`), on the reasoning that "setVerticesData/
+    // setVerticesBuffer always build a fresh Geometry rather than reuse the cleared one, so
+    // clearing here cannot break the next bonus-layer rebuild".
+    //
+    // TR-113 — THAT CLAIM IS WITHDRAWN; it broke the entire renderer. This method is the ONE
+    // clearCachedData site of the three that runs TWICE (boot, then the bonus-layer merge).
+    // Babylon derives the mesh's `BoundingInfo` from the CPU-side POSITION cache; with the
+    // cache gone, the rebuild leaves `getBoundingInfo()` undefined and the transparent depth
+    // sort (`RenderingGroup._RenderSorted` reads `.boundingSphere.centerWorld` to order
+    // alpha-blended meshes) throws INSIDE `scene.render()`. The throw is uncaught and lands
+    // before `this.renderFrames++` in the render loop, so the renderer freezes permanently
+    // ~10 frames into every load, on every backend — no stars, no travel, no ascent.
+    //
+    // Reconstructing the bounding info before clearing was tried and MEASURED NOT TO WORK
+    // (`refreshBoundingInfo()` + `_createGlobalSubMesh(true)` immediately before the clear:
+    // still frozen at 10 frames, same exception) — Babylon re-derives and re-nulls it from
+    // the absent cache afterwards. So the cache stays.
+    //
+    // The win is NOT lost overall: the two genuinely one-shot meshes keep their clears
+    // (`_loadSdssGalaxyLayer` ~361 MB, `_loadAsteroidVisualLayer` ~15 MB — the large ones),
+    // and both are verified fine because they are built once and never rebuilt. Only this
+    // rebuildable mesh (~54 MB) retains its copy.
+    //
+    // RULE FOR D8 AND ANY FUTURE STAR LAYER: never `clearCachedData()` on a mesh whose
+    // geometry will be rebuilt. D8's Gaia DR3 Tiny merge reuses exactly this path.
+    // Regression-tested by "the star mesh survives the bonus-layer rebuild" in
+    // engine-select.spec.ts.
   }
 
   /** Resolves once `this.warp.mode === "idle"`, polling once per animation frame, capped at
