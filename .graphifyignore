@@ -1,0 +1,5 @@
+# graphify corpus scope for this repo.
+# Excluded: binary art assets with no semantic content for the knowledge graph.
+public/
+docs/test-reports/assets/
+scripts/hero/source/

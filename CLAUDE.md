@@ -27,16 +27,22 @@ command or read the index. Stale numbers in docs are how the last major drift ha
 ## Commands
 
 ```bash
-npm run build          # lint && check && astro build  (&& short-circuits — lint failure hides typecheck)
+npm run build          # prebuild: assets:verify → lint && check && astro build
+                       # && short-circuits — a stale asset fails BEFORE lint; lint failure hides typecheck
+                       # lint = eslint . && prettier --check .
 npm run test           # vitest run
 npm run test:e2e       # playwright — REQUIRES a fresh `npm run build` first
 npm run budget:check   # CI bundle gate; needs dist/
+npm run docs:check     # mechanical doc-drift gate (stale engine-default claims, index/status mismatches)
 npm run assets:craft   # regenerate tiered ship GLBs (never hand-edit them)
 ```
 
 - **Full local gate:** `npm run build && npm run test && npm run test:e2e && npm run budget:check`
 - **E2E always needs a fresh build** — Playwright serves the prebuilt `dist/`. A stale `dist/`
   silently tests old code.
+- **`dev`/`preview` run `assets:sync` first, `build` runs `assets:verify`** — the same planet
+  texture/VT/atlas pipeline, but `sync` regenerates stale artifacts while `verify` fails on them.
+  A build that dies before any lint output is this, not your code.
 - **Determinism check:** `npx playwright test --workers=1 --retries=0`
 - **Perf measurement:** `npm run build && npm run preview`, then `/?perf=1` — cold load, record
   RENDER FPS and the device signature line. **Never measure on `astro dev`** (~4× distortion).
@@ -244,3 +250,17 @@ index/status mismatches).
 - Frame budget: 16.6 ms desktop / 25 ms mid-Android. No per-frame allocation in the render loop.
 - Smallest coherent change. Preserve existing intent. Patterns only when they pay for a
   present problem.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- `graphify-out/` is **generated** — never hand-edit it; regenerate via `graphify update .`. It is
+  gitignored (7.4 MB of derived output that would churn on every commit); `.graphifyignore` is the
+  hand-maintained input and belongs in the repo.

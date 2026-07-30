@@ -173,6 +173,12 @@ resources/
 # not COMMITTED, which is the risk that actually matters.
 .claude-flow/
 
+# graphify knowledge-graph output (added 2026-07-31 during a CLAUDE.md audit that found it
+# sitting untracked at 7.4MB — same `git add -A` risk as .claude-flow/ above). Derived entirely
+# from source via `graphify update .`, so it would churn on every commit while telling a reviewer
+# nothing. The INPUT config `.graphifyignore` is hand-maintained and stays tracked.
+graphify-out/
+
 # OS / editor cruft (2026-07-29 CI/CD audit). The dev box is Windows (CLAUDE.md), so Thumbs.db
 # and desktop.ini are the ones that actually show up here; .DS_Store covers a macOS clone or
 # contributor. No .vscode/ or .idea/ committed today — blanket-ignored so neither can land by
