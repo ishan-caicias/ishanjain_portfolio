@@ -1,0 +1,11 @@
+# Enforce LF in working trees on every platform (overrides core.autocrlf).
+# text=auto lets git skip files it detects as binary; the LFS rules below
+# additionally mark their patterns -text explicitly.
+* text=auto eol=lf
+
+**/*.jpg filter=lfs diff=lfs merge=lfs -text
+**/*.glb filter=lfs diff=lfs merge=lfs -text
+**/*.jpeg filter=lfs diff=lfs merge=lfs -text
+**/*.png filter=lfs diff=lfs merge=lfs -text
+**/*.webp filter=lfs diff=lfs merge=lfs -text
+**/*.obj filter=lfs diff=lfs merge=lfs -text

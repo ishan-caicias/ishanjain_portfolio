@@ -25,14 +25,9 @@ export interface SkillCategory {
   skills: string[];
 }
 
-export interface HubbleEntry {
-  id: string;
+export interface CredibilityItem {
   title: string;
-  date: string;
   description: string;
-  imagePath: string;
-  credit: string;
-  sourceUrl: string;
 }
 
 export interface NavItem {

@@ -1,0 +1,20 @@
+# Security response headers (OWASP A05: Security Misconfiguration).
+# Honored by Netlify and Cloudflare Pages; copied verbatim into dist/ at build time.
+# Content-Security-Policy is emitted separately as a per-page <meta> element by Astro
+# (security.csp in astro.config.mjs), so it is intentionally NOT duplicated here to avoid
+# two conflicting policies. The headers below are the ones a <meta> tag cannot deliver.
+#
+# Hosts that do not read _headers:
+#   - Vercel: use vercel.json "headers" (see docs/security/).
+#   - GitHub Pages: cannot set custom headers; the <meta> CSP still applies, but nosniff,
+#     HSTS, X-Frame-Options, and Permissions-Policy will be absent. Prefer a host that
+#     supports custom headers for full coverage.
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=(), browsing-topics=()
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin

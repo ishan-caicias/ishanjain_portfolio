@@ -1,0 +1,40 @@
+name: CodeQL
+
+# Static security analysis (SAST) — free for public repos, and separate from ci.yml on purpose:
+# this scans code shape/data-flow for vulnerability patterns (injection, unsafe deserialization,
+# etc.), which is a different concern from ci.yml's correctness/regression gates and would only
+# slow that pipeline down for no shared benefit. Not wired into the main-protection ruleset's
+# required checks (2026-07-29 CI/CD audit) — CodeQL is advisory (see the Security tab), not a
+# merge gate; a real finding is a fix to make, not a job to keep re-running until it happens to
+# pass.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Monday, offset from Dependabot's own Monday run so the two don't compete for attention on
+    # the same morning.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # required to upload SARIF results to the Security tab
+    strategy:
+      matrix:
+        language: ["javascript-typescript"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

@@ -147,3 +147,48 @@ playwright-report/
 
 # Claude
 .claude/
+
+# Agent tooling scratch space (brainstorm servers, PIDs, logs) - transient, not source
+.superpowers/
+
+# PF-07 raw Gaia/Hipparcos dataset pipeline (source material for public/assets/ and
+# src/data/celestial/*.js, which are the converted/committed runtime binaries - see
+# docs/delivery-plan/PF-07-space-portfolio-webgl.md §1). Not needed to build or run the site.
+gaia_datasets/
+
+# PF-07 prototype source (the DC-template original this feature was ported from - reference
+# material only, not a build/runtime dependency; see docs/delivery-plan/PF-07-space-portfolio-webgl.md
+# §1). Was accidentally committed once (42MB, since stripped from history) - kept gitignored so a
+# plain `git add -A`/`git add .` can never pull it back in.
+Interactive Outerspace Portfolio/
+
+# PF-07 ship-v2 source asset downloads (Sketchfab originals, ~255MB: raw GLB/glTF/USDZ +
+# 4K texture exports). Conversion input for scripts/build-craft-assets.mjs, which produces
+# the committed runtime GLBs in public/assets/craft/. Never commit the originals.
+resources/
+
+# Local agent-harness scratch state (ruflo / claude-flow). Never ours to ship, and — added
+# 2026-07-29 after a code review found it sitting untracked in `git status` — one `git add -A`
+# away from being committed. `.prettierignore` already skips it; that stops it being FORMATTED,
+# not COMMITTED, which is the risk that actually matters.
+.claude-flow/
+
+# graphify knowledge-graph output (added 2026-07-31 during a CLAUDE.md audit that found it
+# sitting untracked at 7.4MB — same `git add -A` risk as .claude-flow/ above). Derived entirely
+# from source via `graphify update .`, so it would churn on every commit while telling a reviewer
+# nothing. The INPUT config `.graphifyignore` is hand-maintained and stays tracked.
+graphify-out/
+
+# OS / editor cruft (2026-07-29 CI/CD audit). The dev box is Windows (CLAUDE.md), so Thumbs.db
+# and desktop.ini are the ones that actually show up here; .DS_Store covers a macOS clone or
+# contributor. No .vscode/ or .idea/ committed today — blanket-ignored so neither can land by
+# accident; if shared editor settings are ever wanted, add a narrow `!.vscode/settings.json`
+# exception deliberately rather than removing the ignore.
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

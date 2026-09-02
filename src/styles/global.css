@@ -71,10 +71,71 @@ body {
   overflow-x: hidden;
 }
 
+/* Space scene travel mode (PF-07 Phase 4): while flying, only the hero section's WebGL
+   canvas + chrome show - scrollable content sections and the footer are hidden until the
+   user switches back to classic scroll mode. */
+body.ij-travel main section:not(#hero) {
+  display: none !important;
+}
+
+body.ij-travel footer {
+  display: none !important;
+}
+
+/* Space scene classic view (PF-07): the WebGL scene's <space-engine> is position:fixed with
+   z-index:0, mounted inside #hero. Without their own stacking context, these later, plain
+   static-positioned sections would still paint *behind* it per normal CSS stacking order,
+   making them invisible once scrolled into view - confirmed via a live audit where the canvas
+   covered the About section's content entirely despite it being present and visible in the DOM. */
+main > section:not(#hero),
+footer {
+  position: relative;
+  z-index: 1;
+}
+
+/* Mobile responsive pass (design_handoff_mobile_responsive): the mobile menu's mode-toggle
+   entry needs to show the opposite label of HUD's desktop toggle (both flip the same
+   `body.ij-travel` class), and the touch hint only makes sense in travel mode on a narrow
+   viewport - the desktop drag/keyboard instructions it replaces already live inside the
+   now mobile-hidden HUD, so no `md:` gate is needed here beyond the media query itself. */
+body.ij-travel .ij-mode-label-scroll {
+  display: none;
+}
+
+body.ij-travel .ij-mode-label-travel {
+  display: inline;
+}
+
+@media (max-width: 767px) {
+  body.ij-travel #ij-touch-hint {
+    display: block;
+  }
+}
+
+#ij-hero-copy {
+  transition: opacity 0.6s;
+}
+
+body.ij-away #ij-hero-copy {
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* Focus styles for accessibility */
 :focus-visible {
   outline: 2px solid var(--color-gold-400);
   outline-offset: 2px;
+}
+
+/* <space-engine> keyboard-focus outline. Moved here from a runtime-injected <style>
+   element in space-engine.js (_bindKeys) so a hash-based Content-Security-Policy
+   (security.csp in astro.config.mjs) does not have to allow inline <style> injection. */
+space-engine:focus {
+  outline: none;
+}
+space-engine:focus-visible {
+  outline: 2px solid #7986cb;
+  outline-offset: -3px;
 }
 
 /* Reduced motion */
@@ -111,4 +172,260 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-royal-600);
+}
+
+/* Space scene animations (PF-07) - ported from the prototype's <style> block. Only the
+   keyframes actually used by Phases 1-3 are included; float/bounce/pulse/blink/tumble/
+   drift are for the station-sprite/mascot/HUD-cursor chrome added in Phase 4. */
+@keyframes ij-fadein {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ij-land {
+  from {
+    opacity: 0;
+    transform: scale(0.22);
+    filter: blur(10px);
+  }
+  60% {
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes ij-cardin {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ij-foil {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes ij-slidein {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes ij-holo {
+  from {
+    transform: translateY(-4px);
+  }
+  to {
+    transform: translateY(5px);
+  }
+}
+
+@keyframes ij-barin {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes ij-tumble {
+  from {
+    transform: rotate(-7deg);
+  }
+  to {
+    transform: rotate(7deg);
+  }
+}
+
+@keyframes ij-drift {
+  from {
+    transform: translate(0px, 0px);
+  }
+  to {
+    transform: translate(7px, -9px);
+  }
+}
+
+@keyframes ij-float {
+  0%,
+  100% {
+    transform: translateY(0px) rotate(-2deg);
+  }
+  25% {
+    transform: translateY(-8px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-4px) rotate(2deg);
+  }
+  75% {
+    transform: translateY(-12px) rotate(0deg);
+  }
+}
+
+/* AstronautMascot (TR-016): position, transition, and float moved here from the
+   component's former inline style attribute + <style> element, both of which the
+   hash-based CSP blocked (hashes only cover Astro's own bundled styles). The
+   dynamic `top` is set post-hydration as a style property. */
+.astronaut-mascot {
+  top: 200px;
+  transition: top 2s ease-in-out;
+}
+.astronaut-float {
+  animation: ij-float 8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .astronaut-mascot {
+    transition: none;
+  }
+  .astronaut-float {
+    animation: none;
+  }
+}
+
+/* ship-v2 P3 (TR-018): hero copy steps back during warp so the flight reads
+   as the primary event; SpaceScene toggles body.ij-warping from warp state. */
+#ij-hero-copy {
+  transition: opacity 0.6s ease;
+}
+body.ij-warping #ij-hero-copy {
+  opacity: 0.12;
+}
+@media (prefers-reduced-motion: reduce) {
+  #ij-hero-copy {
+    transition: none;
+  }
+}
+
+/* PF-08 F0 (TR-022): landing loading choreography. body.ij-loading ships in
+   the SSR HTML; SpaceScene removes it once the star stream + craft are ready
+   (with grace/fallback timers). The hero copy and WHERE-TO bar fade in. */
+#ij-mission-bar {
+  transition:
+    opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+    top 0.6s ease,
+    bottom 0.6s ease;
+}
+body.ij-loading #ij-hero-copy,
+body.ij-loading #ij-mission-bar {
+  opacity: 0;
+  pointer-events: none;
+}
+/* PF-11 D1.3: the WHERE-TO console REVEALS into its dock with a small rise (fade + 12px, 0.6s,
+   the same "arrival" easing the vista uses) — the settle the launch ascent hands off to. The
+   rise lives only on the console; the hero copy just fades. The `arrival` easing overshoot-free
+   settle is quiet on purpose: the ascent was the spectacle, the console is the tool. */
+body.ij-loading #ij-mission-bar {
+  transform: translateY(12px);
+}
+/* WHERE-TO docks between the ship and the title at the home vista.
+   PF-11 D1.3: formalized to the clamped band the experience review specified
+   (`top: clamp(45vh, 54vh, calc(66vh - <bar height>))`) so the D1.3 ascent reveal and a later
+   `goHome` land the console in the IDENTICAL place — post-launch and post-goHome are one frame. */
+body.ij-travel.ij-at-home #ij-mission-bar {
+  bottom: auto;
+  top: clamp(45vh, 54vh, calc(66vh - 56px));
+}
+/* Mobile travel mode: bottom-docked (a mid-screen input collides with the virtual keyboard).
+   "second third" is a desktop/tablet spec — experience review §D1.6. */
+@media (max-width: 767px) {
+  body.ij-travel.ij-at-home #ij-mission-bar {
+    top: auto;
+    bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+/* PF-11 post-D8 (owner-reported P0, 2026-07-29): during a warp the console LIFTS clear of the
+   WarpOverlay's bottom letterbox bar.
+   THE DEFECT: the bar docks at `bottom-8` (32px) and is ~48px tall, so it occupies y=32..80px.
+   WarpOverlay's bottom letterbox is `h-16` — 64px of OPAQUE #05081a at z-70 against the bar's
+   z-62, and painted later in the DOM. So the entire button row, including `◂ RETURN HOME`,
+   was covered for the whole flight. Because the overlay is `pointer-events-none` the click
+   still landed, so abort WORKED — it was simply invisible in the one state it exists for
+   (ADR-0010: goHome IS the mid-warp abort). The TOP letterbox was accounted for when it
+   shipped (HUD.tsx parks its readouts at `top-[clamp(72px,12vh,78px)]`); the bottom one never
+   got the equivalent treatment, and no test caught it because Playwright's `toBeVisible()`
+   checks CSS/box visibility, not occlusion by a higher-z sibling.
+   WHY THE READOUT MOVED TOO (WarpOverlay.tsx): the fix is forced, not chosen. Clearing the
+   letterbox needs `bottom >= 64`; staying under the readout's old floor needs
+   `bottom + 48 <= 112`. There is no solution, so the readout's floor had to rise with the bar.
+   Reduced motion: `#ij-mission-bar`'s transition block below is already disabled under
+   `prefers-reduced-motion`, so this becomes an instant reposition rather than a slide — the
+   contract holds with no extra rule.
+   `top: auto` is NOT redundant, and the E2E spec caught why: `body.ij-travel.ij-at-home`
+   above sets `top: clamp(45vh,54vh,...)` with `bottom: auto`. `ij-at-home` is cleared by React
+   when the warp starts, but for ONE frame both classes are live — and with only `bottom` set
+   here the element had `top` AND `bottom` simultaneously and stretched to 252px tall instead of
+   its natural ~48px. The doubled selector matches the at-home rule's specificity (two body
+   classes) and, coming later, wins the cascade — so the console's geometry never depends on
+   which class React happens to remove first. */
+body.ij-warping #ij-mission-bar,
+body.ij-travel.ij-warping #ij-mission-bar {
+  top: auto;
+  bottom: clamp(76px, 11vh, 92px);
+}
+@media (prefers-reduced-motion: reduce) {
+  #ij-mission-bar {
+    transition: none;
+  }
+}
+
+/* PF-08 F0: in travel mode the WHERE-TO bar occupies the badge's slot between
+   ship and title — the location badge is redundant there (the HUD shows
+   ORIGIN · SOL-3) and hiding it clears the overlap. */
+body.ij-travel #ij-hero-badge {
+  display: none;
+}
+
+/* No-JS/failed-hydration failsafe: even if SpaceScene never clears ij-loading,
+   the content self-reveals after 9s via CSS animation alone.
+
+   PF-11 D1.2: scoped to :not(.ij-preflight-mounted) — the 9s VALUE is
+   preserved verbatim (per the implementation plan) as the no-JS/hydration-
+   failure timing, but the CONDITION was widened by measurement, not guessed
+   at. PreFlight.tsx now gates the reveal behind a real visitor action
+   (LAUNCH/SKIP INTRO), which can legitimately take longer than 9s under
+   completely normal operation (craft alone is calibrated up to 45s in this
+   repo's own E2E ceilings) — an E2E regression this exact CSS rule caused
+   (craft-ship.spec.ts's warp-travel test: #ij-hero-copy read opacity 1
+   during warp because the failsafe had already force-revealed it out from
+   under a still-showing PreFlight). Scoping to the body class PreFlight sets
+   on mount makes the rule mean what its own comment always claimed: it now
+   fires ONLY when the JS-driven gate never mounted at all (a genuine
+   hydration failure), never merely because a working visitor hasn't chosen
+   LAUNCH yet. */
+@keyframes ij-unhide {
+  to {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+body.ij-loading:not(.ij-preflight-mounted) #ij-hero-copy,
+body.ij-loading:not(.ij-preflight-mounted) #ij-mission-bar {
+  animation: ij-unhide 0.6s ease 9s forwards;
 }

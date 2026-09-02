@@ -1,0 +1,55 @@
+// Ambient types for the celestial catalog data files (celestial-*.js), which are copied
+// verbatim from the prototype and populate these window globals as a side effect of import.
+// See docs/delivery-plan/PF-07-space-portfolio-webgl.md §1 for why they weren't hand-converted.
+
+export interface CelestialFigure {
+  s: [number, number][]; // [ra, dec] star positions
+  l: [number, number][]; // [starIndexA, starIndexB] line segments
+}
+
+export interface CelestialEntry {
+  id: string;
+  n: string; // name
+  d: string; // designation/subtitle
+  t: string; // type
+  r: string; // rarity
+  ra: number;
+  dec: number;
+  ly: number | null;
+  mg: string; // magnitude, display string
+  sp: string; // spectral class / description
+  img: string | null; // relative path under assets/
+  crd?: string | null; // image credit
+  c: string; // hex color
+  con: string | null; // constellation
+  st: [string, string, number][]; // [label, value, barPct]
+  f: string; // field note / fun fact
+  lo: [string, string][] | null; // [culture, text] sky-lore entries
+  fig?: CelestialFigure;
+}
+
+declare global {
+  interface Window {
+    CELESTIAL?: CelestialEntry[];
+    CELESTIAL_BASE?: CelestialEntry[];
+    CELESTIAL_BASE_DONE?: boolean;
+    CELESTIAL_EXTRA_DONE?: boolean;
+    CELESTIAL_COMPLETE?: boolean;
+    CELESTIAL_GAIA_COUNT?: number;
+    CELESTIAL_CLUSTERS_COUNT?: number;
+    CELESTIAL_MINORPLANETS_COUNT?: number;
+    CELESTIAL_NBG_COUNT?: number;
+    CELESTIAL_GD1_COUNT?: number;
+    CELESTIAL_NGC2000_COUNT?: number;
+    CELESTIAL_SATURNMOONS_COUNT?: number;
+    CELESTIAL_MISSINGMOONS_COUNT?: number;
+    CELESTIAL_IMGMAP?: Record<string, [string, string]>;
+    /** PF-11 defect P1 (duplicate-id sub-fix) — see celestial-image-borrow-overlay.js. */
+    CELESTIAL_IMAGE_BORROW_COUNT?: number;
+    CELESTIAL_IMAGE_BORROW_LOG?: { from: string; to: string; sepDeg: number }[];
+    /** PF-11 defect P1 (real DSS2 photo pipeline) — see celestial-dso4-imgmap.js and
+     * scripts/fetch-dso-survey-photos.mjs. */
+    CELESTIAL_DSO4_IMGMAP?: Record<string, [string, string]>;
+    CELESTIAL_DSO4_COUNT?: number;
+  }
+}

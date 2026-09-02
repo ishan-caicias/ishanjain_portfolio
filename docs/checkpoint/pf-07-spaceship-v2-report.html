@@ -1,0 +1,836 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PF-07 Spaceship v2 — Audit & Implementation Plan</title>
+<style>
+  :root {
+    --ground: #f4f5f8;
+    --surface: #ffffff;
+    --surface-2: #eceef4;
+    --ink: #1a2030;
+    --muted: #5a6478;
+    --line: #d8dce6;
+    --accent: #946d14;
+    --accent-soft: rgba(148, 109, 20, 0.12);
+    --valid: #1e7a4d;
+    --valid-soft: rgba(30, 122, 77, 0.12);
+    --void: #b0432f;
+    --void-soft: rgba(176, 67, 47, 0.12);
+    --info: #2f5e96;
+    --info-soft: rgba(47, 94, 150, 0.1);
+    --star: #1a2030;
+    --display: "Bahnschrift", "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+    --body: system-ui, "Segoe UI", sans-serif;
+    --mono: "Cascadia Code", "SF Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0b0e14;
+      --surface: #131826;
+      --surface-2: #1a2133;
+      --ink: #e8ebf2;
+      --muted: #8a93a8;
+      --line: #262e42;
+      --accent: #e8b84b;
+      --accent-soft: rgba(232, 184, 75, 0.13);
+      --valid: #5bc98c;
+      --valid-soft: rgba(91, 201, 140, 0.13);
+      --void: #e06a5a;
+      --void-soft: rgba(224, 106, 90, 0.13);
+      --info: #7fa9d9;
+      --info-soft: rgba(127, 169, 217, 0.12);
+      --star: #e8ebf2;
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f4f5f8;
+    --surface: #ffffff;
+    --surface-2: #eceef4;
+    --ink: #1a2030;
+    --muted: #5a6478;
+    --line: #d8dce6;
+    --accent: #946d14;
+    --accent-soft: rgba(148, 109, 20, 0.12);
+    --valid: #1e7a4d;
+    --valid-soft: rgba(30, 122, 77, 0.12);
+    --void: #b0432f;
+    --void-soft: rgba(176, 67, 47, 0.12);
+    --info: #2f5e96;
+    --info-soft: rgba(47, 94, 150, 0.1);
+    --star: #1a2030;
+  }
+  :root[data-theme="dark"] {
+    --ground: #0b0e14;
+    --surface: #131826;
+    --surface-2: #1a2133;
+    --ink: #e8ebf2;
+    --muted: #8a93a8;
+    --line: #262e42;
+    --accent: #e8b84b;
+    --accent-soft: rgba(232, 184, 75, 0.13);
+    --valid: #5bc98c;
+    --valid-soft: rgba(91, 201, 140, 0.13);
+    --void: #e06a5a;
+    --void-soft: rgba(224, 106, 90, 0.13);
+    --info: #7fa9d9;
+    --info-soft: rgba(127, 169, 217, 0.12);
+    --star: #e8ebf2;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px 96px; }
+
+  /* ---------- header ---------- */
+  header {
+    position: relative;
+    border-bottom: 1px solid var(--line);
+    overflow: hidden;
+  }
+  #stars { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.5; }
+  .head-inner { position: relative; max-width: 880px; margin: 0 auto; padding: 56px 24px 40px; }
+  .eyebrow {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.78rem;
+    color: var(--accent);
+    margin: 0 0 12px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(1.9rem, 4.5vw, 2.7rem);
+    line-height: 1.12;
+    margin: 0 0 10px;
+    text-wrap: balance;
+    letter-spacing: 0.01em;
+  }
+  .sub { color: var(--muted); max-width: 62ch; margin: 0 0 24px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--surface);
+    color: var(--muted);
+  }
+  .chip b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- stat strip ---------- */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin: 32px 0 0;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 14px 16px;
+  }
+  .stat .k {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.68rem;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 4px;
+  }
+  .stat .v { font-family: var(--display); font-size: 1.25rem; line-height: 1.25; }
+  .stat .v.accent { color: var(--accent); }
+  .stat .v.void { color: var(--void); }
+  .stat .v.valid { color: var(--valid); }
+
+  /* ---------- nav ---------- */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--ground);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-inner {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+  }
+  nav a {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.74rem;
+    color: var(--muted);
+    text-decoration: none;
+    padding: 12px 12px 10px;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+  }
+  nav a:hover, nav a:focus-visible { color: var(--ink); }
+  nav a.on { color: var(--accent); border-bottom-color: var(--accent); }
+  nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 56px; scroll-margin-top: 64px; }
+  h2 {
+    font-family: var(--display);
+    font-size: 1.45rem;
+    margin: 0 0 6px;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+  }
+  .sec-eyebrow {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.7rem;
+    color: var(--accent);
+    margin: 0 0 6px;
+  }
+  .lede { color: var(--muted); max-width: 68ch; margin: 0 0 20px; }
+  p { max-width: 68ch; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* ---------- tables ---------- */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  th {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.68rem;
+    color: var(--muted);
+    text-align: left;
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+  }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; background: var(--surface); }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .pill {
+    display: inline-block;
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.66rem;
+    padding: 2px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .pill.valid { color: var(--valid); background: var(--valid-soft); }
+  .pill.void { color: var(--void); background: var(--void-soft); }
+  .pill.partial { color: var(--accent); background: var(--accent-soft); }
+  .pill.info { color: var(--info); background: var(--info-soft); }
+
+  /* ---------- filter ---------- */
+  .filters { display: flex; gap: 8px; margin: 0 0 12px; flex-wrap: wrap; }
+  .filters button {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.7rem;
+    padding: 6px 14px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .filters button.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- cards ---------- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 16px 18px;
+  }
+  .card h3 { font-family: var(--display); font-size: 1rem; margin: 0 0 6px; letter-spacing: 0.02em; }
+  .card p { font-size: 0.9rem; color: var(--muted); margin: 0; }
+  .card .tag {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 8px;
+  }
+
+  /* ---------- decision ---------- */
+  .decision { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 640px) { .decision { grid-template-columns: 1fr; } }
+  .option {
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--surface);
+    padding: 18px 20px;
+  }
+  .option.chosen { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .option h3 { font-family: var(--display); margin: 0 0 2px; font-size: 1.05rem; }
+  .option .verdict-line {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.66rem;
+    margin-bottom: 12px;
+  }
+  .option.chosen .verdict-line { color: var(--accent); }
+  .option:not(.chosen) .verdict-line { color: var(--muted); }
+  .option ul { margin: 0; padding-left: 18px; font-size: 0.9rem; }
+  .option li { margin-bottom: 6px; }
+  .option li:last-child { margin-bottom: 0; }
+
+  /* ---------- phases ---------- */
+  .phase { border-left: 2px solid var(--line); margin-left: 10px; padding: 0 0 8px 0; position: relative; }
+  .phase:last-child { padding-bottom: 0; }
+  .phase summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 10px 8px 10px 24px;
+    position: relative;
+  }
+  .phase summary::-webkit-details-marker { display: none; }
+  .phase summary::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 18px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--ground);
+    border: 2px solid var(--muted);
+  }
+  .phase[open] summary::before { border-color: var(--accent); background: var(--accent); }
+  .phase summary:hover .ph-title, .phase summary:focus-visible .ph-title { color: var(--accent); }
+  .phase summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .ph-num {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--accent);
+    min-width: 2.4em;
+    font-variant-numeric: tabular-nums;
+  }
+  .ph-title { font-family: var(--display); font-size: 1.02rem; letter-spacing: 0.01em; }
+  .ph-meta { font-size: 0.76rem; color: var(--muted); margin-left: auto; white-space: nowrap; }
+  .ph-body { padding: 0 8px 16px 60px; font-size: 0.92rem; }
+  .ph-body p { margin: 0 0 10px; }
+  .ph-body .exit {
+    border-left: 3px solid var(--valid);
+    background: var(--valid-soft);
+    padding: 8px 12px;
+    border-radius: 0 3px 3px 0;
+    font-size: 0.88rem;
+  }
+  .ph-body .exit b { color: var(--valid); font-family: var(--display); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.68rem; }
+  .gate {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 8px 12px;
+    border-radius: 0 3px 3px 0;
+    font-size: 0.88rem;
+    margin-top: 8px;
+  }
+
+  /* ---------- roadmap ---------- */
+  .road { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding: 6px 0; }
+  .road-step {
+    flex: 1;
+    min-width: 150px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 12px 14px;
+    position: relative;
+  }
+  .road-step + .road-step { margin-left: 28px; }
+  .road-step + .road-step::before {
+    content: "→";
+    position: absolute;
+    left: -22px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    font-size: 1rem;
+  }
+  .road-step .k {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.64rem;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 4px;
+  }
+  .road-step .t { font-family: var(--display); font-size: 0.94rem; line-height: 1.3; }
+  .road-step .d { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+  .road-step.done { border-color: var(--valid); }
+  .road-step.done .k { color: var(--valid); }
+
+  /* ---------- license ---------- */
+  .license {
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--surface);
+    padding: 16px 20px;
+    font-size: 0.9rem;
+  }
+  .license .attr {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    background: var(--surface-2);
+    padding: 10px 14px;
+    border-radius: 3px;
+    margin-top: 10px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--muted);
+  }
+  a { color: var(--info); }
+  .foot { margin-top: 64px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.8rem; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+</style>
+
+<header>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <div class="head-inner">
+    <p class="eyebrow">Mission Briefing · PF-07 Spaceship v2</p>
+    <h1>Delivered: Textured Craft, Flight Dynamics &amp; the Road to v3</h1>
+    <p class="sub">
+      The full record: the Codex analysis audit that reset this feature, the six delivered
+      phases (TR-014…TR-020) plus the hull-shading hotfix (TR-021), and the owner-directed
+      PF-08 Flight&nbsp;v3 roadmap — a true 360° flight model and richer exhaust.
+    </p>
+    <div class="chips">
+      <span class="chip">branch <b>feature/PF-07/background-spaceship-v2</b></span>
+      <span class="chip">status <b>DELIVERED 2026-07-18</b></span>
+      <span class="chip">ship <b>Sci-Fi Aircraft | Spaceship Fighter</b> · CC-BY-4.0</span>
+      <span class="chip">next <b>PF-08 Flight v3</b></span>
+    </div>
+    <div class="stats">
+      <div class="stat"><span class="k">Delivery</span><span class="v valid">6/6 phases · TR-014…021</span></div>
+      <div class="stat"><span class="k">Suite</span><span class="v valid">47 unit · 44 E2E green</span></div>
+      <div class="stat"><span class="k">Shell payload</span><span class="v">0.997 MiB / 10 MiB budget</span></div>
+      <div class="stat"><span class="k">Rendering path</span><span class="v accent">In-engine GLB · default-on</span></div>
+    </div>
+  </div>
+</header>
+
+<nav aria-label="Sections">
+  <div class="nav-inner">
+    <a href="#cause" class="on">Root cause</a>
+    <a href="#findings">Findings</a>
+    <a href="#facts">New facts</a>
+    <a href="#decision">Decision</a>
+    <a href="#plan">Plan</a>
+    <a href="#roadmap">Roadmap</a>
+    <a href="#v3">Flight v3</a>
+    <a href="#license">Attribution</a>
+  </div>
+</nav>
+
+<div class="wrap">
+
+  <section id="cause">
+    <p class="sec-eyebrow">01 · Why the implementation failed</p>
+    <h2>Codex analyzed <code>main</code> — the work lives on the feature branch</h2>
+    <p class="lede">
+      Every false claim in the analysis set traces to one error. <code>main</code> still carries
+      the pre-PF-07 starfield site; the space scene, the engine port, and the Astro 7 upgrade all
+      live on <code>feature/PF-07/background-spaceship-v2</code>. An implementation driven by that
+      world model re-integrates a prototype that was already integrated — on top of the finished
+      scene.
+    </p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Codex claim</th><th>On <code>main</code></th><th>On the working branch</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>App is "still the older starfield portfolio" (<code>Starfield.tsx</code>, <code>StarModal.tsx</code>)</td>
+            <td><span class="pill valid">True</span></td>
+            <td><span class="pill void">False</span> — <code>SpaceScene.tsx</code> + 10 space islands shipped Jul 8–10</td>
+          </tr>
+          <tr>
+            <td>No <code>space-engine</code> in <code>src/</code>; "integration step still needed"</td>
+            <td><span class="pill valid">True</span></td>
+            <td><span class="pill void">False</span> — 1,469-line verbatim port at <code>src/lib/space-engine.js</code>; PF-07 phases 1–6 complete</td>
+          </tr>
+          <tr>
+            <td>"The previously reported Astro 7 upgrade was incorrect" — repo is Astro 5 / TS 5</td>
+            <td><span class="pill valid">True</span></td>
+            <td><span class="pill void">False</span> — Astro <code>^7.0.7</code>, TS <code>~6.0.3</code> since TR-010 (Jul 13)</td>
+          </tr>
+          <tr>
+            <td>Option B hybrid "implemented and measured" (GLBs, quality adapter, 7 phase reports)</td>
+            <td colspan="2"><span class="pill void">Void everywhere</span> — rolled back; all phase-report links dangle, no GLB in <code>public/assets/</code>, <code>three</code> not a dependency</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="findings">
+    <p class="sec-eyebrow">02 · Document-by-document verdicts</p>
+    <h2>What survives, what is void</h2>
+    <p class="lede">
+      Each document now carries a dated correction banner in the repo; original Codex text is
+      preserved for provenance. Filter by verdict:
+    </p>
+    <div class="filters" role="group" aria-label="Filter findings">
+      <button class="on" data-f="all">All</button>
+      <button data-f="valid">Valid</button>
+      <button data-f="partial">Partial</button>
+      <button data-f="void">Void</button>
+    </div>
+    <div class="tbl-wrap">
+      <table id="verdicts">
+        <thead><tr><th>Document</th><th>Verdict</th><th>Audit note</th></tr></thead>
+        <tbody>
+          <tr data-v="valid">
+            <td>Space motion realism audit</td>
+            <td><span class="pill valid">Valid — high value</span></td>
+            <td>Analyzed the prototype engine, byte-identical to the shipped one. All 6 findings and the top-4 improvement ranking carry over 1:1. Primary design input for v2.</td>
+          </tr>
+          <tr data-v="valid">
+            <td>Sketchfab ship survey</td>
+            <td><span class="pill valid">Valid</span></td>
+            <td>License and geometry analysis spot-checked; OBJ stats (2,923 v / 2,834 f) reproduced exactly. Rejections (CC BY-NC, Everspace provenance, 540k tris) sound. Ship choice stands.</td>
+          </tr>
+          <tr data-v="partial">
+            <td>Rendering stack options</td>
+            <td><span class="pill partial">Partial</span></td>
+            <td>Options A/B/C trade-off analysis holds. "Current state" describes <code>main</code>; the "validated delivery decision" section describes rolled-back work and is void.</td>
+          </tr>
+          <tr data-v="partial">
+            <td>Validation record</td>
+            <td><span class="pill partial">Partial</span></td>
+            <td>Third-party model validation table remains useful. Repo findings and package baseline validated the wrong branch; texture policy and release measurements describe deleted work.</td>
+          </tr>
+          <tr data-v="void">
+            <td>Repo state &amp; space scene scope</td>
+            <td><span class="pill void">Void</span></td>
+            <td>Accurate description of <code>main</code>, which makes it wrong for delivery: the "prototype integration first" conclusion is inverted on the working branch.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="facts">
+    <p class="sec-eyebrow">03 · Established by this audit</p>
+    <h2>Four facts the plan must not miss</h2>
+    <div class="cards">
+      <div class="card">
+        <span class="tag">GLB internals</span>
+        <h3>Single static mesh</h3>
+        <p>1 mesh · 1 primitive · 1 material · 0 animations · 0 skins · 31,015 vertices · 4 PNG textures. No runtime animation system needed — travel, banking, and thrusters stay procedural in the engine.</p>
+      </div>
+      <div class="card">
+        <span class="tag">space-engine.js:421</span>
+        <h3>Context has no depth buffer</h3>
+        <p>WebGL1 created with <code>depth: false</code> — and a context's depth setting cannot change after creation. A self-occluding textured ship requires <code>depth: true</code> at the creation line, with depth testing enabled only during the ship pass.</p>
+      </div>
+      <div class="card">
+        <span class="tag">constraint retired</span>
+        <h3>Byte-identical era ends</h3>
+        <p>The verbatim-port constraint was a PF-07 Phase 1 verification device. Ship v2 deliberately forks the engine; the file comes under ESLint/Prettier in the same change, with an ADR recording the fork point.</p>
+      </div>
+      <div class="card">
+        <span class="tag">budget math</span>
+        <h3>Page counts ≠ GLB counts</h3>
+        <p>Sketchfab lists 18.2k vertices; the GLB accessor holds 31,015 (seam splitting for normals/UVs). Raw download is 43.5 MB. All budgets must be computed from the real GLB, not the model page.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="decision">
+    <p class="sec-eyebrow">04 · Rendering decision</p>
+    <h2>In-engine GLB renderer, with a gated Three.js fallback</h2>
+    <p class="lede">
+      Codex recommended the Three.js hybrid (Option B). The audit refines this: the asset is one
+      static mesh, and the realism audit's #1 fix — world-space ship placement — is native when
+      the ship lives in the same context, projection, and frame loop as the stars.
+    </p>
+    <div class="decision">
+      <div class="option chosen">
+        <h3>Option A+ · In-engine GLB renderer</h3>
+        <div class="verdict-line">Chosen — primary path</div>
+        <ul>
+          <li>~200–300 lines against existing engine shader infrastructure</li>
+          <li>Zero new runtime dependencies</li>
+          <li>One GL context — ship shares projection, depth, and frame loop with the stars</li>
+          <li>Purpose-built loader for one known asset shape, not a general glTF parser</li>
+          <li>Lighting: baseColor × baked AO + emissive + directional/rim, tone-mapped</li>
+        </ul>
+      </div>
+      <div class="option">
+        <h3>Option B · Three.js ship layer</h3>
+        <div class="verdict-line">Fallback — gated at Phase 1 exit</div>
+        <ul>
+          <li>Battle-tested glTF loading and PBR out of the box</li>
+          <li>Costs ~150 KB gz + a second canvas/context for a single mesh</li>
+          <li>Per-frame camera state sync between two rendering worlds</li>
+          <li>Makes world-space integration with the custom starfield harder, not easier</li>
+          <li>Trigger: Phase 1 proof misses its visual-quality acceptance — Phase 0 output carries over unchanged</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="plan">
+    <p class="sec-eyebrow">05 · Implementation record</p>
+    <h2>Six phases planned — six delivered, every exit gate passed</h2>
+    <p class="lede">
+      All complete: P0 <span class="pill valid">TR-014</span> · P1 <span class="pill valid">TR-015 + ADR-0002</span>
+      · P2 <span class="pill valid">TR-017</span> · P3 <span class="pill valid">TR-018</span>
+      · P4 <span class="pill valid">TR-019</span> · P5 <span class="pill valid">TR-020</span>,
+      plus the post-delivery hull-shading hotfix <span class="pill valid">TR-021</span>.
+      Highlights along the way: meshopt adopted at P0's measurement gate, four defects caught by
+      the new E2E during P1, the owner's 2.5× center-stage revision at P5, and the default-on
+      rollout with an accessible quality selector. Original phase specs preserved below.
+    </p>
+
+    <details class="phase" open>
+      <summary><span class="ph-num">P0</span><span class="ph-title">Asset pipeline (offline)</span><span class="ph-meta">gltf-transform</span></summary>
+      <div class="ph-body">
+        <p>Repeatable script: prune → weld → quantize (if budget requires) → texture resize + WebP.
+        Outputs committed to <code>public/assets/craft/</code>: <code>sci-fi-fighter-1k.glb</code> and
+        <code>sci-fi-fighter-2k.glb</code>. Add <code>**/*.glb</code> to LFS rules. Capture the exact
+        attribution line from <code>license.txt</code>.</p>
+        <div class="exit"><b>Exit</b> · 1K ≤ 0.6 MiB and 2K ≤ 1.2 MiB on disk; script re-runs deterministically.</div>
+      </div>
+    </details>
+
+    <details class="phase">
+      <summary><span class="ph-num">P1</span><span class="ph-title">In-engine ship renderer (flagged)</span><span class="ph-meta">the Option B gate</span></summary>
+      <div class="ph-body">
+        <p>Context creation becomes <code>depth: true</code>. Purpose-built loader (JSON chunk + BIN
+        chunk + embedded textures) and a ship pass with depth testing enabled only for its draws.
+        Feature flag reuses the PF-07 query-param rollback pattern — flag off leaves the wireframe
+        path untouched.</p>
+        <div class="exit"><b>Exit</b> · Textured ship at parity positions at 60 fps desktop; flag-off pixel-identical to today; full suite green.</div>
+        <div class="gate">⚖ If visual quality misses acceptance here, switch to Option B without discarding Phase 0.</div>
+      </div>
+    </details>
+
+    <details class="phase">
+      <summary><span class="ph-num">P2</span><span class="ph-title">World-space flight staging</span><span class="ph-meta">realism fixes #1 · #3</span></summary>
+      <div class="ph-body">
+        <p>Replace the NDC post-shift with a view-space transform. Re-express scroll-state targets
+        (home / parked / corner escort) as world-space poses. Add camera lag, overshoot, and settle.</p>
+        <div class="exit"><b>Exit</b> · Ship occupies the star scene's space; motion has perceptible mass; travel + mobile E2E still pass.</div>
+      </div>
+    </details>
+
+    <details class="phase">
+      <summary><span class="ph-num">P3</span><span class="ph-title">Thrusters &amp; arrival presence</span><span class="ph-meta">realism fixes #2 · #4 · #5</span></summary>
+      <div class="ph-body">
+        <p>Layered exhaust: nozzle core + cone plume + phase-dependent flare + acceleration jitter.
+        Arrival cues: target-tinted rim light, plume response, quieter overlays during travel —
+        honouring <code>prefers-reduced-motion</code>.</p>
+        <div class="exit"><b>Exit</b> · Warp in/out reads as thrust events; overlays recede during flight; accessibility specs pass.</div>
+      </div>
+    </details>
+
+    <details class="phase">
+      <summary><span class="ph-num">P4</span><span class="ph-title">Adaptive quality &amp; fallback parity</span><span class="ph-meta">1K / 2K tiers</span></summary>
+      <div class="ph-body">
+        <p>Tier selection via GPU tier, <code>saveData</code>, <code>deviceMemory</code>, viewport —
+        plus an accessible manual override. The audited policy design was sound; the rolled-back
+        implementation is not reused. No-WebGL DOM fallback verified unchanged.</p>
+        <div class="exit"><b>Exit</b> · Both tiers exercised in tests; fallback parity confirmed.</div>
+      </div>
+    </details>
+
+    <details class="phase">
+      <summary><span class="ph-num">P5</span><span class="ph-title">Verify · harden · release</span><span class="ph-meta">blocking gates</span></summary>
+      <div class="ph-body">
+        <p>New unit/E2E coverage for flag, tiers, credits. Shell payload budget check (excluding
+        GLB). Credits panel gains the CC-BY-4.0 attribution. TR report, engine-fork ADR,
+        delivery-plan status flip, PR.</p>
+        <div class="exit"><b>Exit</b> · READY TO PROCEED verdict; rollback documented (flag off = wireframe).</div>
+      </div>
+    </details>
+  </section>
+
+  <section id="roadmap">
+    <p class="sec-eyebrow">06 · Roadmap</p>
+    <h2>One branch, one PR, one feature</h2>
+    <p class="lede">
+      <code>main</code> still serves the pre-PF-07 starfield site. This branch is the delivery
+      vehicle for everything since.
+    </p>
+    <div class="road">
+      <div class="road-step done">
+        <span class="k">Delivered</span>
+        <span class="t">PF-07 scene + stack upgrade</span>
+        <div class="d">TR-001…TR-012 · Astro 7 · 8 unit + 30 E2E green</div>
+      </div>
+      <div class="road-step done">
+        <span class="k">Delivered</span>
+        <span class="t">Ship v2 · P0 → P5 + hotfix</span>
+        <div class="d">Textured GLB default-on, world-space flight, thrusters, adaptive tiers, sRGB fix (TR-014…021)</div>
+      </div>
+      <div class="road-step">
+        <span class="k">You are here</span>
+        <span class="t">Commit · PR → main · Deploy</span>
+        <div class="d">Owner actions; then the post-deploy checklist (Netlify GLB binary check, real-device perf)</div>
+      </div>
+      <div class="road-step">
+        <span class="k">Next build</span>
+        <span class="t">PF-08 Flight v3</span>
+        <div class="d">True 360° flight model, chase camera, realistic exhaust — see section 08</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="v3">
+    <p class="sec-eyebrow">08 · Next — PF-08 Flight v3</p>
+    <h2>From choreographed hero prop to a ship that truly flies</h2>
+    <p class="lede">
+      Owner direction after the v2 review: travel still reads as linear — the camera flies
+      while the ship holds screen stations. v3 inverts the model: the <em>ship</em> gets
+      orientation, thrust, and velocity in the scene's real 360° coordinate space, and the
+      camera becomes a chase observer. Plus a realistic layered exhaust and further hull
+      fidelity. Full plan: <code>docs/delivery-plan/PF-08-flight-v3.md</code>.
+    </p>
+    <div class="cards">
+      <div class="card">
+        <span class="tag">F0 · fidelity foundation</span>
+        <h3>Hull &amp; light</h3>
+        <p>sRGB/tone pipeline ✓ shipped early as the TR-021 hotfix (the "opaque white" hull was a tone-curve bleaching bug — texture means measured 71–79/255, a dark blue-gray). Next: relight, engine-glow cast on the rear hull, star bloom.</p>
+      </div>
+      <div class="card">
+        <span class="tag">F1 · flight state</span>
+        <h3>The ship gets physics</h3>
+        <p>Orientation quaternion + angular velocity, thrust vector, integrated velocity — the ship turns toward a destination's real RA/Dec direction and burns along it. Flip-and-burn happens on the true travel vector.</p>
+      </div>
+      <div class="card">
+        <span class="tag">F2 · 360° choreography</span>
+        <h3>Chase camera</h3>
+        <p>During warp the camera detaches and chases with spring offset and look-ahead; free-look drag stays live mid-flight. Arrivals become decelerating orbit-ins, from any direction to any direction.</p>
+      </div>
+      <div class="card">
+        <span class="tag">F3 · exhaust realism</span>
+        <h3>Real propulsion</h3>
+        <p>Noise-scrolled plume texture, white-hot core in a diesel-orange sheath, turbulence from acceleration, heat shimmer, ember particles on burn transitions. Tier-gated so mobile keeps the light version.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="license">
+    <p class="sec-eyebrow">07 · Attribution obligation</p>
+    <h2>CC-BY-4.0 — carried into the credits panel at P5</h2>
+    <div class="license">
+      <strong>Sci-Fi Aircraft | Spaceship Fighter</strong> by valterjherson1 · commercial use
+      allowed · author must be credited, with license link and an indication of changes
+      ("optimized" note for the 1K/2K conversions).
+      <div class="attr">This work is based on "Sci-Fi Aircraft | Spaceship Fighter" (https://sketchfab.com/3d-models/sci-fi-aircraft-spaceship-fighter-99c1d15965c74f3aa7b5999e2d4e42e1) by valterjherson1 (https://sketchfab.com/valterjherson1) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)</div>
+    </div>
+  </section>
+
+  <p class="foot">
+    Audit, delivery &amp; v3 plan: Orion sessions, 2026-07-17 → 2026-07-18 · Sources on disk:
+    <code>docs/analysis/2026-07-17-codex-analysis-audit.md</code> ·
+    <code>docs/delivery-plan/PF-07-spaceship-v2.md</code> ·
+    <code>docs/delivery-plan/PF-08-flight-v3.md</code> ·
+    TR-014…TR-021 in <code>docs/test-reports/</code>
+  </p>
+</div>
+
+<script>
+  // Starfield header — static field, gentle twinkle unless reduced motion.
+  (function () {
+    const cv = document.getElementById("stars");
+    const ctx = cv.getContext("2d");
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let stars = [];
+    function seed() {
+      const r = cv.getBoundingClientRect();
+      cv.width = r.width * devicePixelRatio;
+      cv.height = r.height * devicePixelRatio;
+      stars = Array.from({ length: Math.floor(r.width / 6) }, () => ({
+        x: Math.random() * cv.width,
+        y: Math.random() * cv.height,
+        s: (Math.random() * 1.4 + 0.4) * devicePixelRatio,
+        p: Math.random() * Math.PI * 2,
+      }));
+    }
+    function draw(t) {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      const col = getComputedStyle(document.documentElement).getPropertyValue("--star").trim();
+      ctx.fillStyle = col;
+      for (const st of stars) {
+        ctx.globalAlpha = reduced ? 0.5 : 0.3 + 0.35 * (1 + Math.sin(t / 1400 + st.p)) / 2;
+        ctx.fillRect(st.x, st.y, st.s, st.s);
+      }
+      ctx.globalAlpha = 1;
+      if (!reduced) requestAnimationFrame(draw);
+    }
+    seed();
+    addEventListener("resize", () => { seed(); if (reduced) draw(0); });
+    new MutationObserver(() => { if (reduced) draw(0); })
+      .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    if (reduced) draw(0); else requestAnimationFrame(draw);
+  })();
+
+  // Verdict filter
+  (function () {
+    const btns = document.querySelectorAll(".filters button");
+    const rows = document.querySelectorAll("#verdicts tbody tr");
+    btns.forEach((b) =>
+      b.addEventListener("click", () => {
+        btns.forEach((x) => x.classList.remove("on"));
+        b.classList.add("on");
+        const f = b.dataset.f;
+        rows.forEach((r) => { r.style.display = f === "all" || r.dataset.v === f ? "" : "none"; });
+      })
+    );
+  })();
+
+  // Active section highlight
+  (function () {
+    const links = [...document.querySelectorAll("nav a")];
+    const secs = links.map((a) => document.querySelector(a.getAttribute("href")));
+    const obs = new IntersectionObserver(
+      (es) => {
+        es.forEach((e) => {
+          if (e.isIntersecting) {
+            links.forEach((l) => l.classList.toggle("on", l.getAttribute("href") === "#" + e.target.id));
+          }
+        });
+      },
+      { rootMargin: "-20% 0px -70% 0px" }
+    );
+    secs.forEach((s) => s && obs.observe(s));
+  })();
+</script>

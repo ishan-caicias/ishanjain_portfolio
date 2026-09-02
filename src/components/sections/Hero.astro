@@ -1,31 +1,34 @@
 ---
-import Starfield from "@/components/islands/Starfield";
+import SpaceScene from "@/components/islands/SpaceScene";
 import AstronautMascot from "@/components/islands/AstronautMascot";
-import StarModal from "@/components/islands/StarModal";
 ---
 
 <section
   id="hero"
-  class="relative flex min-h-screen items-center justify-center overflow-hidden px-6"
+  class="relative flex min-h-screen flex-col items-center justify-end overflow-hidden px-6"
   aria-label="Introduction"
 >
-  <!-- Starfield background -->
-  <div class="absolute inset-0 -z-10">
-    <Starfield client:load />
-  </div>
+  <!-- Interactive WebGL space scene: 168,959 real Hipparcos/Gaia/SDSS objects, warp travel
+       between sections. Fixed-position, covers the full viewport regardless of where it's
+       mounted in the DOM - see PF-07 delivery plan. -->
+  <SpaceScene client:load />
 
   <!-- Astronaut (hidden on mobile) -->
   <div class="pointer-events-none absolute inset-0 hidden md:block">
     <AstronautMascot client:idle />
   </div>
 
-  <!-- Star Modal (renders when star is clicked) -->
-  <StarModal client:idle />
-
   <!-- Content -->
-  <div class="relative z-10 mx-auto max-w-3xl text-center">
+  <!-- PF-08 F0 landing layout (TR-022): the ship owns the upper viewport; the
+       copy sits below it in a wide, two-line-max band. Hidden while
+       body.ij-loading (SpaceScene clears it when the scene is ready). -->
+  <div
+    id="ij-hero-copy"
+    class="relative z-10 mx-auto mt-auto max-w-6xl pb-14 text-center"
+  >
     <div
-      class="mb-6 inline-flex items-center gap-2 rounded-full border border-royal-700/50 bg-surface-elevated/80 px-4 py-1.5 text-sm text-text-muted backdrop-blur-sm"
+      id="ij-hero-badge"
+      class="mb-4 inline-flex items-center gap-2 rounded-full border border-royal-700/50 bg-surface-elevated/80 px-4 py-1.5 text-sm text-text-muted backdrop-blur-sm"
     >
       <span
         class="inline-block h-2 w-2 rounded-full bg-pine-500 animate-pulse"
@@ -34,25 +37,35 @@ import StarModal from "@/components/islands/StarModal";
     </div>
 
     <h1
-      class="font-heading text-4xl font-bold leading-tight text-text-primary md:text-6xl"
+      class="font-heading text-3xl font-bold leading-tight text-text-primary md:whitespace-nowrap md:text-5xl"
     >
-      Reliable systems,
-      <span class="block text-gold-400">thoughtful products.</span>
+      Reliable systems, <span class="text-gold-400">thoughtful products.</span>
     </h1>
 
     <p
-      class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-text-muted md:text-xl"
+      class="mx-auto mt-4 max-w-4xl text-lg leading-relaxed text-text-muted md:text-xl"
     >
-      I’m a Sydney-based software engineer with a product mindset specializing in .NET, event-driven architectures,
-      and distributed systems. Recently, my focus has been in orchestrating high-stakes backend systems, with a
-      domain drive approach whilst optimizing databases, building fault-tolerant microservices,
-      and keeping production rock-solid.
+      Sydney-based software engineer with a product mindset — .NET, event-driven
+      architectures, and distributed systems. I build fault-tolerant backends
+      and keep production rock-solid.
     </p>
 
     <p
       class="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-text-dim md:text-base"
     >
       C# / .NET · AWS · distributed systems · APIs · testing · safe delivery
+    </p>
+
+    <!-- Mobile touch hint (design_handoff_mobile_responsive): replaces the desktop drag/
+         keyboard instructions (which live in the now mobile-hidden HUD) with touch-appropriate
+         copy. Shown only on mobile while in travel mode - see the body.ij-travel rule in
+         global.css. -->
+    <p
+      id="ij-touch-hint"
+      class="mt-4 hidden font-mono text-[11px] tracking-[0.12em] text-royal-300"
+      aria-hidden="true"
+    >
+      DRAG TO LOOK AROUND · TAP A CRAFT TO TRAVEL
     </p>
 
     <div

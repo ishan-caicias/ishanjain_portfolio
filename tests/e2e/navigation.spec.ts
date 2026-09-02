@@ -13,7 +13,9 @@ test.describe("Navigation", () => {
     const hero = page.locator("#hero");
     await expect(hero).toBeVisible();
     await expect(hero).toContainText("Reliable systems");
-    await expect(hero).toContainText("Product-minded software engineer");
+    await expect(hero).toContainText(
+      "software engineer with a product mindset",
+    );
   });
 
   test("navigation links are visible on desktop", async ({ page }) => {
@@ -38,7 +40,14 @@ test.describe("Navigation", () => {
     ).toBeVisible();
   });
 
-  test("clicking nav link scrolls to section", async ({ page }) => {
+  test("clicking nav link scrolls to section in classic view", async ({
+    page,
+  }) => {
+    // The space scene defaults to travel mode (nav links warp to a station
+    // instead of scrolling) - switch to classic view first to exercise the
+    // plain-scroll navigation path. See PF-07 delivery plan Phase 4/5.
+    await page.getByRole("button", { name: /CLASSIC VIEW/ }).click();
+
     const experienceLink = page
       .getByRole("navigation")
       .locator("ul")
@@ -83,7 +92,7 @@ test.describe("Navigation", () => {
   test("credibility cards render", async ({ page }) => {
     const aboutSection = page.locator("#about");
     await expect(aboutSection).toContainText(".NET Microservices");
-    await expect(aboutSection).toContainText("AWS Cloud Infrastructure");
+    await expect(aboutSection).toContainText("AWS & Cloud Platform");
     await expect(aboutSection).toContainText("Production Ownership");
   });
 

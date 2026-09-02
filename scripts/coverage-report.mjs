@@ -67,7 +67,7 @@ function aggregateFromFinal(data) {
     coveredLines: 0,
   };
 
-  for (const [file, entry] of Object.entries(data)) {
+  for (const entry of Object.values(data)) {
     if (!entry || typeof entry !== "object") continue;
     const s = entry.s;
     const f = entry.f;
