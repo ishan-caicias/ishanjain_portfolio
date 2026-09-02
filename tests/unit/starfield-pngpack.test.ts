@@ -70,7 +70,9 @@ const REAL_WHITE_DWARF_ROWS = [
 ];
 
 function magToByte(mag: number): number {
-  return ((12.5 - mag) / 14) * 255;
+  // inverse of: mag = 21.5 - 32*t + 9*t^2, t = byte/255 (PF-11 P2b rescale)
+  const t = (32 - Math.sqrt(1024 - 36 * (21.5 - mag))) / 18;
+  return t * 255;
 }
 function colourToByte(bpRp: number): number {
   const lo = -0.5;
@@ -123,29 +125,38 @@ describe("starfield-pngpack: Track B encoder", () => {
     }
   });
 
-  // REAL FINDING (not assumed going in): every one of the 5 real sample white dwarfs is
-  // fainter than magnitude 12.5, the faintest value the shared byte format can represent
-  // (`mag = 12.5 - byte/255*14`, calibrated for the naked-eye Hipparcos+Gaia-deep population).
-  // All 5 raw byte computations come out negative (-106.7 to -141.1) and clamp to 0, which
-  // decodes back to exactly 12.5 — not the source magnitude. This is the format doing its
-  // documented job (clamping out-of-range input), not a pipeline defect: reusing
-  // star-catalog.ts's exact contract, unmodified, is what C0 requires (Track B "follows the
-  // proven pattern exactly rather than inventing a second format"). The consequence is real
-  // and worth carrying into C1: white dwarfs sharing this byte format render at the format's
-  // faintest bucket, indistinguishable from each other by brightness, unless a future
-  // per-population magnitude remapping is designed — a rendering-integration decision, not a
-  // pipeline-mechanism one, and out of scope for proving Track B works here.
-  it("documents the real limitation: this magnitude byte format cannot represent white-dwarf-faint magnitudes", () => {
-    for (const row of REAL_WHITE_DWARF_ROWS) {
+  // PF-11 P2b (2026-09-02) INTENTIONALLY REWRITES the test this comment used to introduce —
+  // CLAUDE.md #15: named and justified here, not silently patched. The original test pinned
+  // P2b's own bug as correct behaviour: under the OLD format (`mag = 12.5 - byte/255*14`, a
+  // 14-mag range floored at mag 12.5), all 5 real sample white dwarfs computed a negative raw
+  // byte (-106.7 to -141.1) and clamped to 0 — the entire real eDR3 white-dwarf population
+  // (real G mag 8.5-21.0, median 19.8) collapsed to one indistinguishable floor byte. The fix
+  // (P2b) replaces that formula with a quadratic that keeps the bright anchor/slope fixed while
+  // extending the faint anchor from mag 12.5 to mag 21.5 — see star-catalog.ts's decode comment
+  // for the full derivation. This test now asserts the FIXED behaviour: the same 5 real samples
+  // decode to a spread of distinct, non-zero, non-clamped bytes. (Two of the five — rows 1 and
+  // 4 below — do land on the SAME byte, 10; their real magnitudes, 20.219 and 20.245, are
+  // themselves nearly identical to two decimal places, an honest property of the data at this
+  // byte format's resolution, not a test bug.)
+  it("no longer saturates: real white-dwarf magnitudes now decode to a spread of distinct bytes", () => {
+    const expectedBytes = [10, 17, 26, 10, 22]; // computed directly from the new inverse formula
+    for (let i = 0; i < REAL_WHITE_DWARF_ROWS.length; i++) {
+      const row = REAL_WHITE_DWARF_ROWS[i];
       const raw = magToByte(row.phot_g_mean_mag);
-      expect(raw).toBeLessThan(0); // every real sample falls below the format's floor
-      expect(clampByte(raw)).toBe(0); // clamps to the faintest representable byte
+      expect(raw).toBeGreaterThan(0); // no longer falls below the format's floor
+      const byte = clampByte(raw);
+      expect(byte).toBeGreaterThan(0); // no longer clamps to the faintest representable byte
+      expect(byte).toBe(expectedBytes[i]);
     }
+    // Not all 5 collapse to the same byte — the population is now differentiable by brightness,
+    // the whole point of the rescale (contrast with the old formula's single-byte collapse).
+    expect(new Set(expectedBytes).size).toBeGreaterThan(1);
   });
 
   it("round-trips faithfully for a magnitude that DOES fall inside the format's range", () => {
-    // Proves the mechanism itself is correct — the limitation above is about this real
-    // population's magnitude range, not a bug in the pack/decode byte arithmetic.
+    // Proves the mechanism itself is correct — separate from whether any particular real
+    // population's magnitude range fits inside the format (which, post-P2b, all 5 real samples
+    // above now do too).
     const brightRecord = {
       ...toRecord(REAL_WHITE_DWARF_ROWS[0]),
       magByte: magToByte(5.0),
@@ -155,7 +166,8 @@ describe("starfield-pngpack: Track B encoder", () => {
       new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.length),
     ]);
     const decodedByte = field.meta[0] * 255;
-    const decodedMag = 12.5 - (decodedByte / 255) * 14;
+    const t = decodedByte / 255;
+    const decodedMag = 21.5 - 32 * t + 9 * t * t; // PF-11 P2b rescale — mirrors the production decoder
     expect(decodedMag).toBeCloseTo(5.0, 1);
   });
 

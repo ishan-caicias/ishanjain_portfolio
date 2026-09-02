@@ -131,8 +131,18 @@ export const assets = {
    * the 8 magnitude-sorted chunks of the Gaia DR3 Tiny background field (2,439,417 stars post
    * position-crossmatch dedup against the shipped Hipparcos base field — see ADR-0012 §3),
    * 36,791,591 bytes (35.09 MB) real measured total on disk. Never boot-critical: fetch-on-enable
-   * only, through the D9 Render Console. Measured 291.89 MB. */
-  totalMB: 291.9,
+   * only, through the D9 Render Console. Measured 291.89 MB.
+   *
+   * RAISED 291.9 -> 294.5, 2026-09-02 (PF-11 defects P1/P2a/P2b, real-device-pass follow-up) —
+   * three independent, deliberate additions landed in the same pass: the Sun's texture (P2a,
+   * +0.96 MB, see `groupsMB.planets`), 25 new CDS DSS2 survey-plate photos for previously
+   * photo-less NGC/cluster objects under `assets/dso4/` (P1, +1.06 MB — see `groupsMB.dso4`,
+   * newly added below), and the white-dwarf magnitude rescale (P2b) regenerating `sdss18.png`
+   * and the 8 `gaia-tiny-*.png` chunks under the new byte-encoding formula, which grew
+   * `assets/(root)` by ~0.4 MB (see `groupsMB.(root)`'s entry of the same date) even though no
+   * new files or records were added — only the per-row byte values changed. Measured 294.46 MB;
+   * 0.04 MB headroom restored. */
+  totalMB: 294.5,
 
   /** The largest single file. Attribution, not a second total: a 45 MB asset appearing where the
    * previous maximum was 8 MB is a different kind of event from the total drifting up by 45 MB
@@ -176,18 +186,37 @@ export const assets = {
     // RAISED 169.5 -> 170.0, 2026-07-23 (PF-11 D6.4, TR-088) — Earth's night lights returning at
     // base + high, measured 0.25 MB total (0.05 + 0.20). See `totalMB` for why the earlier
     // ratchet-down that removed them no longer applies.
-    planets: 170.0,
+    // RAISED 170.0 -> 170.6, 2026-09-02 (PF-11 defect P2a, TR pending) — the Sun had a real
+    // catalog entry and real sunDirectionFrom() geometry but no texture at all, so it fell
+    // through to the 110px procedural star beacon. First PLANET_SOURCES entry sourced from
+    // Solar System Scope rather than the local hi-res-textures pack (which has no Sun map —
+    // see build-planet-textures.mjs's PACK_RECKONING header note); base + high tiers only, no
+    // ultra. Measured sun-surface-base.jpg + sun-surface-high.jpg = 0.9623 MB
+    // (0.2313 + 0.7311); planets group measured 170.5213 MB.
+    planets: 170.6,
     // RAISED 59.7 -> 60.0, 2026-07-29 (PF-11 D6.2 + D6.6, TR-108/109) — see `totalMB`'s entry
     // of the same date for the two causes (asteroids-dr3.png reframe, atlas.jpg's 3 new
     // moon cells); both land in this group. Measured 59.87 MB; 0.13 MB headroom restored.
     // RAISED 60.0 -> 95.0, 2026-07-29 (PF-11 D8, ADR-0012, TR-114) — the 8 gaia-tiny-*.png
     // chunks (35.09 MB, loose files directly under public/assets, same as every other
     // top-level catalog PNG). Measured 94.96 MB.
-    "(root)": 95.0,
+    // RAISED 95.0 -> 95.6, 2026-09-02 (PF-11 defect P2b, white-dwarf magnitude rescale) —
+    // regenerating `sdss18.png` and the 8 `gaia-tiny-*.png` chunks under the new byte-encoding
+    // formula changed their PNG-compressed size on disk (same effect as `layerBytes.sdssField`/
+    // `.gaiaTiny` above: real per-row magnitude bytes now spread across the format's full range
+    // instead of clustering near one value, which compresses slightly less tightly). Record
+    // counts unchanged on both. Measured 95.51 MB.
+    "(root)": 95.6,
     dso3: 15.0,
     dso2: 7.2,
     dso: 3.9,
     craft: 1.5,
+    // ADDED 2026-09-02 (PF-11 defect P1, image-fallback real-photo sourcing) — 25 new CDS DSS2
+    // survey-plate photos (`assets/dso4/`) for previously photo-less NGC2000/cluster objects,
+    // fetched via `scripts/fetch-dso-survey-photos.mjs`. Was flagged unbudgeted by
+    // `check-bundle-budgets.mjs`'s own INFO note; gating it now per that suggestion. Measured
+    // 1.06 MB.
+    dso4: 1.1,
   },
 };
 
@@ -204,16 +233,35 @@ export const assets = {
  * (`render-layers.test.ts`) asserts these against both `LAYERS` and the real files on disk, so
  * a future asset regen that changes a size either updates both sides here or fails loudly.
  *
+ * `bonusStars` RE-MEASURED 2026-09-02 (PF-11 P2b, white-dwarf magnitude rescale): regenerating
+ * `whitedwarfs-edr3.png` and `cns5.png` under the new byte-encoding formula (the real per-row
+ * magnitude bytes now spread across the format's full range instead of clustering near one
+ * value) changed their PNG-compressed size on disk — 5,415,687 -> 5,581,501 and 79,027 ->
+ * 80,338 respectively; `oortcloud.png` and `clusters-bg.png` (uniform-byte layers, not
+ * per-row) came out byte-identical in size. This is exactly the "future asset regen" case the
+ * paragraph above names — updating this constant is what keeps `render-layers.test.ts`'s
+ * on-disk assertion (and `npm run budget:check`) truthful rather than silently stale.
+ *
  * `gaiaTiny` added PF-11 D8 (ADR-0012, TR-114): the sum of all 8 `gaia-tiny-NN.png` chunks,
  * 36,792,163 bytes real measured on disk 2026-07-29 — the layer's full-enable cost; a
- * chunk-prefix partial enable fetches proportionally less (see render-layers.ts's `maxCount`). */
+ * chunk-prefix partial enable fetches proportionally less (see render-layers.ts's `maxCount`).
+ *
+ * `sdssField` and `gaiaTiny` RE-MEASURED 2026-09-02 (PF-11 P2b, white-dwarf magnitude rescale):
+ * both were regenerated from source under the new byte-encoding formula (`gaia-sdss18-pngpack.mjs`
+ * and `gaia-tiny-pngpack.mjs` — the P2b implementation pass updated their `magToByte`/formula
+ * constants but had not yet re-run either script, which this pass closed). `sdssField` moved
+ * 47,125,068 -> 47,125,108 (uniform-byte layer, effectively unchanged — the +40 bytes is PNG
+ * compression noise, not a content change). `gaiaTiny` moved 36,792,163 -> 37,200,598 (real
+ * per-row magnitude bytes, same effect as `bonusStars` above — the wider byte spread compresses
+ * slightly less tightly). Record counts on both are unchanged (3,637,836 rows; 2,465,763 rows
+ * across 8 chunks) — only the encoded byte values changed. */
 export const layerBytes = {
   starField: 2_018_454 + 873_480,
-  bonusStars: 5_415_687 + 79_027 + 135_583 + 163_385,
-  sdssField: 47_125_068,
+  bonusStars: 5_581_501 + 80_338 + 135_583 + 163_385,
+  sdssField: 47_125_108,
   beltVisual: 2_081_206,
   planetHires: 5_000_000,
-  gaiaTiny: 36_792_163,
+  gaiaTiny: 37_200_598,
 };
 
 export default { bundle, assets, layerBytes };

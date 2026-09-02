@@ -16,9 +16,26 @@
  *
  * Record layout, 15 bytes, little-endian — fixed by the existing assets:
  *   [0..3]  f32 x   [4..7] f32 y   [8..11] f32 z
- *   [12]    u8 magnitude byte      (shader: mag = 12.5 - m/255*14)
+ *   [12]    u8 magnitude byte      (shader: mag = 21.5 - 32*t + 9*t^2, t = m/255 — PF-11 P2b)
  *   [13]    u8 colour index        (shader: Planckian O->M ramp)
  *   [14]    u8 object type         (0 = star; 1..7 = deep-layer classes)
+ *
+ * PF-11 P2b MAGNITUDE RESCALE (2026-09-02): the byte->magnitude formula was `12.5 - t*14`, a
+ * 14-mag range floored at 12.5 — every white dwarf in the shipped eDR3 catalog (real G mag
+ * 8.5-21.0, median 19.8) saturated to that one floor byte, indistinguishable by brightness. The
+ * new quadratic keeps the BRIGHT anchor and its slope exactly fixed (byte 255 -> mag -1.5,
+ * d(mag)/dt = -14 at t=1, matching the old formula's constant slope there) while extending the
+ * FAINT anchor from mag 12.5 to mag 21.5 (byte 0), so the real white-dwarf population now
+ * spreads across bytes ~0-83 instead of collapsing to 0. Chosen quadratic (not piecewise, not a
+ * cubic) specifically because it has a closed-form inverse (one sqrt) — the safest shape to keep
+ * byte-identical across every consumer that duplicates this literal (both shader twins here and
+ * in the archived space-engine.js, the JS mirrors, and ~6 scripts/*-pngpack.mjs encoders).
+ * REINTERPRETATION COST: `stars-hip.png`/`deep.png` have no in-repo generator script (hand-ported
+ * from the PF-07 prototype), so their already-baked bytes are reinterpreted under the new
+ * formula rather than regenerated — bright stars (byte 200+) are visually unchanged
+ * (matching slope at the bright anchor), mid-brightness stars (byte ~60-150, old mag ~4-9) dim
+ * by up to ~4 real magnitudes, and near-floor bytes (already at both the shader's alpha and
+ * quad-size floors) are unaffected in practice.
  *
  * OBJECT-TYPE BYTE LEGEND (PF-10 C0/C1, TR-065/066 — the ONLY place this is documented; none of
  * this was written down anywhere in the codebase before, only implicit in the shader's branch

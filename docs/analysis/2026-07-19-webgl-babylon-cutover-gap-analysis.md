@@ -261,6 +261,18 @@ this document names that ADR-0006's three-delta list never mentioned. An ADR tha
 under-reports its own consequences is the kind of record this repo's history explicitly warns
 against, and that critique doesn't go away because the two most severe items are now fixed.~~
 
+> **VERIFIED 2026-09-02 (documentation-only pass, no code/test changes):** re-read against the
+> disposed rows in sections A-E above and cross-checked against PF-09's own status header, which
+> already states this correctly. Confirming explicitly, since a prior doc-correction pass found
+> other status cells in this repo going stale silently: **GAP-17 through GAP-27 are ALL resolved
+> except the device-measurement residue inside GAP-22 (§A1-A4 per-device fps rows) and GAP-27
+> (the manual screen-reader pass).** That residue is not implementation debt — it is
+> owner/hardware-gated by construction (no automated tool available to any session can composite
+> a real frame or operate a real screen reader; see GAP-22/27's own rows above), and is correctly
+> still recorded as open rather than closed. GAP-23's remaining piece is likewise not a separate
+> code gap: its bundle numbers are real and current, and what's left is the same GAP-22 device
+> residue (perceptual first-paint cost cannot be assessed from byte counts alone).
+
 ---
 
 ## Verification status

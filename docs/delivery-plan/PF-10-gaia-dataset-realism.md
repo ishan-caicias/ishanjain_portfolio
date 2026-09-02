@@ -50,7 +50,11 @@ subsets with bit-identical elements, so merging adds nothing); and the docs-drif
 broken-link warning turned out to be a defect in the checker's own CommonMark parsing, now fixed
 and regression-tested. **C3's frame-budget half is STILL NOT measured** — it inherits C2's
 instrument problem exactly, and TR-075 added per-vertex trigonometric work to 154,662 billboards,
-which makes that measurement more necessary rather than less. **C4 RE-SCOPED and C4.1 COMPLETE** ([TR-076](../test-reports/TR-076.md)): the plan's premise for this phase — applying topography "to the existing Mars mesh" — turned out to rest on a mesh that never existed; every body in this scene is a 128px billboard cell. Owner chose real spheres + full virtual texturing. C4.1 (sphere renderer, real equirect surface maps, real elevation, real Sun lighting with Astra's Lunar-Lambert correction) is live for 12 bodies, 3 of them with real topography; C4.2 is PARTIAL ([TR-077](../test-reports/TR-077.md)): measuring the FIXED arrival camera (38 units from a radius-26 sphere, no zoom anywhere) made the magnification computable and produced three findings — the shipped 4096 map was 4x magnified so C4.1 was visibly soft, VT level 5 is unreachable by this camera and is never built (~75% asset saving), and level 3/4 sit ~1% under 1080p/4K parity. Shipped: an ultra (8192) surface tier, progressive high->ultra loading, an enforced NEVER_SPHERE rule for Phobos/Deimos, real sidereal rotation on its own 1e3 clock (the belt's 4e5 would alias Mars backwards past Nyquist), and the complete VT bake pipeline (1,364 offline-baked normal tiles). The runtime tile streamer is deliberately NOT wired — see TR-077 Part 6. C4.2 is now COMPLETE ([TR-078](../test-reports/TR-078.md)) — the runtime VT streamer and the Venus cloud descent both landed. **PF-10 IS FEATURE-COMPLETE**: per [ADR-0008](../adr/0008-ship-first-measure-after.md) (owner direction, 2026-07-21) C2 and C3 ship at FULL SCOPE with their measurement gates retired as preconditions and replaced by a post-ship real-device obligation, and PF-09's B6 frame-budget gate is not applied to PF-10 items. What remains is measurement, not features: the real-device pass, the asset-weight decision (~~221 MB~~ **CORRECTED 2026-07-29, PF-11 D6.7:** the real measured total was already 256.01/256.34 MB by the time later sessions checked `budgets.config.mjs`'s own history — this 221 MB figure was stale even when this status line was written, additive correction only, not edited away), the belt's 23.44° frame decision (**RESOLVED — PF-11 D6.2, GO on re-expression into the obliquity-inclined basis**), and C4.3 (self-shadowing + tier gating), all of which now want real hardware data first. **TR-070's
+which makes that measurement more necessary rather than less. **C4 RE-SCOPED and C4.1 COMPLETE** ([TR-076](../test-reports/TR-076.md)): the plan's premise for this phase — applying topography "to the existing Mars mesh" — turned out to rest on a mesh that never existed; every body in this scene is a 128px billboard cell. Owner chose real spheres + full virtual texturing. C4.1 (sphere renderer, real equirect surface maps, real elevation, real Sun lighting with Astra's Lunar-Lambert correction) is live for 12 bodies, 3 of them with real topography; C4.2 is PARTIAL ([TR-077](../test-reports/TR-077.md)): measuring the FIXED arrival camera (38 units from a radius-26 sphere, no zoom anywhere) made the magnification computable and produced three findings — the shipped 4096 map was 4x magnified so C4.1 was visibly soft, VT level 5 is unreachable by this camera and is never built (~75% asset saving), and level 3/4 sit ~1% under 1080p/4K parity. Shipped: an ultra (8192) surface tier, progressive high->ultra loading, an enforced NEVER_SPHERE rule for Phobos/Deimos, real sidereal rotation on its own 1e3 clock (the belt's 4e5 would alias Mars backwards past Nyquist), and the complete VT bake pipeline (1,364 offline-baked normal tiles). The runtime tile streamer is deliberately NOT wired — see TR-077 Part 6. C4.2 is now COMPLETE ([TR-078](../test-reports/TR-078.md)) — the runtime VT streamer and the Venus cloud descent both landed. **PF-10 IS FEATURE-COMPLETE**: per [ADR-0008](../adr/0008-ship-first-measure-after.md) (owner direction, 2026-07-21) C2 and C3 ship at FULL SCOPE with their measurement gates retired as preconditions and replaced by a post-ship real-device obligation, and PF-09's B6 frame-budget gate is not applied to PF-10 items. What remains is measurement, not features: the real-device pass, the asset-weight decision (~~221 MB~~ **CORRECTED 2026-07-29, PF-11 D6.7:** the real measured total was already 256.01/256.34 MB by the time later sessions checked `budgets.config.mjs`'s own history — this 221 MB figure was stale even when this status line was written, additive correction only, not edited away), the belt's 23.44° frame decision (**RESOLVED — PF-11 D6.2, GO on re-expression into the obliquity-inclined basis**), and C4.3 (self-shadowing + tier gating), all of which now want real hardware data first
+(**CORRECTED 2026-09-02: C4.3 itself shipped 2026-07-21/23 — rotation, self-shadowing, and the tier
+ladder are all code-complete and unit-tested; see the corrected C4.3 row and note below. Only the
+`ultra` rung's real-hardware confirmation remains, which is what "wants real hardware data" refers
+to for C4.3 specifically**). **TR-070's
 flagged `ship track` E2E failure is now root-caused and fixed
 ([TR-071](../test-reports/TR-071.md))**: a real wall-clock-progress-vs-frame-count-bounded-ramp
 race, triggered only by travelling to the closest possible catalog target under CI's now-very-slow
@@ -483,7 +487,39 @@ sequenced:
 | --------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **C4.1**  | Sphere renderer, real equirect surface textures, real elevation via height-derived normals, real Sun lighting   | ✅ **COMPLETE (TR-076)**                                                                                                                                                                |
 | **C4.2**  | MOLA/NASA virtual-texture streaming with camera-distance LOD; body-selection rules (below); Venus cloud descent | ✅ **COMPLETE (TR-078)** — runtime streamer wired (the visible tile set is a contiguous rectangle, so no indirection table was needed), Venus descent live with Astra's flat-light fork |
-| **C4.3**  | Rotation, self-shadowing, tier/budget gating from real-device data                                              | not started                                                                                                                                                                             |
+| **C4.3**  | Rotation, self-shadowing, tier/budget gating from real-device data                                              | ~~not started~~ **CORRECTED 2026-09-02 — SUBSTANTIALLY COMPLETE, see note below**                                                                                                       |
+
+**⛔ CORRECTION (2026-09-02, documentation-only pass, no code/test changes) — the "not started" cell
+above was wrong; per this repo's corrections-are-additive convention it is struck through in place
+rather than silently rewritten.** All three C4.3 items shipped before this correction was written;
+this pass only found and fixed the stale doc:
+
+- **Rotation** shipped 2026-07-21, the same PF-10 session, in commit `34ae8ac` —
+  `ROTATION_PERIOD_S` / `rotationAngle()` (`src/lib/planet-sphere.ts:221-276`), wired every frame in
+  `babylon-engine.ts:4169-4175` on its own 1e3 clock (kept off the belt's 4e5 accel deliberately, to
+  avoid aliasing Mars's spin backwards past Nyquist), reduced-motion-aware (`tS=0` holds the real
+  orientation rather than spinning), and unit-tested per body against its cited rotation period
+  (`tests/unit/planet-sphere.test.ts:295-309`, including the Earth-sidereal-vs-solar-day distinction).
+- **Self-shadowing** shipped 2026-07-23 as PF-11 D6.3.3 ([TR-087](../test-reports/TR-087.md)) — a
+  declared-**SIMPLIFIED** terminator-elevation darkening term, line-for-line twin in GLSL
+  (`planet-sphere.ts:836-840`) and WGSL (`planet-sphere.ts:1105-1107`) per CLAUDE.md #4, gated so the
+  twelve bodies with neither height nor normal map are bit-identical to before the term existed. **This
+  is not the fuller ray-march self-shadowing** Astra's
+  [planetary-sphere science brief](../analysis/2026-07-21-planetary-sphere-topography-science-brief.md#L270-L275)
+  recommended — TR-087 records it explicitly as an aggregate darkening, not resolved cast shadows.
+  Closing that gap (if ever prioritized) is new work, not a completion of what's tracked here.
+- **Tier/budget gating** is wired and unit-tested: `QUALITY_BUDGETS`'
+  `planetTexture: "base" | "high" | "ultra-progressive"` ladder (`src/lib/babylon-tiers.ts:55-88`) —
+  `lite` finally consumes the 2048 `base` tier shipped since C4.1 and fetched by nobody until TR-087;
+  `full` alone reaches `ultra`. TR-087's own "Known limitations" flags the one piece that is
+  genuinely still open: **the `full`/`ultra-progressive` ladder rung has never been exercised on real
+  hardware** — Playwright's SwiftShader environment resolves to `balanced`, so no automated run has
+  ever driven the `ultra` swap-in. That is owner real-device residue, not missing code, and per
+  ADR-0008 it folds into the **same real-device pass B6/PF-10 is already waiting on** — it is not
+  separate open work.
+
+**Net: C4.3 is substantially complete.** The only remaining item is the `ultra` rung's real-hardware
+confirmation, tracked as part of PF-10's standing real-device obligation rather than as its own gap.
 
 **C4.1 owner-confirmed 2026-07-21:** Mars, Mercury and the Moon all read correctly on the live
 page. The visual questions TR-076 left open — terminator, true-scale topography shading, and the

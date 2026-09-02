@@ -73,10 +73,17 @@ const SOURCE_PATH =
  * `ty < 6.5`, px *= 0.85) plus the tight low-alpha fragment branch C3 adds alongside it. */
 const ASTEROID_TYPE_BYTE = 6;
 /** Uniform, dim: no per-object photometry exists in the source (see HONEST LIMITS). The shader
- * reads mag = 12.5 - byte/255*14, so byte 0 is the format's floor at magnitude 12.5.
- * ASTRA (science brief, 2026-07-20): even that floor is 3-5 magnitudes BRIGHTER than a real
- * main-belt asteroid, so the dimmest byte the format has is the only honest choice — the first
- * draft's 24 (mag 11.2) was gratuitously bright on top of an already-generous floor. */
+ * used to read mag = 12.5 - byte/255*14 (byte 0 = format floor, mag 12.5); ASTRA (science brief,
+ * 2026-07-20) found even that floor 3-5 magnitudes BRIGHTER than a real main-belt asteroid, so
+ * the dimmest byte the format had was the only honest choice at the time.
+ * PF-11 P2b (2026-09-02), NOT applied here — judgment call, flagged rather than decided: the
+ * decode formula is now mag = 21.5 - 32*t + 9*t^2 (t = byte/255), so byte 0 now means mag 21.5,
+ * not 12.5 — this OVERSHOOTS Astra's intended ~15.5-17.5 (the format can now represent it
+ * directly, where it previously could not). Leaving UNIFORM_MAG_BYTE at 0 keeps this asteroid
+ * belt at the new floor rather than the honest target Astra actually wanted; recomputing it to
+ * hit ~16.5 is a separate, real-photometry-style decision (a new Astra-style re-audit), not a
+ * mechanical formula-consistency fix, so it is out of P2b's strict scope and deliberately left
+ * inconsistent rather than silently "fixed" by a guess. */
 const UNIFORM_MAG_BYTE = 0;
 /** Warm GREY. ASTRA CORRECTION (science brief, 2026-07-20): the first draft used 214 (t = 0.85),
  * which the Planckian ramp renders as RGB (1.00, 0.81, 0.53) — B-V ~ 1.4, about 4000 K, a K5-M0

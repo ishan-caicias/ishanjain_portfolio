@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLOUD_QUAD_DEFICIT,
   ELEV_SAMPLE_STEP,
+  NEVER_SPHERE,
   OCEAN_F0,
   OCEAN_SIGMA2,
   PLANET_LUNAR_L,
@@ -29,6 +30,8 @@ import {
   PLANET_PHYSICAL,
   PLANET_SPHERE_RADIUS,
   SPHERE_SEGMENTS,
+  SUN_FLAT_LEVEL,
+  SUN_FLAT_TINT_RGB,
   TERMINATOR_SOFTEN,
   UV_LONGITUDE_OFFSET,
   reliefFraction,
@@ -739,5 +742,103 @@ describe("PF-11 D6.3.4 per-body atmosphere flag", () => {
     // inherit Earth's atmosphere.
     expect(manifest.bodies.earth.atmosphere).toBe(true);
     expect(manifest.bodies.earth.cloud).toBeTruthy();
+  });
+});
+
+describe("PF-11 defect P2a — the Sun sphere", () => {
+  // The Sun had a real catalog entry (celestial-catalog.js, t:"star") and real
+  // sunDirectionFrom() geometry, but no shipped texture — it fell through to the 110px
+  // procedural star beacon. These assertions pin the three things that make it a real sphere
+  // without silently re-lighting it like a rocky body: it is eligible for one (not
+  // NEVER_SPHERE), it has real imagery (manifest, surface-only like Venus/Jupiter/Saturn), and
+  // it engages the SAME flat-shadowless-illuminant fork Venus proved out — which the shader
+  // twins show fully DISCARDS the Lunar-Lambert reflectance / terminator / self-shadow chain
+  // rather than merely dimming it.
+  const manifest = JSON.parse(
+    readFileSync(
+      resolve(process.cwd(), "public/assets/planets/manifest.json"),
+      "utf8",
+    ),
+  ) as {
+    bodies: Record<
+      string,
+      { surface: unknown; height: unknown; normal?: unknown }
+    >;
+  };
+  const engineSrc = readFileSync(
+    resolve(process.cwd(), "src/lib/babylon-engine.ts"),
+    "utf8",
+  );
+
+  it("is eligible for a sphere — confirmed absent from NEVER_SPHERE", () => {
+    expect(NEVER_SPHERE.has("sun")).toBe(false);
+  });
+
+  it("ships real surface imagery, surface-only like the other flat-lit/no-relief bodies", () => {
+    const sun = manifest.bodies.sun;
+    expect(sun, "sun must have a manifest entry").toBeDefined();
+    expect(sun.surface).toBeTruthy();
+    expect(sun.height).toBeNull();
+    expect(sun.normal ?? null).toBeNull();
+  });
+
+  it("declares a real, brightening flat-light level rather than the fork's neutral default", () => {
+    // uFlatLevel's neutral/off value is 1 (see the material's boot-time default and the
+    // non-venus/non-sun reset branch in _tickPlanetSphere) — a self-luminous star reading at
+    // the SAME level as "the fork is off" would be indistinguishable from a bug that forgot to
+    // set it. > 1 is the declared choice that makes it visibly bright post-Reinhard.
+    expect(SUN_FLAT_LEVEL).toBeGreaterThan(1);
+    expect(Number.isFinite(SUN_FLAT_LEVEL)).toBe(true);
+    for (const c of SUN_FLAT_TINT_RGB) {
+      expect(c).toBeGreaterThanOrEqual(0);
+      expect(c).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("_tickPlanetSphere sets uFlatLight=1 for the Sun, not the default lit-path 0", () => {
+    // Pins the dispatch itself, in the pattern tests/unit/frame-ladder.test.ts already uses for
+    // this same private method: the class can't be instantiated without a real GPU context, so
+    // the dispatch is asserted as source text rather than by driving the engine.
+    expect(engineSrc).toContain('if (key === "sun") {');
+    const start = engineSrc.indexOf('if (key === "sun") {');
+    const end = engineSrc.indexOf('} else if (key !== "venus") {', start);
+    expect(
+      end,
+      "sun branch must be followed by the venus-reset else-if",
+    ).toBeGreaterThan(start);
+    const sunBranch = engineSrc.slice(start, end);
+    expect(sunBranch).toContain('mat.setFloat("uFlatLight", 1);');
+    expect(sunBranch).toContain('mat.setFloat("uFlatLevel", SUN_FLAT_LEVEL);');
+    // And NOT the reflectance-path reset ("uFlatLight", 0) that every other non-Venus body gets.
+    expect(sunBranch).not.toContain('mat.setFloat("uFlatLight", 0);');
+  });
+
+  it("the flat-light branch fully REPLACES lit, not blends a fraction of it in", () => {
+    // mix(lit, flatLit, uFlatLight) with uFlatLight = 1 selects flatLit identically — this is
+    // what makes it safe to engage on a body (the Sun) whose uSunDir is otherwise meaningless,
+    // rather than merely reducing the reflectance term's influence.
+    expect(PLANET_FRAGMENT_GLSL).toContain(
+      "vec3 outLin = mix(lit, flatLit, uFlatLight);",
+    );
+    expect(PLANET_FRAGMENT_WGSL).toContain(
+      "var outLin : vec3<f32> = mix(lit, flatLit, uniforms.uFlatLight);",
+    );
+  });
+
+  it("flatLit itself never reads uSunDir, mu0, refl or the self-shadow term", () => {
+    // The excluded-from-reflectance claim has to hold at the shader level, not just at the
+    // dispatch level: even though _tickPlanetSphere still computes a real uSunDir for the Sun
+    // (sunDirectionFrom is well-defined — the Sun sits at a real ra/dec, not the world origin),
+    // flatLit must be structurally incapable of using it.
+    for (const src of [PLANET_FRAGMENT_GLSL, PLANET_FRAGMENT_WGSL]) {
+      const flatLitLine = src
+        .split("\n")
+        .find((l) => l.includes("flatLit") && l.includes("="))!;
+      expect(flatLitLine, "flatLit assignment must exist").toBeTruthy();
+      for (const forbidden of ["uSunDir", "mu0", "refl", "SELF_SHADOW"])
+        expect(flatLitLine, `${forbidden} leaked into flatLit`).not.toContain(
+          forbidden,
+        );
+    }
   });
 });

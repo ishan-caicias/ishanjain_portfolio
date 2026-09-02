@@ -44,5 +44,12 @@ declare global {
     CELESTIAL_SATURNMOONS_COUNT?: number;
     CELESTIAL_MISSINGMOONS_COUNT?: number;
     CELESTIAL_IMGMAP?: Record<string, [string, string]>;
+    /** PF-11 defect P1 (duplicate-id sub-fix) — see celestial-image-borrow-overlay.js. */
+    CELESTIAL_IMAGE_BORROW_COUNT?: number;
+    CELESTIAL_IMAGE_BORROW_LOG?: { from: string; to: string; sepDeg: number }[];
+    /** PF-11 defect P1 (real DSS2 photo pipeline) — see celestial-dso4-imgmap.js and
+     * scripts/fetch-dso-survey-photos.mjs. */
+    CELESTIAL_DSO4_IMGMAP?: Record<string, [string, string]>;
+    CELESTIAL_DSO4_COUNT?: number;
   }
 }

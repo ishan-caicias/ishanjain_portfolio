@@ -450,6 +450,39 @@ deferred by owner. Leading hypothesis: uncapped `adaptToDeviceRatio` at the flag
 resolution — untested data needed to confirm is already on the `?perf=1` overlay (device
 signature + ENGINE/TIER lines), just not yet reported. **B6 remains open.** 216 unit · 70 E2E.
 
+**A4 (WebGL2 fallback) measured 2026-09-02, desktop-hardware proxy — not a full A-row close.**
+New spec `tests/e2e/webgl2-fallback-perf.spec.ts` forces `createEngine()`'s real WebGL2 branch by
+launching this desk's real installed Chrome (channel `"chrome"`, TR-039's precedent) with WebGPU
+disabled at the browser level, against `npm run preview`'s secure `http://localhost` origin —
+isolating "WebGPU off" from the insecure-LAN-origin issue that invalidated the owner's earlier
+phone readings. `--disable-features=WebGPU` alone turned out to be a no-op on this machine's
+installed Chrome (152.x) — WebGPU has since shipped to stable and `requestAdapter()` still
+resolved a real adapter; `WebGPUService,WebGPUDeveloperFeatures` had to be disabled alongside it
+(confirmed live via a throwaway probe script before trusting the spec, not assumed) to actually
+null the adapter. `window.__ijPerf()`'s `PerfSnapshot` had no way to say which Babylon backend
+produced a given reading (a real gap — a captured snapshot's fps/startup numbers couldn't be
+attributed to a fallback tier without a separate `sceneStats()` cross-check); closed additively
+by giving `PerfMonitor` a `backend` field/setter (`src/lib/perf-telemetry.ts`), fed every host
+frame from `<babylon-scene>.backend` in `SpaceScene.tsx`'s existing rAF loop (same cadence as the
+pre-existing `renderFrames` read — a property access, no per-frame allocation). Two consecutive
+real runs, both clean against the repo's own measurement-validity guards (renderFrames > 0,
+renderFps ≤ displayHz, startupMs ≥ 300 ms):
+
+| Run | backend | tier | startupMs | fps | renderFps | renderFrames | displayHz |
+| --- | ------- | ---- | --------- | --- | --------- | ------------ | --------- |
+| 1   | webgl2  | high | 508 ms    | 48  | 49        | 233          | 53        |
+| 2   | webgl2  | high | 469 ms    | 54  | 53        | 288          | 57        |
+
+Both clear the A4 budget-table floor (≥30 fps) by a wide margin — no fallback-tier fps problem on
+this hardware. **Scoped explicitly**: this is A4 measured on desktop hardware via a forced
+WebGL2 fallback — genuine GPU acceleration (ANGLE/Direct3D11, confirmed via
+`UNMASKED_RENDERER_WEBGL` during the flag probe, not SwiftShader), but still this desk's
+desktop-class machine, not the owner's mobile/tablet devices. It is **not** a substitute for the
+owner's own A1 (desktop, ≥60 fps target — still short per TR-083's 45-52 fps), A2 (iPad,
+untested), or A3 (mid-Android, MIXED-anomaly-reversed-pending-backend-confirmation) readings,
+all of which remain outstanding and owner-only. **B6 stays open** — one row (A4) now has a real,
+trustworthy number; A1/A2/A3 do not.
+
 ## Creative exploration (candidate stretch ideas — pick per phase, not all)
 
 Beyond the owner's list, the Babylon+WebGPU+Havok stack cheaply unlocks:

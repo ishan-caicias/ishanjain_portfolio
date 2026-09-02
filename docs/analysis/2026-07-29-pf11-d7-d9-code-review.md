@@ -6,6 +6,17 @@
 **Trigger:** owner-reported 59 failing E2E specs; review requested before the remaining
 delivery-plan items are built on this foundation.
 
+> **✅ RESOLVED, same day — [TR-113](../test-reports/TR-113.md).** Owner directive: apply all
+> CRITICAL/HIGH/MEDIUM findings, get the failing tests passing, unblock D8. C1 (the renderer-
+> freezing `clearCachedData()` call) and H1-H4 are all fixed; M1-M4 are all fixed. Verified live
+> in source at the time of this banner: `clearCachedData()` removed from
+> `_applyStarFieldGeometry` only (`src/lib/babylon-engine.ts` ~3185-3212, TR-113's fix comment
+> in place), the two genuinely one-shot meshes (SDSS, asteroid-visual) keep theirs. Gate:
+> 883/883 unit, **172/172 E2E, ZERO failures** (workers=1, retries=0, 41.8 min) — the suite that
+> returned 59 failures against the pre-fix build. This document's CRITICAL/BLOCKED verdict below
+> describes the working tree at the time of review and is left standing per this repo's
+> corrections-are-additive convention.
+
 ---
 
 ## Verdict

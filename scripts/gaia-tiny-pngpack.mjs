@@ -46,7 +46,7 @@
  * against this base field at all).
  *
  * Magnitude byte / clamp: identical formula and clamp every other pipeline script in this repo
- * uses (star-catalog.ts's decoder: mag = 12.5 - byte/255*14).
+ * uses (star-catalog.ts's decoder, PF-11 P2b rescale: mag = 21.5 - 32*t + 9*t^2, t = byte/255).
  *
  * Colour byte range: [-0.5, 2.0] B-V, matching gaia-cns5-pngpack.mjs's "ordinary nearby stars"
  * range (gaia-tiny is a general mixed population, the same case CNS5 already covers — NOT the
@@ -109,7 +109,9 @@ function raDecToDir(ra, dec) {
 }
 
 function magToByte(mag) {
-  return ((12.5 - mag) / 14) * 255;
+  // inverse of: mag = 21.5 - 32*t + 9*t^2, t = byte/255 (PF-11 P2b rescale)
+  const t = (32 - Math.sqrt(1024 - 36 * (21.5 - mag))) / 18;
+  return t * 255;
 }
 
 function clampByte(n) {
@@ -168,7 +170,11 @@ async function buildBaseFieldGrid() {
     const dec = Math.asin(z / r) * (180 / Math.PI);
     let ra = Math.atan2(y, x) * (180 / Math.PI);
     if (ra < 0) ra += 360;
-    const mag = 12.5 - (magByte / 255) * 14;
+    // PF-11 P2b rescale — must track the base field's decode formula for this sanity backstop
+    // to mean anything (it's already loose/non-authoritative per the header note above, but a
+    // stale formula here would make even that loose check compare apples to oranges).
+    const bt = magByte / 255;
+    const mag = 21.5 - 32 * bt + 9 * bt * bt;
     const key = gridKey(ra, dec);
     let bucket = grid.get(key);
     if (!bucket) grid.set(key, (bucket = []));

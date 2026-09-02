@@ -65,6 +65,15 @@ export interface PerfSnapshot {
    * two samples exist or when the engine exposes no counter.
    */
   renderFps: number | null;
+  /**
+   * Babylon's actual render backend for this reading ("webgpu" | "webgl2"),
+   * or null on the archived WebGL1 engine / before `createEngine()` resolves.
+   * Without this, a captured snapshot's fps/startup numbers can't be
+   * attributed to a specific fallback tier (PF-09 B6 checklist §A4 needs the
+   * WebGL2-fallback row distinguished from the WebGPU rows) — the reader had
+   * to cross-reference `<babylon-scene>.sceneStats().backend` separately.
+   */
+  backend: "webgpu" | "webgl2" | null;
   /** Which hardware produced this reading — makes gate rows attributable. */
   device: DeviceContext;
 }
@@ -142,6 +151,8 @@ export class PerfMonitor {
   /** Latest engine frame count (fed by the host via setRenderFrames). */
   renderFrames: number | null = null;
   private rfSamples: { t: number; n: number }[] = [];
+  /** Latest Babylon render backend (fed by the host via setBackend). */
+  private backend: "webgpu" | "webgl2" | null = null;
 
   constructor(
     readonly engine: EngineKind,
@@ -181,6 +192,12 @@ export class PerfMonitor {
       now - this.rfSamples[0].t > RENDER_FPS_WINDOW_MS
     )
       this.rfSamples.shift();
+  }
+
+  /** Feed Babylon's resolved render backend (call once per host frame, same
+   * cadence as setRenderFrames — cheap property read, no allocation). */
+  setBackend(b: "webgpu" | "webgl2" | null): void {
+    this.backend = b;
   }
 
   /** Actual engine render rate — the gate metric. */
@@ -228,6 +245,7 @@ export class PerfMonitor {
       displayHz: this.displayHz(),
       renderFrames: this.renderFrames,
       renderFps: this.renderFps(),
+      backend: this.backend,
       device: this.device,
     };
   }

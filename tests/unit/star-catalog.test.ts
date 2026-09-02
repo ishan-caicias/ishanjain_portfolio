@@ -203,26 +203,73 @@ describe("decodeStarCatalogFromRGBA (PF-11 D7.3 — stride-aware reader, no stri
   });
 });
 
-describe("photometry (the density fix — TR-037)", () => {
+describe("photometry (the density fix — TR-037; PF-11 P2b magnitude rescale)", () => {
   // Mirrors of the shader arithmetic, kept here so the mapping that decides how
   // many stars are actually visible is asserted rather than eyeballed on a phone.
-  const magOf = (magNorm: number) => 12.5 - magNorm * 14;
+  //
+  // PF-11 P2b (2026-09-02): replaced the old LINEAR `mag = 12.5 - t*14` (a 14-mag range,
+  // floored at mag 12.5 — every white dwarf in the shipped eDR3 catalog, real G mag 8.5-21.0,
+  // saturated to that one floor byte) with a QUADRATIC that keeps the bright anchor and its
+  // slope exactly fixed (byte 255 -> mag -1.5, d(mag)/dt = -14 at t=1, matching the old
+  // formula's constant slope there) while extending the faint anchor from mag 12.5 to mag 21.5
+  // at byte 0. See star-catalog.ts's decode comment for the full derivation.
+  const magOf = (magNorm: number) =>
+    21.5 - 32 * magNorm + 9 * magNorm * magNorm;
+  const oldMagOf = (magNorm: number) => 12.5 - magNorm * 14; // pre-P2b, for regression comparison only
   const fluxOf = (magNorm: number) => Math.pow(10, -0.4 * (magOf(magNorm) - 2));
   const alphaOf = (magNorm: number) =>
     0.1 + 0.9 * Math.sqrt(Math.min(Math.max(fluxOf(magNorm), 0), 1.4));
 
+  it("keeps the bright anchor (byte 255) exactly fixed at mag -1.5", () => {
+    expect(magOf(1)).toBeCloseTo(-1.5, 10);
+  });
+
+  it("extends the faint anchor (byte 0) from mag 12.5 to mag 21.5", () => {
+    expect(magOf(0)).toBeCloseTo(21.5, 10);
+  });
+
+  it("leaves ordinary bright stars' rendered brightness unchanged — the regression risk this rescale must not introduce", () => {
+    // The new formula was built to match the old one's slope at the bright anchor for exactly
+    // this reason: byte 255 (t=1) is identical by construction, and byte 246 (t≈0.9647, mag ≈
+    // -1 under both formulas) should differ by only a hundredth of a magnitude — imperceptible.
+    const t246 = 246 / 255;
+    expect(magOf(t246) - oldMagOf(t246)).toBeGreaterThan(-0.02);
+    expect(magOf(t246) - oldMagOf(t246)).toBeLessThan(0.02);
+  });
+
+  it("dims ordinary mid-brightness stars by a real, bounded amount — the documented reinterpretation cost", () => {
+    // byte 155 (t≈0.6078, old mag ≈4.0): the design spec's reinterpretation-cost table for the
+    // two base-catalog assets that have no regeneration pipeline (stars-hip.png/deep.png) and
+    // so can only be reinterpreted under the new formula, not regenerated with new bytes.
+    const t155 = 155 / 255;
+    const shift155 = magOf(t155) - oldMagOf(t155);
+    expect(shift155).toBeGreaterThan(1.0);
+    expect(shift155).toBeLessThan(2.0);
+    // byte 82 (t≈0.3216, old mag ≈8.0): "real, noticeable dimming" per the same table — flux
+    // drops enough to roughly halve alpha for this population, still well short of a full mag
+    // collapse to the floor.
+    const t82 = 82 / 255;
+    const shift82 = magOf(t82) - oldMagOf(t82);
+    expect(shift82).toBeGreaterThan(3.5);
+    expect(shift82).toBeLessThan(4.5);
+  });
+
   it("collapses faint stars to the alpha floor and keeps bright ones opaque", () => {
-    // magByte 0 -> mag 12.5: flux is tiny but not zero, so alpha sits just
-    // above the 0.10 floor (0.107), not exactly on it.
+    // magByte 0 -> mag 21.5 now (was mag 12.5 under the old, saturating formula): flux is
+    // vanishingly small (~1.6e-8), so alpha sits only a hair above the 0.10 floor (~0.1001) —
+    // much closer to the floor than the old formula's byte-0 alpha (~0.107), consistent with
+    // the spec's finding that near-floor bytes were already effectively floor-clamped by the
+    // shader's own alpha/quad-size floors and so cost nothing extra in practice.
     expect(alphaOf(0)).toBeGreaterThan(0.1);
-    expect(alphaOf(0)).toBeLessThan(0.11);
-    expect(alphaOf(1)).toBeGreaterThan(1.0); // magByte 255 -> mag -1.5, blazing
+    expect(alphaOf(0)).toBeLessThan(0.101);
+    expect(alphaOf(1)).toBeGreaterThan(1.0); // magByte 255 -> mag -1.5, blazing, unchanged
   });
 
   it("leaves the large majority of a real magnitude distribution near-invisible", () => {
     // Measured shape of stars-hip.png: ~80% of records sit in the lower two
     // octiles of the magnitude byte. Those must land at ~the alpha floor —
-    // that is precisely what the B1 placeholder failed to do.
+    // that is precisely what the B1 placeholder failed to do, and remains true (with an even
+    // wider margin, since the same bytes now decode even fainter) under the P2b rescale.
     const faint = decodeStarCatalog([
       makeChunk(64, (i) => ({ ...rec(i), mag: i })), // bytes 0..63
     ]);

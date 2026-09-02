@@ -225,6 +225,8 @@ import {
   SPHERE_SEGMENTS,
   sphereIdFor,
   sunDirectionFrom,
+  SUN_FLAT_LEVEL,
+  SUN_FLAT_TINT_RGB,
   type PlanetManifest,
 } from "./planet-sphere";
 // PF-10 C4.2: virtual-texture streaming for planetary elevation detail.
@@ -632,6 +634,37 @@ export function fieldStarTarget(
   return { index, pos, dir: [pos[0] / L, pos[1] / L, pos[2] / L] };
 }
 
+/** PF-11 P2b — the one field object-type byte `_fieldBody` promotes into a real, memoized
+ * `this.bodies` entry (rather than staying a synthesized, ephemeral pick target). White dwarfs
+ * only (`FIELD_TYPES[2]` in spaceHelpers.ts): they are the one field class a visitor needs to
+ * revisit/re-pick precisely (D5.3's "nearest instance" search row, or a direct hover), and the
+ * only one that is a static point source — see `_fieldBody`'s header for why this must NOT be
+ * extended to type 6 (DR3 asteroids), which move under GPU-side orbital motion the CPU-side
+ * cache would go stale against. Exported so the carve-out condition is unit-testable without a
+ * live scene. */
+export function isPromotableFieldType(type: number): boolean {
+  return type === 2;
+}
+
+/** PF-11 TR-103/TR-115 + P2b — arrival standoff selection, extracted out of `travelTo` so the
+ * choice is unit-testable without a live scene. Order matters: a body with real raymarched
+ * sphere geometry (planet/moon/dwarf) gets `PLANET_ARRIVE_STANDOFF`; a body with a real
+ * raymarched VOLUME (the 11 shipped nebulae) gets a multiple of that volume's own radius;
+ * everything else — ordinary stars, billboard-only DSOs, stations, and `fs-` field objects
+ * (INCLUDING a promoted white dwarf: `_fieldBody`'s synthesized `e` carries no `.t`, so it can
+ * never match the first branch) — keeps `ARRIVE_STANDOFF`: their sprite is sized in SCREEN
+ * space and is already at its clamp there, so backing off would be pure loss. */
+export function arrivalStandoffFor(
+  body: { e: { id: string; t?: string } },
+  nebulaVolumes: readonly { id: string; radius: number }[] = NEBULA_VOLUMES,
+): number {
+  if (body.e.t === "planet" || body.e.t === "moon" || body.e.t === "dwarf") {
+    return PLANET_ARRIVE_STANDOFF;
+  }
+  const vol = nebulaVolumes.find((v) => v.id === body.e.id);
+  return vol ? vol.radius * NEBULA_ARRIVE_STANDOFF_FACTOR : ARRIVE_STANDOFF;
+}
+
 /** Free-look pitch clamp — matches space-engine.js's ±1.45 rad (≈ ±83°). */
 const FREE_LOOK_PITCH_LIMIT = 1.45;
 /** Pointer-drag sensitivity — matches space-engine.js's `0.0022 * (70/60)`. */
@@ -867,7 +900,9 @@ const GAIA_TINY_CHUNK_URLS = [
  * path verbatim — Pogson's law over the Hipparcos magnitude window, the
  * Planckian O->M chromaticity ramp, and the deep-layer object-class modifiers:
  *
- *   mag  = 12.5 - magByte/255 * 14      real catalog magnitude
+ *   mag  = 21.5 - 32*t + 9*t^2, t = magByte/255      real catalog magnitude (PF-11 P2b rescale —
+ *          bright anchor/slope fixed at t=1 (mag -1.5), faint anchor extended to mag 21.5 so the
+ *          eDR3 white-dwarf population no longer saturates to one floor byte; see star-catalog.ts)
  *   flux = 10^(-0.4*(mag - 2))          Pogson
  *   px   = clamp((0.9 + 2.6*flux^0.28) * uSize * 520/dist, 1, 13)
  *   a    = 0.10 + 0.90*sqrt(flux)
@@ -995,7 +1030,7 @@ void main(){
   centre.xyz = aberrate(centre.xyz, warpDirView);
   float dist = length(centre.xyz);          // camera sits at the view origin
 
-  float mag  = 12.5 - starMeta.x*14.0;
+  float mag  = 21.5 - 32.0*starMeta.x + 9.0*starMeta.x*starMeta.x; // PF-11 P2b rescale
   float flux = pow(10.0, -0.4*(mag - 2.0));
   float fl   = pow(flux, 0.28);
   float px   = (0.9 + 2.6*fl) * uSize * (520.0/max(dist, 90.0));
@@ -1156,7 +1191,8 @@ fn main(input : VertexInputs) -> FragmentInputs {
   centre = vec4<f32>(aberrate(centre.xyz, warpDirView), centre.w);
   let dist : f32 = length(centre.xyz);
 
-  let mag : f32 = 12.5 - vertexInputs.starMeta.x * 14.0;
+  // PF-11 P2b rescale
+  let mag : f32 = 21.5 - 32.0 * vertexInputs.starMeta.x + 9.0 * vertexInputs.starMeta.x * vertexInputs.starMeta.x;
   let flux : f32 = pow(10.0, -0.4 * (mag - 2.0));
   let fl : f32 = pow(flux, 0.28);
   var px : f32 = (0.9 + 2.6 * fl) * uniforms.uSize * (520.0 / max(dist, 90.0));
@@ -3968,7 +4004,21 @@ class BabylonScene extends HTMLElement {
       // PF-10 C4.2: arriving at Venus starts the cloud descent; arriving anywhere else clears it
       // and restores ordinary lit rendering.
       this._venusDescentStart = key === "venus" ? performance.now() : 0;
-      if (key !== "venus") {
+      // PF-11 defect P2a: the Sun reuses Venus's flat-shadowless-illuminant fork, but STATICALLY
+      // rather than depth-ramped — there is no "altitude" to descend through, only a self-luminous
+      // body that must never receive Lunar-Lambert reflectance or a terminator (see planet-sphere.ts
+      // SUN_FLAT_LEVEL). Set once here on arrival, not per-frame: unlike Venus there is no
+      // `_tickVenusDescent`-style ramp driving it, and the per-frame call below is a no-op for any
+      // key other than "venus", so these values hold until the next body is dressed.
+      if (key === "sun") {
+        mat.setFloat("uFlatLight", 1);
+        mat.setFloat("uFlatLevel", SUN_FLAT_LEVEL);
+        mat.setVector3(
+          "uFlatTint",
+          this._venusTintScratch.set(...SUN_FLAT_TINT_RGB),
+        );
+        if (this._venusCloud) this._venusCloud.isVisible = false;
+      } else if (key !== "venus") {
         mat.setFloat("uFlatLight", 0);
         mat.setFloat("uFlatLevel", 1);
         if (this._venusCloud) this._venusCloud.isVisible = false;
@@ -6289,7 +6339,8 @@ class BabylonScene extends HTMLElement {
       ra,
       dec,
       ly: type > 0 ? Math.pow(10, (r - 150) / 128) - 1.5 : r * 3.9,
-      mg: 12.5 - f.meta[i * 2] * 14,
+      // PF-11 P2b rescale — mirrors the GLSL/WGSL decode above; f.meta[i*2] is byte/255.
+      mg: 21.5 - 32 * f.meta[i * 2] + 9 * f.meta[i * 2] * f.meta[i * 2],
       ci: colour * 255,
       type,
     };
@@ -6451,9 +6502,9 @@ class BabylonScene extends HTMLElement {
    * PF-10's WD/SDSS/OC/GD-1/EXO/AST/OORT layers) are billboard instances in one GPU mesh, not
    * `bodies` entries — so `travelTo` could never resolve one and silently returned, even though
    * the hover tooltip was showing `CLICK TO TRAVEL ▸` over it. Synthesizing a body here (never
-   * pushing it into `this.bodies`, exactly as the legacy engine keeps it local) lets the whole
-   * select→warp→arrive→vista→card path run unchanged, which is what revives
-   * `entryForFieldStar` on the default engine.
+   * pushing it into `this.bodies`, exactly as the legacy engine keeps it local — EXCEPT white
+   * dwarfs, PF-11 P2b's deliberate carve-out below) lets the whole select→warp→arrive→vista→card
+   * path run unchanged, which is what revives `entryForFieldStar` on the default engine.
    *
    * TWO DELIBERATE DIVERGENCES FROM THE LEGACY SOURCE, both because Babylon's field is not the
    * field space-engine.js had:
@@ -6474,18 +6525,36 @@ class BabylonScene extends HTMLElement {
    *    routing through it makes them agree by construction rather than by coincidence.
    */
   private _fieldBody(id: string): BabylonBody | undefined {
+    // PF-11 P2b: both current callers (travelTo, _aimAt below) already check `_bodyById` before
+    // falling back here, so this only re-fires on a genuine cache miss — but checking again
+    // keeps this method idempotent (and safe against a future caller that skips that check)
+    // rather than pushing a duplicate white-dwarf entry into `this.bodies` on a second call.
+    const cached = this._bodyById.get(id);
+    if (cached) return cached;
     const f = this._field;
     if (!f) return undefined;
     const t = fieldStarTarget(id, f.positions, f.count);
     if (!t) return undefined;
     const fi = this.fieldInfo(t.index);
     if (!fi) return undefined;
-    return {
+    const body: BabylonBody = {
       e: { id, ra: fi.ra, dec: fi.dec, ly: fi.ly },
       pos: t.pos,
       dir: t.dir,
       vis: false,
     };
+    // PF-11 P2b — carve white dwarfs (only) out of "always ephemeral, never memoized": a
+    // white dwarf a visitor has actually hovered/clicked/searched becomes a real `this.bodies`
+    // entry, same as a curated body, so it gets precise 34px picking (`_pick`), a chance to
+    // surface from `randomBody()`, and a stable identity for D4.2's queued-retarget drain — all
+    // for free, since that drain re-enters `travelTo`, which re-resolves through `_bodyById`
+    // first. Bounded by real session visit count (single digits to a few dozen), never the full
+    // 359,073-record eDR3 population — every other field type stays ephemeral, unchanged.
+    if (isPromotableFieldType(fi.type)) {
+      this._bodyById.set(id, body);
+      this.bodies.push(body);
+    }
+    return body;
   }
 
   travelTo(id: string, quiet?: boolean) {
@@ -6540,13 +6609,7 @@ class BabylonScene extends HTMLElement {
     // The volumetric test is PRESENCE OF A VOLUME, never `e.t === "nebula"` — the catalogs carry
     // far more nebula-typed entries than the 11 shipped volumes, and a type check would hand
     // dozens of billboard-only objects a standoff derived from a volume they do not have.
-    const vol = NEBULA_VOLUMES.find((v) => v.id === b.e.id);
-    const standoff =
-      b.e.t === "planet" || b.e.t === "moon" || b.e.t === "dwarf"
-        ? PLANET_ARRIVE_STANDOFF
-        : vol
-          ? vol.radius * NEBULA_ARRIVE_STANDOFF_FACTOR
-          : ARRIVE_STANDOFF;
+    const standoff = arrivalStandoffFor(b);
     const to: [number, number, number] = [
       b.pos[0] - dir[0] * standoff,
       b.pos[1] - dir[1] * standoff,
@@ -6848,8 +6911,9 @@ class BabylonScene extends HTMLElement {
       // PF-11 D4.2: `fs-<i>` resolves through the same synthesis `travelTo` uses, so a spec
       // can aim at a field object and then drive the REAL hover→click path (CLAUDE.md #18)
       // instead of calling `travelTo` directly and proving only that the method exists.
-      // Field objects are billboard instances, never `bodies` entries, so the ?? is the only
-      // way this hook can reach the ~168,883 objects D4.2 makes travelable.
+      // Field objects are billboard instances, not `bodies` entries on first resolution (PF-11
+      // P2b's white-dwarf carve-out is the one exception, and only AFTER a first resolve), so
+      // the ?? is the only way this hook can reach the ~168,883 objects D4.2 makes travelable.
       const b = this._bodyById.get(bodyId) ?? this._fieldBody(bodyId);
       if (!b) return false;
       pos = b.pos;

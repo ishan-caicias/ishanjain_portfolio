@@ -11,6 +11,16 @@ update) — ALL owner decisions are now taken.** IMPLEMENT starts at D0.
 was the last per the plan's own sequencing). **D0.3's real-device pass remains the one
 owner-scheduled item standing across the whole plan** (ADR-0008) — it calibrates D9's presets,
 D6.3's tier gating, and D8's defaults, none of which it blocks from shipping.
+**2026-09-02: the owner's own D0.3 real-device pass (same day) found 7 post-delivery defects
+against the shipped plan** ([triage](../analysis/2026-07-29-owner-device-pass-and-defect-triage.md)).
+Both P0s closed same day ([TR-115](../test-reports/TR-115.md)). The five remaining P1/P2/P3
+items (image fallback, Sun texture, white-dwarf rescale + partial body, warp-chase drift, plus
+a real WebGL2-fallback B6 measurement) closed in a second, separately-orchestrated pass
+([TR-117](../test-reports/TR-117.md)) — three carrying an explicit owner sign-off flag (a
+license-risk finding on newly-fetched photos, a scope reduction on the white-dwarf visual
+body, a minor-planet exclusion) rather than being unconditionally closed. Two triage items
+(§1d viewport-only tiering, gaia-tiny chunk-value visual check) remain open, outside that
+pass's scope. Test baseline at this point: 944 unit · 178 E2E.
 **Implementation companion (bidirectional — for coding agents):**
 [docs/implementation/PF-11-implementation-plan.md](../implementation/PF-11-implementation-plan.md)
 holds the full technical detail per phase; each phase below links to its implementation

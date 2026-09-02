@@ -167,6 +167,19 @@ describe("PerfMonitor", () => {
     expect(m.snapshot().renderFps).toBe(10);
   });
 
+  it("backend is null until fed, then reports the resolved Babylon backend", () => {
+    // PF-09 B6 A4: a snapshot must be able to say WHICH backend produced its
+    // fps/startup numbers so a WebGL2-fallback reading can't be mistaken for
+    // a WebGPU one (or vice versa) when read back later.
+    const m = new PerfMonitor("babylon", "high", DEV);
+    m.start(0);
+    expect(m.snapshot().backend).toBeNull();
+    m.setBackend("webgl2");
+    expect(m.snapshot().backend).toBe("webgl2");
+    m.setBackend("webgpu");
+    expect(m.snapshot().backend).toBe("webgpu");
+  });
+
   it("drops tab-sleep outliers and bounds the window", () => {
     const m = new PerfMonitor("webgl", "mid", DEV);
     let t = 0;

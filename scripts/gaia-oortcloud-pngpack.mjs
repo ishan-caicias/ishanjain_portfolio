@@ -46,7 +46,12 @@ const DAT_PATH =
   "resources/gaia_datasets/oort-cloud/oortcloud/oort_10000particles.dat";
 const AU_TO_LY = 1 / 63241.077;
 const OORT_TYPE_BYTE = 7; // "oort dust grain" — already a real shader branch, see header note
-const UNIFORM_MAG_BYTE = 40; // dim (no real photometry in source data — see header note)
+// PF-11 P2b: recomputed to preserve the ORIGINAL intended "dim" real magnitude (~10.30) under
+// the rescaled decode formula (mag = 21.5 - 32*t + 9*t^2, t = byte/255) — byte 40 meant mag
+// 10.30 under the old 12.5-floor formula; leaving it unchanged would have silently shifted this
+// population's rendered brightness to mag ~14.0 (a real, undocumented dimming) purely because
+// the decode side changed, not because the source data or intent did.
+const UNIFORM_MAG_BYTE = 100; // dim (~mag 10.30, unchanged intent — see header note)
 const UNIFORM_COLOUR_BYTE = 90; // cool neutral grey-blue, mid-ramp
 
 function parseRows(text) {

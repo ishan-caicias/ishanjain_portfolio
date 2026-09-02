@@ -429,14 +429,25 @@ const elev = (b: number) => -Math.tan(CHASE_ELEVATION) * b;
  * below SHIP_VIEW_DEPTH before k=1, so the ship never looms mid-brake. The
  * settle waypoint sits at k=0.92 on the elevation locus so the 30° hold still
  * runs to 0.92 (Vega's brief said 0.9; 0.92 is perceptually identical and
- * keeps the hold-window invariant intact). */
+ * keeps the hold-window invariant intact) — because elev() is linear in b,
+ * interpolating two on-locus waypoints with the same smoothstep weight stays
+ * on the locus at every interior k regardless of the waypoints' back values,
+ * so the k-shift alone satisfies the 30°-hold test; back is independent.
+ *
+ * PF-11 defect #5 fix (2026-09-02, see the dated MOTION-AUDIT correction in
+ * docs/experience-design/): the settle back-distance shipped at 3.4 instead
+ * of the brief's 4.3 — a 21% closer camera that TR-093 never justified (only
+ * the k-shift was explained; back was silently dragged along). Restored to
+ * the brief's 4.3: still ≥ SHIP_VIEW_DEPTH (no loom regression) and still
+ * monotone into k=1, but spreads the close-in over the full 0.72→1.0 tail
+ * instead of compressing 2.4 of the 2.8-unit close-in into 0.72→0.92. */
 const CHASE_WAYPOINTS: readonly [number, number, number, number][] = [
   [0.0, 0, 0, SHIP_VIEW_DEPTH],
   [0.1, 0, elev(2.6), 2.6],
   [0.35, 0, elev(4.5), 4.5],
   [0.55, 0.6, elev(5.3), 5.3],
   [0.72, 0.25, elev(5.8), 5.8],
-  [0.92, 0, elev(3.4), 3.4],
+  [0.92, 0, elev(4.3), 4.3],
   [1.0, 0, 0, SHIP_VIEW_DEPTH],
 ];
 

@@ -209,6 +209,14 @@
         "ultra": "earth-specular-ultra.jpg"
       },
       "atmosphere": true
+    },
+    "sun": {
+      "surface": {
+        "base": "sun-surface-base.jpg",
+        "high": "sun-surface-high.jpg"
+      },
+      "height": null,
+      "normal": null
     }
   }
 }

@@ -203,6 +203,36 @@ export const PLANET_LUNAR_L: Record<string, number> = {
   tethys: 1.0,
 };
 
+/* ---------- PF-11 defect P2a: the Sun sphere ------------------------------------------------
+ *
+ * THE SUN IS NOT A LIT BODY, so none of PLANET_PHYSICAL / PLANET_ALBEDO / PLANET_LUNAR_L above
+ * apply to it and it deliberately has no entry in any of them — `uAlbedo`/`uLunarL` fall back to
+ * their neutral defaults and are simply never read, for the reason below.
+ *
+ * REUSES THE VENUS FLAT-SHADOWLESS-ILLUMINANT FORK (uFlatLight, planet-sphere.ts shader twins),
+ * for the mirror-image reason Venus needed it. Venus's radar map must not be lit because a
+ * directional Sun would MANUFACTURE geometry that is not there. The Sun must not be lit because
+ * there is no directional illuminant to apply in the first place — it is the light source, not a
+ * reflector of one. `sunDirectionFrom(sunBodyPos)` is well-defined (the Sun sits at a real J2000
+ * geocentric ra/dec like every other catalog body, not at the world origin — see SUN_RA_DEG/
+ * SUN_DEC_DEG), so `uSunDir` gets a real value when the sphere dresses; it is simply irrelevant,
+ * because `outLin = mix(lit, flatLit, uFlatLight)` with `uFlatLight = 1` discards the entire
+ * `lit` term — reflectance, the dayside terminator mask, and relief self-shadowing — identically
+ * to how it discards them below Venus's cloud deck. A Lunar-Lambert terminator on a self-luminous
+ * star would be exactly the class of error CLAUDE.md's shader rules exist to prevent: a real
+ * formula applied to a surface whose physics it does not describe.
+ *
+ * VALUES ARE A DECLARED VISUAL CHOICE, not a measured quantity — unlike Venus's illuminant, which
+ * Astra derived from Rayleigh transmission against the asset's own cast, there is no "real relative
+ * illuminance" for a body that IS the illuminant. `SUN_FLAT_LEVEL` is chosen so the real
+ * granulation/faculae texture (Solar System Scope, CC BY 4.0 — see PLANET_SOURCES in
+ * build-planet-textures.mjs) reads as bright and overexposed after the shared Reinhard tone map
+ * (ADR-0010) without flattening to featureless white, and `SUN_FLAT_TINT_RGB` is left at neutral
+ * white so the texture's own real photographic colour (already a warm G2V yellow-orange) is not
+ * doubly tinted. */
+export const SUN_FLAT_LEVEL = 2.6;
+export const SUN_FLAT_TINT_RGB: readonly [number, number, number] = [1, 1, 1];
+
 /** Bodies that must NEVER be rendered as a sphere, however much texture data exists for them.
  *
  * OWNER DECISION (2026-07-21), on Astra's advice, recorded as a standing RULE rather than a

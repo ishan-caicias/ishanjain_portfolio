@@ -22,21 +22,22 @@ nebula ports — see TR-072, ADR-0004, PF-10 plan).
 
 ## Summary verdict table
 
-| #   | Source                           | License (verified 2026-07-22)                                                             | Risk      | Verdict for this repo                                                  |
-| --- | -------------------------------- | ----------------------------------------------------------------------------------------- | --------- | ---------------------------------------------------------------------- |
-| 1   | NASA SVS                         | Public domain ("unless otherwise noted")                                                  | CLEAN     | Best single source for Moon/star-map textures                          |
-| 2   | NASA Visible Earth / Blue Marble | Public domain (NASA media guidelines)                                                     | CLEAN     | Best Earth surface/topo/cloud source                                   |
-| 3   | USGS Astrogeology (MOLA, LOLA)   | US public domain, credit requested                                                        | CLEAN     | Best Mars/Moon elevation source; huge files need downsampling          |
-| 4   | JPL Horizons                     | US-gov data; no explicit license page; acknowledgment normal                              | CLEAN     | Best ephemeris ground truth for orbits/positions                       |
-| 5   | ESA multimedia (Gaia imagery)    | CC BY-SA 3.0 IGO where marked; **non-CC ESA content is NC by default**                    | SA        | Usable with credit + SA declaration; check the per-image license box   |
-| 6   | Gaia **data** (archive/DR3)      | **CC BY-NC 3.0 IGO** (license page) vs "open and free to use, provided credit" (DR3 docs) | **NC**    | Already shipped in-repo — needs an explicit owner risk acceptance note |
-| 7   | Solar System Scope textures      | CC BY 4.0 (stated verbatim on page)                                                       | CLEAN     | Easiest drop-in full planet set, 2K–8K                                 |
-| 8   | Stellarium texture tree          | Mixed per-file (PD / CC BY-SA / special permission)                                       | **TRAP**  | Do **not** bulk-copy; go to each texture's upstream instead            |
-| 9   | Hubble (STScI) imagery           | Public domain (STScI asserts no copyright; NASA contract)                                 | CLEAN     | DSO sprites/skybox imagery                                             |
-| 10  | JWST (STScI/ESA Webb) imagery    | PD via STScI/NASA; esawebb.org is CC BY 4.0                                               | CLEAN     | Prefer STScI (PD) over esawebb (CC BY) when both host an image         |
-| 11  | ESO imagery incl. GigaGalaxy     | CC BY 4.0 (site-wide for images)                                                          | CLEAN     | Milky Way panorama; **full 800-Mpx original is NOT free** (trap)       |
-| 12  | Hipparcos via CDS/VizieR         | Free for scientific use; commercial per-catalog; citation required                        | CLEAN-ish | Already the basis of the 168,959-star field; keep citation             |
-| 13  | HYG database (Astronexus)        | **CC BY-SA 4.0** (v4.x; v3.x was CC BY-SA 2.5)                                            | SA        | Convenient merged catalog; SA obligations on derived binaries          |
+| #   | Source                                             | License (verified 2026-07-22)                                                                                                            | Risk                            | Verdict for this repo                                                                                                                          |
+| --- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | NASA SVS                                           | Public domain ("unless otherwise noted")                                                                                                 | CLEAN                           | Best single source for Moon/star-map textures                                                                                                  |
+| 2   | NASA Visible Earth / Blue Marble                   | Public domain (NASA media guidelines)                                                                                                    | CLEAN                           | Best Earth surface/topo/cloud source                                                                                                           |
+| 3   | USGS Astrogeology (MOLA, LOLA)                     | US public domain, credit requested                                                                                                       | CLEAN                           | Best Mars/Moon elevation source; huge files need downsampling                                                                                  |
+| 4   | JPL Horizons                                       | US-gov data; no explicit license page; acknowledgment normal                                                                             | CLEAN                           | Best ephemeris ground truth for orbits/positions                                                                                               |
+| 5   | ESA multimedia (Gaia imagery)                      | CC BY-SA 3.0 IGO where marked; **non-CC ESA content is NC by default**                                                                   | SA                              | Usable with credit + SA declaration; check the per-image license box                                                                           |
+| 6   | Gaia **data** (archive/DR3)                        | **CC BY-NC 3.0 IGO** (license page) vs "open and free to use, provided credit" (DR3 docs)                                                | **NC**                          | Already shipped in-repo — needs an explicit owner risk acceptance note                                                                         |
+| 7   | Solar System Scope textures                        | CC BY 4.0 (stated verbatim on page)                                                                                                      | CLEAN                           | Easiest drop-in full planet set, 2K–8K                                                                                                         |
+| 8   | Stellarium texture tree                            | Mixed per-file (PD / CC BY-SA / special permission)                                                                                      | **TRAP**                        | Do **not** bulk-copy; go to each texture's upstream instead                                                                                    |
+| 9   | Hubble (STScI) imagery                             | Public domain (STScI asserts no copyright; NASA contract)                                                                                | CLEAN                           | DSO sprites/skybox imagery                                                                                                                     |
+| 10  | JWST (STScI/ESA Webb) imagery                      | PD via STScI/NASA; esawebb.org is CC BY 4.0                                                                                              | CLEAN                           | Prefer STScI (PD) over esawebb (CC BY) when both host an image                                                                                 |
+| 11  | ESO imagery incl. GigaGalaxy                       | CC BY 4.0 (site-wide for images)                                                                                                         | CLEAN                           | Milky Way panorama; **full 800-Mpx original is NOT free** (trap)                                                                               |
+| 12  | Hipparcos via CDS/VizieR                           | Free for scientific use; commercial per-catalog; citation required                                                                       | CLEAN-ish                       | Already the basis of the 168,959-star field; keep citation                                                                                     |
+| 13  | HYG database (Astronexus)                          | **CC BY-SA 4.0** (v4.x; v3.x was CC BY-SA 2.5)                                                                                           | SA                              | Convenient merged catalog; SA obligations on derived binaries                                                                                  |
+| 14  | DSS2 via CDS `hips2fits` (`alasky.cds.unistra.fr`) | **Copyrighted** (AAO/Caltech/AURA per plate), "distributed herein by agreement" — **no explicit third-party redistribution grant found** | **NC-like risk, owner-flagged** | Used for PF-11 defect P1's `celestial-dso4-*` pack under the same declared-risk posture as §6 (Gaia data) — see §14 below for the full finding |
 
 Everything in this table can be downloaded and self-hosted, so **all of it is compatible with
 the no-CDN hash-based CSP** — the only sources with a distribution problem are the two traps
@@ -210,6 +211,35 @@ the no-CDN hash-based CSP** — the only sources with a distribution problem are
   products — for measured-accuracy bodies prefer §1/§2/§3 and keep SSS for gas giants and
   the Venus cloud deck.
 
+**Asset actually fetched — verified 2026-09-02, PF-11 defect P2a (Sun sphere).** The Sun had a
+real catalog entry and real `sunDirectionFrom()` geometry but no shipped texture at all (it fell
+through to the 110px procedural star beacon) — the Gaia Sky `hi-res-textures` pack this repo's
+`scripts/build-planet-textures.mjs` otherwise sources from has **no Sun map** (see that file's
+`PACK_RECKONING`; Gaia Sky treats Sol as a star-billboard sprite, not a planet-pipeline body), so
+this is the first `PLANET_SOURCES` entry sourced from Solar System Scope directly rather than the
+pre-existing local pack.
+
+- **Direct download URL (verified live, 2026-09-02):**
+  `https://www.solarsystemscope.com/textures/download/2k_sun.jpg` — reached via the "Sun, Moon
+  and Stars" section of <https://www.solarsystemscope.com/textures/>, whose Sun row offers
+  exactly two tiers: `2k_sun.jpg` (labelled plain "Download" — the free/standard tier) and
+  `8k_sun.jpg` (same button text; not fetched — the standard tier is sufficient here and per-tier
+  gating was not exercised for this one-off single-body fetch).
+- **File as fetched:** JPEG, 2048×1024 (exact 2:1 equirectangular, matching this pipeline's
+  aspect requirement with no re-projection), 822,427 bytes. Real photographic granulation and
+  faculae — not a synthetic/procedural disc.
+- **License re-confirmed verbatim on the same page, same date:** "Distributed under Attribution
+  4.0 International license: You may use, adapt, and share these textures for any purpose, even
+  commercially." Identical wording to the 2026-07-22 pass above — CC BY 4.0, CLEAN, no change.
+- **Shipped as:** `resources/gaia_datasets/hi-res-textures/default-data/tex/base/sun-2k.jpg`
+  (gitignored source pack) → `PLANET_SOURCES` entry `{ id: "sun", surface: "sun-2k" }` →
+  `public/assets/planets/sun-surface-{base,high}.jpg` (committed output; no `ultra` tier — `sun`
+  is not in `ULTRA_SOURCES`, and the 4096px `high` tier is an upscale of the 2048 source, accepted
+  because the Sun renders through the flat-shadowless-illuminant shader fork with no directional
+  shading to expose upsample softness — see `src/lib/planet-sphere.ts` `SUN_FLAT_LEVEL`).
+- **Attribution:** covered by the existing "Solar System Scope" credit line above; no separate
+  entry needed on an eventual attributions page.
+
 ## 8. Stellarium texture tree — **TRAP: mixed per-file licenses**
 
 - **URLs:** <https://github.com/Stellarium/stellarium/tree/master/textures> — license ledger
@@ -324,6 +354,60 @@ the no-CDN hash-based CSP** — the only sources with a distribution problem are
   as §5, and worth the same explicit owner sign-off given the PF-10 precedent (that
   precedent was specifically **NC**+SA; plain SA carries no commercial restriction).
 
+## 14. DSS2 via CDS `hips2fits` (Digitized Sky Survey cutouts) — **verified 2026-09-02, flagged NC-like risk**
+
+**Date added:** 2026-09-02, as part of PF-11 defect P1 (class-blind collector-card image
+fallback) — the owner approved sourcing real per-object photos for the 41 NGC2000 nebulae + 35
+hall-of-fame clusters via `scripts/fetch-dso-survey-photos.mjs`, which pulls colour cutouts from
+`https://alasky.cds.unistra.fr/hips-image-services/hips2fits?hips=CDS/P/DSS2/color&...`. This
+entry is the license verification the task explicitly required BEFORE using that source — done
+live against the actual pages (not carried forward from a prior summary), and the result is
+**less clean than "a uniform STScI product" suggests.**
+
+- **URLs checked (all fetched live, 2026-09-02):**
+  - hips2fits service docs — <https://alasky.cds.unistra.fr/hips-image-services/hips2fits>
+    (technical/API docs only; **no license or terms-of-use text anywhere on the page**)
+  - DSS copyright summary — <https://archive.stsci.edu/dss/copyright.html>
+  - DSS acknowledgment page — <https://archive.stsci.edu/dss/acknowledging.html>
+  - CDS VizieR usage rules — <https://cds.unistra.fr/vizier-org/licences_vizier.html> (covers
+    catalog _data_, not HiPS/DSS _imagery_ — checked and confirmed it does not apply)
+  - Aladin Sky Atlas — <https://aladin.cds.unistra.fr/aladin.gml> (states only that the Aladin
+    _software_ is GPL v3; says nothing about the imagery it serves)
+  - ESO copyright policy — <https://www.eso.org/public/copyright/> (confirmed: covers only ESO's
+    own CC BY 4.0 imagery, does not extend to DSS)
+- **What the DSS copyright page actually says (verbatim):**
+  - Second Epoch Survey: _"The digitized images are copyright © 1993-5 by the Anglo-Australian
+    Observatory Board, and are distributed herein by agreement."_
+  - UK Schmidt/Equatorial Red Atlas: _"...copyright © 1992-5, jointly by the UK SERC/PPARC...and
+    the Anglo-Australian Telescope Board, and are distributed herein by agreement."_
+  - Palomar (POSS-II): _"...are copyright © 1993-1995 by the California Institute of Technology
+    and are distributed herein by agreement."_
+  - Everything else: _"copyright © 1995 by the Association of Universities for Research in
+    Astronomy, Inc."_
+  - The acknowledgment page adds only: _"All data are subject to the copyright given in the
+    copyright summary... Investigators using these scans are requested to include these
+    acknowledgments in any publications as appropriate."_
+- **The finding:** unlike §9/§10 above (Hubble/JWST **press-release** imagery, where STScI
+  explicitly asserts **no claim to copyright** and the material is genuinely public domain), the
+  DSS **survey plates** are third-party-copyrighted archival data (AAO, Caltech, PPARC, AURA) that
+  STScI/CDS distribute **"by agreement"** — that phrase describes the agreement between the
+  copyright holders and the distributing archives, not a license extended to a downstream site
+  re-hosting cropped derivative images. No page found (across CDS, STScI, or Aladin) states an
+  explicit permission for third-party redistribution of DSS cutouts, commercial or otherwise, the
+  way §1/§2/§3/§7/§9/§10/§11 all do in so many words. This is **not** the TRAP category (nothing
+  is being bulk-copied against an explicit prohibition, and hips2fits is CDS's own sanctioned
+  public _access_ mechanism) — it's closer to §6's **NC-like** situation: long-standing,
+  widely-used, scientific-archive-sanctioned access with a citation request, but no clean
+  redistribution grant on file.
+- **Compatibility / recommended posture:** matching the §6 (Gaia data) precedent exactly rather
+  than inventing a new standard — **used for this defect fix under an owner-flagged risk, not
+  treated as CLEAN.** Every fetched image is credited "Digitized Sky Survey (STScI/CDS)" on its
+  collector card (the acknowledgment text the DSS page itself requests), the crops are small
+  (illustrative field cutouts, not the survey's own distributable products), and the use is a
+  personal, no-revenue portfolio — the same defensible-non-commercial-use posture §6 already
+  documents for Gaia. **This is a decision for the owner to affirm or override**, exactly as §6
+  asks for the Gaia NC term; it is recorded here as a finding, not resolved as settled.
+
 ---
 
 ## Cross-cutting recommendations
@@ -365,3 +449,19 @@ All fetched 2026-07-22:
 - ESO copyright — <https://www.eso.org/public/copyright/> · GigaGalaxy panorama — <https://www.eso.org/public/images/eso0932a/>
 - CDS VizieR usage rules — <https://cds.unistra.fr/vizier-org/licences_vizier.html>
 - HYG database — <https://codeberg.org/astronexus/hyg> · <https://github.com/astronexus/HYG-Database>
+
+Fetched 2026-09-02 (§14 only):
+
+- hips2fits service — <https://alasky.cds.unistra.fr/hips-image-services/hips2fits>
+- DSS copyright summary — <https://archive.stsci.edu/dss/copyright.html> · acknowledgment page —
+  <https://archive.stsci.edu/dss/acknowledging.html>
+- CDS VizieR usage rules (re-checked, confirmed scope) — <https://cds.unistra.fr/vizier-org/licences_vizier.html>
+- Aladin Sky Atlas — <https://aladin.cds.unistra.fr/aladin.gml>
+
+Re-fetched 2026-09-02 (§7 addendum only — PF-11 defect P2a, Sun texture):
+
+- Solar System Scope textures page (re-checked, license text unchanged) —
+  <https://www.solarsystemscope.com/textures/>
+- Direct Sun texture download (2K, standard tier) —
+  <https://www.solarsystemscope.com/textures/download/2k_sun.jpg>
+- ESO copyright policy (re-checked, confirmed scope) — <https://www.eso.org/public/copyright/>

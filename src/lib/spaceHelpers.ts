@@ -44,6 +44,222 @@ export function fmtC(v: number): string {
   return v.toFixed(2) + " c";
 }
 
+// --- Class-aware collector-card / arrival-vista visual fallback (PF-11 defect P1) -----------
+//
+// CollectorCard.tsx and ArrivalVista.tsx each render one of a small set of visual treatments for
+// a body's image panel. Before this fix both computed that choice from `!!e.img`/`!!e.fig` ALONE
+// — never consulting `e.t` (the body's real class: star/galaxy/nebula/cluster/blackhole/moon/
+// dwarf/...) — so any photo-less non-star (a galaxy, a nebula, a globular cluster, a black hole)
+// rendered the literal sun-surface texture (`/assets/star-tex.jpg`) under a "SPECTRAL RENDER · "
+// caption that was simply false for that body. Measured against the real catalog this was 74.4%
+// of all bodies (docs/analysis/2026-07-29-owner-device-pass-and-defect-triage.md, Defect #6).
+//
+// `resolveCardVisual` is the single place that decision is made now, so the two card components
+// cannot drift back out of sync with each other the way they drifted out of sync with `e.t`. It
+// returns a `kind` (which JSX branch to render) and an honest `caption` in one call. New
+// class-aware kinds are PURELY PROCEDURAL — CSS gradients and deterministic SVG glyphs derived
+// from the body's own `c` (hex glow colour) and `id` — no new image assets, matching how `isFig`
+// already renders constellation lines with zero images and how the star glow already derives its
+// gradient from `c`.
+export type CardVisualKind =
+  | "globe" // planet/moon/dwarf WITH a real equirect surface photo -> drawGlobe canvas
+  | "figure" // has a constellation figure -> SVG line diagram (figGeom)
+  | "photo" // has a real image, not surface-mapped -> flat photo panel
+  | "star" // no image/figure, class is (or defaults to) star -> procedural star glow
+  | "nebula" // no image, class nebula -> diffuse gas-cloud gradient
+  | "galaxy" // no image, class galaxy -> spiral/elliptical glow
+  | "cluster" // no image, class cluster -> scattered bound-star-point glyph
+  | "blackhole" // no image, class blackhole -> event-horizon ring
+  | "moon" // no image, class moon -> procedural cratered sphere shading
+  | "asteroid" // no image, class dwarf (minor planet) -> irregular rock silhouette
+  | "generic"; // no image, unrecognised/future class -> neutral glow, honest caption
+
+export interface CardVisual {
+  kind: CardVisualKind;
+  caption: string;
+}
+
+const CLASS_VISUAL: Record<string, { kind: CardVisualKind; caption: string }> =
+  {
+    nebula: { kind: "nebula", caption: "PROCEDURAL RENDER · NEBULA CLASS" },
+    galaxy: { kind: "galaxy", caption: "PROCEDURAL RENDER · GALAXY CLASS" },
+    cluster: { kind: "cluster", caption: "PROCEDURAL RENDER · CLUSTER CLASS" },
+    blackhole: {
+      kind: "blackhole",
+      caption: "PROCEDURAL RENDER · BLACK HOLE CLASS",
+    },
+    moon: { kind: "moon", caption: "PROCEDURAL RENDER · MOON CLASS" },
+    dwarf: {
+      kind: "asteroid",
+      caption: "PROCEDURAL RENDER · MINOR PLANET CLASS",
+    },
+  };
+
+export function resolveCardVisual(e: CelestialEntry): CardVisual {
+  const isGlobe =
+    (e.t === "planet" || e.t === "moon" || e.t === "dwarf") && !!e.img;
+  if (isGlobe)
+    return { kind: "globe", caption: "SURFACE MAP · NASA / GAIA SKY" };
+  if (e.fig) return { kind: "figure", caption: "FIGURE · HIPPARCOS POSITIONS" };
+  if (e.img)
+    return {
+      kind: "photo",
+      caption: "IMAGE · " + (e.crd || "NASA / ESA ARCHIVES"),
+    };
+  const cls = CLASS_VISUAL[e.t];
+  if (cls) return cls;
+  if (e.t === "star")
+    return { kind: "star", caption: "SPECTRAL RENDER · " + (e.sp || "") };
+  // Unrecognised class with no image/figure (e.g. a future body type) — still honest about what
+  // it is rather than silently reusing the star caption for a non-star.
+  return {
+    kind: "generic",
+    caption: "PROCEDURAL RENDER · " + e.t.toUpperCase(),
+  };
+}
+
+/** Internal authoring marker for catalog entries with no content pass yet (TR-061's honesty
+ * convention: an explicit `[[TODO: ...]]` placeholder rather than invented flavour text). Several
+ * bulk-generated catalog files (celestial-nbg.js, celestial-gd1.js, celestial-ngc2000.js,
+ * celestial-clusters.js) ship entries whose `f` is literally this marker, in a few slightly
+ * different wordings — never intended to reach a visitor as-is. */
+const FIELD_NOTE_TODO_RE = /^\s*\[\[TODO:/i;
+
+/** Field note to show for a body, or `null` to omit the section entirely. Bulk-authored entries
+ * with no content pass yet carry the honest internal `[[TODO: ...]]` marker described above —
+ * showing that raw string to a visitor was never the intent, and per TR-061's own convention this
+ * must NOT be papered over with invented flavour text, so the only honest fix is to not show a
+ * field note at all until one is actually authored. */
+export function resolveFieldNote(e: CelestialEntry): string | null {
+  if (!e.f || FIELD_NOTE_TODO_RE.test(e.f)) return null;
+  return e.f;
+}
+
+/** `e.lo` (sky-lore `[culture, text]` tuples), with the same `[[TODO: ...]]` authoring marker
+ * filtered out — `celestial-clusters.js` ships some entries as `[["", "[[TODO: ...]]"]]` rather
+ * than `null`, which without this would render an empty-culture lore card showing the raw marker
+ * text (the same defect `resolveFieldNote` fixes for `e.f`, one field over). */
+export function resolveLore(e: CelestialEntry): [string, string][] {
+  return (e.lo || []).filter(([, text]) => !FIELD_NOTE_TODO_RE.test(text));
+}
+
+/** Deterministic small PRNG (mulberry32) seeded from a body id via an FNV-1a hash, so the
+ * procedural glyphs below (cluster scatter, moon craters, asteroid silhouette) are stable across
+ * re-renders and identical between CollectorCard and ArrivalVista for the same body, rather than
+ * reshuffling on every paint. Not cryptographic — just a cheap, well-distributed hash-to-PRNG. */
+function seededRandom(id: string, salt: number): () => number {
+  let h = 2166136261 ^ salt;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  let a = h >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export interface DotGlyph {
+  x: number;
+  y: number;
+  r: number;
+}
+
+/** Scattered bound-point glyph for the "cluster" fallback — denser toward the centre (sqrt of a
+ * uniform draw) so it reads as gravitationally bound rather than uniform noise. Coordinates sit
+ * in the same 400x300 space `figGeom` already uses for the constellation-figure SVG, so both
+ * card components can drop it into an identical `viewBox="0 0 400 300"` `<svg>`. */
+export function clusterDots(e: CelestialEntry, count = 26): DotGlyph[] {
+  const rnd = seededRandom(e.id, 0x1);
+  const out: DotGlyph[] = [];
+  for (let i = 0; i < count; i++) {
+    const ang = rnd() * Math.PI * 2;
+    const rad = Math.sqrt(rnd()) * 130;
+    out.push({
+      x: 200 + Math.cos(ang) * rad,
+      y: 150 + Math.sin(ang) * rad * 0.75,
+      r: 1.1 + rnd() * 2.2,
+    });
+  }
+  return out;
+}
+
+/** Crater-pockmark glyph for the "moon" fallback (a real moon with real physical stats but no
+ * surface photo — e.g. celestial-missing-moons.js's Mimas/Iapetus/Phobos/Triton/Charon). Same
+ * 400x300 space as `clusterDots`, tighter radius so it reads as a disc's relief, not a scatter. */
+export function moonCraters(e: CelestialEntry, count = 9): DotGlyph[] {
+  const rnd = seededRandom(e.id, 0x2);
+  const out: DotGlyph[] = [];
+  for (let i = 0; i < count; i++) {
+    const ang = rnd() * Math.PI * 2;
+    const rad = Math.sqrt(rnd()) * 78;
+    out.push({
+      x: 200 + Math.cos(ang) * rad,
+      y: 150 + Math.sin(ang) * rad,
+      r: 3 + rnd() * 7,
+    });
+  }
+  return out;
+}
+
+/** Irregular lumpy-silhouette polygon (as an SVG `points` string) for the "asteroid" fallback —
+ * jittered radius around a circle, standing in for the small, non-spherical minor planets that
+ * ship with real orbital/physical data but no imagery (celestial-minorplanets.js). Same 400x300
+ * space as the other glyphs above. */
+export function asteroidSilhouette(e: CelestialEntry, points = 12): string {
+  const rnd = seededRandom(e.id, 0x3);
+  const cx = 200;
+  const cy = 150;
+  const baseR = 95;
+  const pts: string[] = [];
+  for (let i = 0; i < points; i++) {
+    const ang = (i / points) * Math.PI * 2;
+    const r = baseR * (0.72 + rnd() * 0.34);
+    pts.push(
+      `${(cx + Math.cos(ang) * r).toFixed(1)},${(cy + Math.sin(ang) * r * 0.72).toFixed(1)}`,
+    );
+  }
+  return pts.join(" ");
+}
+
+/** Diffuse, irregular gas-cloud gradient for the "nebula" fallback — three overlapping soft
+ * radial blobs at `c`, rather than one centred glow, so it doesn't read as just a blurry star. */
+export function nebulaGradient(c: string): string {
+  return [
+    `radial-gradient(circle at 34% 38%, ${c}77 0%, ${c}3d 26%, transparent 55%)`,
+    `radial-gradient(circle at 66% 62%, ${c}66 0%, ${c}2e 30%, transparent 60%)`,
+    `radial-gradient(circle at 50% 50%, ${c}33 0%, transparent 70%)`,
+  ].join(", ");
+}
+
+/** Flattened, bright-cored elliptical glow for the "galaxy" fallback — an edge-on disc silhouette
+ * rather than the nebula's diffuse blobs or the star's round core. */
+export function galaxyGradient(c: string): string {
+  return [
+    `radial-gradient(ellipse 62% 20% at 50% 50%, #fff 0%, ${c} 14%, ${c}cc 30%, ${c}44 52%, transparent 74%)`,
+    `radial-gradient(ellipse 90% 34% at 50% 50%, ${c}22 0%, transparent 70%)`,
+  ].join(", ");
+}
+
+/** Dark core + thin bright accretion ring + faint halo for the "blackhole" fallback — the inverse
+ * of every other class here (light comes from a ring around darkness, not a glowing centre). */
+export function blackholeGradient(c: string): string {
+  return [
+    `radial-gradient(circle at 50% 50%, #000 0%, #000 29%, ${c}33 30.5%, ${c}ee 32.5%, ${c}33 34.5%, transparent 46%)`,
+    `radial-gradient(circle at 50% 50%, transparent 55%, ${c}22 78%, transparent 100%)`,
+  ].join(", ");
+}
+
+/** Base sphere shading for the "moon" fallback, under the `moonCraters` glyph — an off-centre
+ * highlight and a dark limb, evoking a lit sphere without an actual surface photo. */
+export function moonGradient(c: string): string {
+  return `radial-gradient(circle at 36% 32%, ${c} 0%, ${c}cc 40%, ${c}66 72%, #05081a 100%)`;
+}
+
 export interface FigGeom {
   figStars: { x: string; y: string; r: number }[];
   figLines: { x1: string; y1: string; x2: string; y2: string }[];

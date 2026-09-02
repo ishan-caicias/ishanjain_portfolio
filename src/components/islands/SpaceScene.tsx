@@ -305,7 +305,22 @@ function getFeaturedSuggestions(): CommandSuggestion[] {
 function entryFor(id: string | null): CelestialEntry | null {
   if (!id) return null;
   const found = catalog().find((x) => x.id === id);
-  if (found) return found;
+  if (found) {
+    // Defensive fallback (PF-11 defect P1): CELESTIAL_IMGMAP is fully merged into
+    // window.CELESTIAL at load time (celestial-extra2.js's own tail loop), but that merge
+    // currently relies on Promise.all module-load-order luck rather than a guaranteed sequence
+    // (see that file's comment). This is the safety net the archived space-engine.js already had
+    // (_applyImgmap) and the Babylon path did not — cheap, one-line, additive, never overrides an
+    // image the catalog already resolved.
+    if (!found.img) {
+      const im = window.CELESTIAL_IMGMAP?.[found.id];
+      if (im) {
+        found.img = im[0];
+        found.crd = im[1];
+      }
+    }
+    return found;
+  }
   if (!id.startsWith("fs-")) return null;
   const en = engineEl();
   if (!en) return null;
@@ -610,9 +625,21 @@ export default function SpaceScene({
       const n = engineKind === "babylon" ? el.renderFrames : el._frame;
       return typeof n === "number" ? n : null;
     };
+    // PF-09 B6 A4: window.__ijPerf()'s snapshot previously had no way to say
+    // WHICH Babylon backend produced its fps/startup numbers — a reader had
+    // to cross-reference sceneStats().backend separately to know whether a
+    // reading was the WebGPU or WebGL2-fallback tier. Fed every frame at the
+    // same cadence as readEngineFrames (a property read, no allocation);
+    // always null on the archived space-engine (it has no `backend`).
+    const readEngineBackend = (): "webgpu" | "webgl2" | null => {
+      if (engineKind !== "babylon") return null;
+      const b = resolveEngineEl()?.backend;
+      return b === "webgpu" || b === "webgl2" ? b : null;
+    };
     let raf = requestAnimationFrame(function loop() {
       monitor.frame(performance.now());
       monitor.setRenderFrames(readEngineFrames(), performance.now());
+      monitor.setBackend(readEngineBackend());
       raf = requestAnimationFrame(loop);
     });
     const perfWin = window as unknown as { __ijPerf?: () => PerfSnapshot };
@@ -731,6 +758,19 @@ export default function SpaceScene({
         // its own .then chained after batch 1 rather than folded into one import for the
         // same non-ordering-guarantee reason above.
         () => import("@/data/celestial/celestial-content-overlay-ngc2000.js"),
+      )
+      .then(
+        // PF-11 defect P1 fix: duplicate-id image borrow (m45<->cluster-pleiades etc — see that
+        // module's header) must run after every base catalog module has populated
+        // window.CELESTIAL, same non-ordering-guarantee reason as the two overlays above.
+        () => import("@/data/celestial/celestial-image-borrow-overlay.js"),
+      )
+      .then(
+        // PF-11 defect P1 fix: real DSS2 survey photos for the NGC2000/cluster/minor-planet
+        // objects that still have no image after the borrow overlay above. Chained after it (not
+        // merged into the same .then) so this module's own "still missing" check is never racing
+        // the borrow it depends on.
+        () => import("@/data/celestial/celestial-dso4-imgmap.js"),
       )
       .then(() => {
         if (!cancelled) setEngineReady(true);

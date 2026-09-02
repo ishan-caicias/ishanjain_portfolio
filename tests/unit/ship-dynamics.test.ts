@@ -459,6 +459,18 @@ describe("PF-08 F2 chase camera", () => {
       }
       expect(chaseOffsetAt(1)[2]).toBe(SHIP_VIEW_DEPTH);
     });
+
+    // PF-11 defect #5 (owner real-device pass, 2026-07-29): the shipped
+    // settle waypoint back-distance (3.4) was 21% closer than the D3.1
+    // SHOT-BRIEF's prescribed 4.3 — a drift TR-093 never justified (only the
+    // k=0.9→0.92 shift was explained). Restored per the dated MOTION-AUDIT
+    // correction in docs/experience-design/.
+    it("D3.1 defect #5: the settle waypoint (k=0.92) sits at the spec's back=4.3, not the drifted 3.4", () => {
+      const [right, up, back] = chaseOffsetAt(0.92);
+      expect(back).toBeCloseTo(4.3, 6);
+      expect(right).toBe(0);
+      expect(-up / back).toBeCloseTo(Math.tan(CHASE_ELEVATION), 6); // still on the 30° locus
+    });
   });
 
   describe("warp profile v4 (D3.2 / ADR-0011 — coast plateau + flip floor)", () => {

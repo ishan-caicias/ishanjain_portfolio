@@ -1,6 +1,18 @@
 import { useEffect, useRef } from "react";
 import type { CelestialEntry } from "@/data/celestial/celestial.d.ts";
-import { fmtDist, figGeom, drawGlobe } from "@/lib/spaceHelpers";
+import {
+  fmtDist,
+  figGeom,
+  drawGlobe,
+  resolveCardVisual,
+  clusterDots,
+  moonCraters,
+  asteroidSilhouette,
+  nebulaGradient,
+  galaxyGradient,
+  blackholeGradient,
+  moonGradient,
+} from "@/lib/spaceHelpers";
 import { moveFocusTo, restoreFocusTo } from "@/lib/focus-utils";
 
 /**
@@ -44,12 +56,21 @@ export default function ArrivalVista({
   }, []);
 
   const c = entry.c || "#ffd54f";
-  const isGlobe =
-    (entry.t === "planet" || entry.t === "moon" || entry.t === "dwarf") &&
-    !!entry.img;
-  const isFig = !!entry.fig;
-  const isPhoto = !!entry.img && !isGlobe;
-  const isStar = !entry.img && !isFig;
+  // PF-11 defect P1 fix — same class-aware fallback as CollectorCard.tsx, sharing the exact same
+  // `resolveCardVisual` decision so the two components cannot drift apart again. See that
+  // function's header comment (src/lib/spaceHelpers.ts) for the full account.
+  const visual = resolveCardVisual(entry);
+  const isGlobe = visual.kind === "globe";
+  const isFig = visual.kind === "figure";
+  const isPhoto = visual.kind === "photo";
+  const isStar = visual.kind === "star";
+  const isNebula = visual.kind === "nebula";
+  const isGalaxy = visual.kind === "galaxy";
+  const isCluster = visual.kind === "cluster";
+  const isBlackhole = visual.kind === "blackhole";
+  const isMoon = visual.kind === "moon";
+  const isAsteroid = visual.kind === "asteroid";
+  const isGeneric = visual.kind === "generic";
   const fig = isFig ? figGeom(entry) : null;
 
   return (
@@ -139,6 +160,100 @@ export default function ArrivalVista({
                 <circle key={i} cx={st.x} cy={st.y} r={st.r} fill="#ffe082" />
               ))}
             </svg>
+          )}
+          {isNebula && (
+            <div
+              aria-hidden="true"
+              className="absolute inset-0 rounded-full blur-[0.5px]"
+              style={{
+                background: nebulaGradient(c),
+                boxShadow: `0 0 90px ${c}33, 0 0 200px ${c}18`,
+              }}
+            />
+          )}
+          {isGalaxy && (
+            <div
+              aria-hidden="true"
+              className="absolute inset-0 rounded-full blur-[0.5px]"
+              style={{
+                background: galaxyGradient(c),
+                boxShadow: `0 0 90px ${c}33, 0 0 200px ${c}18`,
+              }}
+            />
+          )}
+          {isBlackhole && (
+            <div
+              aria-hidden="true"
+              className="absolute inset-0 rounded-full"
+              style={{ background: blackholeGradient(c) }}
+            />
+          )}
+          {isCluster && (
+            <svg
+              viewBox="0 0 400 300"
+              className="absolute inset-0 h-full w-full"
+              aria-label="Cluster member scatter, illustrative"
+            >
+              {clusterDots(entry).map((d, i) => (
+                <circle
+                  key={i}
+                  cx={d.x}
+                  cy={d.y}
+                  r={d.r}
+                  fill={c}
+                  opacity={0.8}
+                />
+              ))}
+            </svg>
+          )}
+          {isMoon && (
+            <>
+              <div
+                aria-hidden="true"
+                className="absolute inset-0 rounded-full"
+                style={{ background: moonGradient(c) }}
+              />
+              <svg
+                viewBox="0 0 400 300"
+                className="absolute inset-0 h-full w-full"
+                aria-label="Surface relief, illustrative"
+              >
+                {moonCraters(entry).map((d, i) => (
+                  <circle
+                    key={i}
+                    cx={d.x}
+                    cy={d.y}
+                    r={d.r}
+                    fill="#000"
+                    opacity={0.22}
+                  />
+                ))}
+              </svg>
+            </>
+          )}
+          {isAsteroid && (
+            <svg
+              viewBox="0 0 400 300"
+              className="absolute inset-0 h-full w-full"
+              aria-label="Silhouette, illustrative"
+            >
+              <polygon
+                points={asteroidSilhouette(entry)}
+                fill={c}
+                opacity={0.85}
+                stroke={c}
+                strokeWidth={1.5}
+              />
+            </svg>
+          )}
+          {isGeneric && (
+            <div
+              aria-hidden="true"
+              className="absolute inset-0 rounded-full blur-[0.6px]"
+              style={{
+                background: `radial-gradient(circle, ${c}cc 0%, ${c}55 45%, transparent 75%)`,
+              }}
+            />
           )}
         </div>
       </div>

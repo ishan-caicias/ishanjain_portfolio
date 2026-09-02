@@ -51,7 +51,11 @@ import { dirname } from "node:path";
 
 const PC_TO_LY = 3.26156;
 const CLUSTER_TYPE_BYTE = 1; // "cluster: soft glow, no PSF core" — see header note
-const UNIFORM_MAG_BYTE = 70; // moderate-dim (no real photometry in any of the 3 sources)
+// PF-11 P2b: recomputed to preserve the ORIGINAL intended "moderate-dim" real magnitude (~8.66)
+// under the rescaled decode formula (mag = 21.5 - 32*t + 9*t^2, t = byte/255) — byte 70 meant
+// mag 8.66 under the old 12.5-floor formula; see gaia-oortcloud-pngpack.mjs's sibling note for
+// why leaving the byte unchanged would silently shift the intended brightness.
+const UNIFORM_MAG_BYTE = 118; // moderate-dim (~mag 8.66, unchanged intent — no real photometry in any of the 3 sources)
 const UNIFORM_COLOUR_BYTE = 140; // warm-neutral mid-ramp, distinct from the Oort cloud's cool-grey
 const DEDUP_ANGLE_DEG = 1.0;
 const DEDUP_DISTANCE_FRAC = 0.3;

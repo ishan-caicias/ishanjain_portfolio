@@ -161,6 +161,21 @@ export const PLANET_SOURCES = [
   { id: "jupiter", surface: "jupiter-high" },
   // NOT "satrun-high" — see the source-data note in the header.
   { id: "saturn", surface: "saturn-high" },
+  // PF-11 defect P2a (2026-09-02): the Sun had a real catalog entry (celestial-catalog.js,
+  // t:"star") and a real sunDirectionFrom() geometry, but no texture — it fell through to the
+  // 110px procedural beacon meant for background stars. NOT from the Gaia Sky hi-res-textures
+  // pack this file otherwise sources from (that pack has no Sun map at all — see PACK_RECKONING's
+  // header note; Sol is stars/skybox territory to Gaia Sky, not a "planet"). Sourced instead from
+  // Solar System Scope (CC BY 4.0 — docs/research/texture-sources-public-domain.md §7), the same
+  // provenance already vetted for this pipeline. `sun-2k` is their free/standard 2048x1024 tier —
+  // real photographic granulation, not a synthetic disc — named honestly for its actual source
+  // resolution rather than borrowing the "-high"/"-ultra" suffixes those tags mean for the other
+  // bodies here (a genuinely >=4096px source). This pipeline's `high` (4096) output tier is
+  // therefore an UPSCALE of a 2048 source for this one body — accepted rather than tier-capped
+  // (MAP_TIER_CAP) because the Sun renders through the flat-shadowless-illuminant fork below
+  // (uFlatLight=1, no directional shading), where upsample softness has nothing to reveal it the
+  // way it would on a Lunar-Lambert-lit rocky body.
+  { id: "sun", surface: "sun-2k" },
 
   // --- Earth: the one body whose surface is a CUBEMAP, not an equirect map ---
   // C4 CLOSEOUT (2026-07-21). The record said "Earth has height-but-no-surface". That was wrong,

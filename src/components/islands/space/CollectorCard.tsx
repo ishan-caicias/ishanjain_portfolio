@@ -1,6 +1,20 @@
 import { useEffect, useRef } from "react";
 import type { CelestialEntry } from "@/data/celestial/celestial.d.ts";
-import { figGeom, drawGlobe, rarityColor } from "@/lib/spaceHelpers";
+import {
+  figGeom,
+  drawGlobe,
+  rarityColor,
+  resolveCardVisual,
+  resolveFieldNote,
+  resolveLore,
+  clusterDots,
+  moonCraters,
+  asteroidSilhouette,
+  nebulaGradient,
+  galaxyGradient,
+  blackholeGradient,
+  moonGradient,
+} from "@/lib/spaceHelpers";
 import { moveFocusTo, restoreFocusTo, trapFocus } from "@/lib/focus-utils";
 import type { CardStyleMode } from "./types";
 
@@ -68,11 +82,27 @@ export default function CollectorCard({
 
   const tier = RARITY_TIERS[e.r] || 1;
   const rc = rarityColor(e.r);
-  const isGlobe =
-    (e.t === "planet" || e.t === "moon" || e.t === "dwarf") && !!e.img;
-  const isFig = !!e.fig;
-  const isStar = !e.img && !isFig;
-  const isImg = !!e.img && !isGlobe;
+  // PF-11 defect P1 fix: the fallback used to be computed purely from `!!e.img`/`!!e.fig`,
+  // never consulting `e.t` — so a photo-less galaxy/nebula/cluster/black hole rendered the same
+  // sun-texture "star" glow as an actual star, under a false "SPECTRAL RENDER" caption. See
+  // `resolveCardVisual`'s own header comment (src/lib/spaceHelpers.ts) for the full account.
+  const visual = resolveCardVisual(e);
+  // Bulk-generated catalog entries with no content pass yet carry an internal `[[TODO: ...]]`
+  // authoring marker as `e.f` (TR-061's honesty convention — an explicit placeholder rather than
+  // invented flavour text). `resolveFieldNote` filters that marker out; `null` means omit the
+  // FIELD NOTE section entirely rather than show the raw marker or fabricate a sentence.
+  const fieldNote = resolveFieldNote(e);
+  const isGlobe = visual.kind === "globe";
+  const isFig = visual.kind === "figure";
+  const isStar = visual.kind === "star";
+  const isImg = visual.kind === "photo";
+  const isNebula = visual.kind === "nebula";
+  const isGalaxy = visual.kind === "galaxy";
+  const isCluster = visual.kind === "cluster";
+  const isBlackhole = visual.kind === "blackhole";
+  const isMoon = visual.kind === "moon";
+  const isAsteroid = visual.kind === "asteroid";
+  const isGeneric = visual.kind === "generic";
   const fig = isFig ? figGeom(e) : null;
   const c = e.c || "#ffd54f";
   const foilOpacity = FOIL_OPACITY[e.r] ?? 0.16;
@@ -134,7 +164,7 @@ export default function CollectorCard({
     value: row[1],
     pct: Math.round(Math.max(0.04, Math.min(1, row[2] ?? 0.5)) * 100) + "%",
   }));
-  const lore = (e.lo || []).map((l) => ({
+  const lore = resolveLore(e).map((l) => ({
     culture: l[0].toUpperCase(),
     text: l[1],
   }));
@@ -311,6 +341,97 @@ export default function CollectorCard({
               ))}
             </svg>
           )}
+          {isNebula && (
+            <div
+              aria-hidden="true"
+              className="absolute inset-0"
+              style={{ background: nebulaGradient(c) }}
+            />
+          )}
+          {isGalaxy && (
+            <div
+              aria-hidden="true"
+              className="absolute inset-0"
+              style={{ background: galaxyGradient(c) }}
+            />
+          )}
+          {isBlackhole && (
+            <div
+              aria-hidden="true"
+              className="absolute inset-0"
+              style={{ background: blackholeGradient(c) }}
+            />
+          )}
+          {isCluster && (
+            <svg
+              viewBox="0 0 400 300"
+              className="absolute inset-0 h-full w-full"
+              aria-label="Cluster member scatter, illustrative"
+            >
+              {clusterDots(e).map((d, i) => (
+                <circle
+                  key={i}
+                  cx={d.x}
+                  cy={d.y}
+                  r={d.r}
+                  fill={c}
+                  opacity={0.75}
+                />
+              ))}
+            </svg>
+          )}
+          {isMoon && (
+            <>
+              <div
+                aria-hidden="true"
+                className="absolute inset-0"
+                style={{ background: moonGradient(c) }}
+              />
+              <svg
+                viewBox="0 0 400 300"
+                className="absolute inset-0 h-full w-full"
+                aria-label="Surface relief, illustrative"
+              >
+                {moonCraters(e).map((d, i) => (
+                  <circle
+                    key={i}
+                    cx={d.x}
+                    cy={d.y}
+                    r={d.r}
+                    fill="#000"
+                    opacity={0.22}
+                  />
+                ))}
+              </svg>
+            </>
+          )}
+          {isAsteroid && (
+            <svg
+              viewBox="0 0 400 300"
+              className="absolute inset-0 h-full w-full"
+              aria-label="Silhouette, illustrative"
+            >
+              <polygon
+                points={asteroidSilhouette(e)}
+                fill={c}
+                opacity={0.8}
+                stroke={c}
+                strokeOpacity={0.9}
+                strokeWidth={1.5}
+              />
+            </svg>
+          )}
+          {isGeneric && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div
+                aria-hidden="true"
+                className="aspect-square w-[60%] rounded-full blur-[0.5px]"
+                style={{
+                  background: `radial-gradient(circle, ${c}cc 0%, ${c}55 45%, transparent 75%)`,
+                }}
+              />
+            </div>
+          )}
           {vShowFoil && (
             <div
               aria-hidden="true"
@@ -325,13 +446,7 @@ export default function CollectorCard({
             />
           )}
           <div className="absolute bottom-1.5 left-2 font-mono text-[9px] tracking-wider text-[#e8eaf6]/60">
-            {isFig
-              ? "FIGURE · HIPPARCOS POSITIONS"
-              : isGlobe
-                ? "SURFACE MAP · NASA / GAIA SKY"
-                : isStar
-                  ? "SPECTRAL RENDER · " + (e.sp || "")
-                  : "IMAGE · " + (e.crd || "NASA / ESA ARCHIVES")}
+            {visual.caption}
           </div>
         </div>
 
@@ -382,14 +497,16 @@ export default function CollectorCard({
           </div>
         )}
 
-        <div className="mt-3 rounded-[10px] bg-[#1a237e]/35 px-3 py-2.5">
-          <div className="font-mono text-[9.5px] tracking-[0.24em] text-[#ffd54f]">
-            ✦ FIELD NOTE
+        {fieldNote && (
+          <div className="mt-3 rounded-[10px] bg-[#1a237e]/35 px-3 py-2.5">
+            <div className="font-mono text-[9.5px] tracking-[0.24em] text-[#ffd54f]">
+              ✦ FIELD NOTE
+            </div>
+            <p className="mt-1.5 text-[13.5px] leading-relaxed text-[#c5cae9]">
+              {fieldNote}
+            </p>
           </div>
-          <p className="mt-1.5 text-[13.5px] leading-relaxed text-[#c5cae9]">
-            {e.f}
-          </p>
-        </div>
+        )}
 
         {lore.length > 0 && (
           <div className="mt-3">

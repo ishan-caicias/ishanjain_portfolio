@@ -10,9 +10,24 @@
  * star** while Babylon's `_field.positions` is **3**. A verbatim port doesn't crash and
  * doesn't fail a render — it silently flies the ship to a neighbouring star. The stride
  * assertions below are the thing that stops that regressing back.
+ *
+ * PF-11 P2b adds two more pure exports here for the same off-GPU-testability reason:
+ * `isPromotableFieldType` (which field object-type byte `_fieldBody` memoizes into a real
+ * `this.bodies` entry — white dwarfs only) and `arrivalStandoffFor` (the arrival-standoff
+ * selection `travelTo` uses, extracted so a promoted white dwarf's standoff is checkable
+ * without a live scene).
  */
 import { describe, expect, it } from "vitest";
-import { fieldStarTarget } from "@/lib/babylon-engine";
+import {
+  arrivalStandoffFor,
+  fieldStarTarget,
+  isPromotableFieldType,
+} from "@/lib/babylon-engine";
+import {
+  ARRIVE_STANDOFF,
+  PLANET_ARRIVE_STANDOFF,
+  NEBULA_ARRIVE_STANDOFF_FACTOR,
+} from "@/lib/ship-dynamics";
 
 /** Three stars at unambiguous, easily-checked coordinates: index 0 on +X, index 1 on +Y,
  * index 2 on +Z — chosen so a 4-stride misread produces obviously wrong values rather than
@@ -87,5 +102,68 @@ describe("fieldStarTarget — direction", () => {
   it("emits a finite (zero) direction rather than NaN for a star at the origin", () => {
     const dir = fieldStarTarget("fs-0", new Float32Array([0, 0, 0]), 1)!.dir;
     expect(dir.every((c) => Number.isFinite(c))).toBe(true);
+  });
+});
+
+/**
+ * PF-11 P2b — the white-dwarf real-body carve-out. `_fieldBody` (private, requires a live
+ * scene, not unit-testable directly) delegates its promotion decision and its caller's
+ * arrival-standoff selection to these two pure functions specifically so the carve-out's
+ * regression-relevant contract is checkable off-GPU, the same reasoning this file's other
+ * describe blocks already use for `fieldStarTarget`.
+ */
+describe("isPromotableFieldType — which field classes _fieldBody memoizes into this.bodies", () => {
+  it("promotes white dwarfs only (FIELD_TYPES[2] in spaceHelpers.ts)", () => {
+    expect(isPromotableFieldType(2)).toBe(true);
+  });
+
+  it("does not promote any other field class — base stars, or any other PF-10 bonus layer", () => {
+    // 0 = base HIP/deep star, 1 = open cluster, 3 = SDSS galaxy, 4 = GD-1, 5 = exoplanet host,
+    // 6 = DR3 asteroid (moves under GPU orbital motion — see _fieldBody's header for why this
+    // MUST stay ephemeral, or a cached position would silently drift from the rendered one),
+    // 7 = Oort dust grain.
+    for (const type of [0, 1, 3, 4, 5, 6, 7]) {
+      expect(isPromotableFieldType(type)).toBe(false);
+    }
+  });
+});
+
+describe("arrivalStandoffFor — a promoted (or ephemeral) field body gets ARRIVE_STANDOFF", () => {
+  it("falls through to ARRIVE_STANDOFF for a field object (no `.t`, not a nebula id)", () => {
+    // Matches EXACTLY the shape `_fieldBody` constructs for a synthesized/promoted white
+    // dwarf: `e` carries id/ra/dec/ly but never `.t`, so the planet/moon/dwarf branch can never
+    // match, and an `fs-<i>` id will never coincidentally equal a curated nebula's id.
+    const fieldBody = { e: { id: "fs-123456" } };
+    expect(arrivalStandoffFor(fieldBody, [])).toBe(ARRIVE_STANDOFF);
+  });
+
+  it("gives planet/moon/dwarf bodies the larger, decoupled PLANET_ARRIVE_STANDOFF", () => {
+    expect(arrivalStandoffFor({ e: { id: "earth", t: "planet" } }, [])).toBe(
+      PLANET_ARRIVE_STANDOFF,
+    );
+    expect(arrivalStandoffFor({ e: { id: "moon", t: "moon" } }, [])).toBe(
+      PLANET_ARRIVE_STANDOFF,
+    );
+    expect(arrivalStandoffFor({ e: { id: "ceres", t: "dwarf" } }, [])).toBe(
+      PLANET_ARRIVE_STANDOFF,
+    );
+  });
+
+  it("gives a real-volume nebula a multiple of its own radius, keyed by id", () => {
+    const volumes = [{ id: "orion-nebula", radius: 40 }];
+    expect(
+      arrivalStandoffFor({ e: { id: "orion-nebula" } }, volumes),
+    ).toBeCloseTo(40 * NEBULA_ARRIVE_STANDOFF_FACTOR, 10);
+  });
+
+  it("never applies the volumetric standoff by `.t === 'nebula'` alone — presence in the volume list is what matters", () => {
+    // A billboard-only DSO typed "nebula" but absent from the (deliberately empty here) volume
+    // list must still get ARRIVE_STANDOFF, not a volume-derived standoff it has no volume for.
+    expect(
+      arrivalStandoffFor(
+        { e: { id: "some-billboard-nebula", t: "nebula" } },
+        [],
+      ),
+    ).toBe(ARRIVE_STANDOFF);
   });
 });

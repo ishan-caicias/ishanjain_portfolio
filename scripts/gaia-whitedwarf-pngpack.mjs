@@ -17,8 +17,12 @@
  * — i.e. real linear light-year distance, not the logarithmic bodyDepth() scale curated
  * destination bodies use.
  *
- * Magnitude byte: same formula star-catalog.ts's decoder documents (mag = 12.5 - m/255*14),
- * inverted to solve for the byte from a real phot_g_mean_mag value.
+ * Magnitude byte: same formula star-catalog.ts's decoder documents (PF-11 P2b rescale:
+ * mag = 21.5 - 32*t + 9*t^2, t = byte/255), inverted to solve for the byte from a real
+ * phot_g_mean_mag value. This rescale is WHY this script exists as a regeneration target: the
+ * old 14-mag-range formula floored at mag 12.5, so all 359,073 rows here saturated to byte 0
+ * (TR-063's documented finding); the new formula extends the floor to mag 21.5 (max observed G
+ * in this catalog is 21.00), so the real population now spreads across bytes ~0-83 instead.
  *
  * Colour byte: TR-064 Astra REALISM-AUDIT applied (2026-07-20, this session) — real Gaia bp_rp
  * (BP-RP, standard blue-minus-red colour index) clamped to [-0.6, 1.2], the literature-informed
@@ -63,8 +67,9 @@ function raDecToDir(ra, dec) {
 }
 
 function magToByte(mag) {
-  // inverse of: mag = 12.5 - byte/255*14
-  return ((12.5 - mag) / 14) * 255;
+  // inverse of: mag = 21.5 - 32*t + 9*t^2, t = byte/255 (PF-11 P2b rescale)
+  const t = (32 - Math.sqrt(1024 - 36 * (21.5 - mag))) / 18;
+  return t * 255;
 }
 
 function colourToByte(bpRp) {

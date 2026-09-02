@@ -21,10 +21,11 @@
  * uses, scaled by real distance in light-years derived from parallax (mas): pc = 1000/parallax,
  * ly = pc * 3.26156 — identical convention to gaia-whitedwarf-pngpack.mjs.
  *
- * Magnitude byte: same formula star-catalog.ts's decoder documents (mag = 12.5 - m/255*14).
- * CNS5 stars are naked-eye-adjacent to modestly faint (unlike the white dwarfs, which all
- * saturated the format) — real G magnitudes here mostly land inside the format's actual range,
- * a genuinely different population behaviour worth recording.
+ * Magnitude byte: same formula star-catalog.ts's decoder documents (PF-11 P2b rescale:
+ * mag = 21.5 - 32*t + 9*t^2, t = byte/255). CNS5 stars are naked-eye-adjacent to modestly faint
+ * (unlike the white dwarfs, which all saturated the OLD 12.5-mag-floor format) — real G
+ * magnitudes here mostly land inside even the old format's range, a genuinely different
+ * population behaviour worth recording; the new format only widens that margin further.
  *
  * Colour byte: bp_rp = bp_mag - rp_mag (both real Gaia bands present in this catalog, unlike a
  * pre-computed bp_rp column), clamped to the SAME [-0.5, 2.0] main-sequence-shaped span
@@ -53,7 +54,9 @@ function raDecToDir(ra, dec) {
 }
 
 function magToByte(mag) {
-  return ((12.5 - mag) / 14) * 255;
+  // inverse of: mag = 21.5 - 32*t + 9*t^2, t = byte/255 (PF-11 P2b rescale)
+  const t = (32 - Math.sqrt(1024 - 36 * (21.5 - mag))) / 18;
+  return t * 255;
 }
 
 function colourToByte(bpRp) {
@@ -92,7 +95,9 @@ function main() {
       skippedNoMag++;
       continue;
     }
-    if (row.g_mag <= 12.5) inRangeMagCount++;
+    // PF-11 P2b: the format's floor moved from mag 12.5 to mag 21.5 — this threshold now
+    // tracks the NEW floor so the diagnostic stays meaningful under the rescaled format.
+    if (row.g_mag <= 21.5) inRangeMagCount++;
     const distancePc = 1000 / row.parallax;
     const distanceLy = distancePc * PC_TO_LY;
     const [dx, dy, dz] = raDecToDir(row.ra, row.dec);
@@ -117,7 +122,7 @@ function main() {
     });
   }
   console.log(
-    `skipped ${skippedNoParallax} (no parallax), ${skippedNoMag} (no g_mag); ${inRangeMagCount}/${records.length} records fall inside the format's naked-eye byte range (mag <= 12.5) — unlike the white-dwarf population, most of CNS5 does NOT saturate`,
+    `skipped ${skippedNoParallax} (no parallax), ${skippedNoMag} (no g_mag); ${inRangeMagCount}/${records.length} records fall inside the format's byte range (mag <= 21.5, PF-11 P2b floor) — unlike the pre-rescale white-dwarf population, most of CNS5 was never anywhere near saturating even the old mag-12.5 floor`,
   );
 
   mkdirSync(dirname(args.out), { recursive: true });

@@ -201,7 +201,7 @@ import {
       float dty = aMeta.w * 255.0;
       vType = dty;
       // photometric: Pogson magnitude -> flux over the full Hipparcos window; no twinkle in vacuum
-      float mag = 12.5 - aMeta.x*14.0;
+      float mag = 21.5 - 32.0*aMeta.x + 9.0*aMeta.x*aMeta.x; // PF-11 P2b rescale
       float flux = pow(10.0, -0.4*(mag - 2.0));
       float fl = pow(flux, 0.28);
       px = (0.9 + 2.6*fl) * uSize * (520.0/max(dist,90.0));
@@ -1359,7 +1359,9 @@ import {
       const type = this.fieldB[i * 16 + 15];
       // stars are linear (real parallax); deep-layer objects use the log-compressed depth scale
       const ly = type > 0 ? Math.pow(10, (r - 150) / 128) - 1.5 : r * 3.9;
-      return { ra, dec, ly, mg: 12.5 - (sizeB / 255) * 14, ci, type };
+      // PF-11 P2b rescale — mirrors the GLSL decode above.
+      const t = sizeB / 255;
+      return { ra, dec, ly, mg: 21.5 - 32 * t + 9 * t * t, ci, type };
     }
     _pickField(x, y) {
       // nearest field star within a ~0.6° cone of the cursor ray; -1 if none

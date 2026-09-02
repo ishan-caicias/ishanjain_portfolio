@@ -59,7 +59,18 @@ import sharp from "sharp";
 const BIN_PATH = "resources/gaia_datasets/catalog-sdss-18/sdss/sdss_dr18.bin";
 const PC_TO_LY = 3.26156;
 const GALAXY_TYPE_BYTE = 3; // "galaxy smudge" — already a real shader branch (babylon-engine.ts)
-const UNIFORM_MAG_BYTE = 60; // moderate brightness (no real photometry in source — see header)
+// PF-11 P2b: recomputed to preserve the ORIGINAL intended "moderate brightness" real magnitude
+// (~9.21) under the rescaled decode formula (mag = 21.5 - 32*t + 9*t^2, t = byte/255) — byte 60
+// meant mag 9.21 under the old 12.5-floor formula; see gaia-oortcloud-pngpack.mjs's sibling
+// note for why leaving the byte unchanged would silently shift the intended brightness.
+// NOT YET REGENERATED as of this change (out of P2b's regeneration scope — this header's own
+// "NOT attempted here" note above is stale, `assets/sdss18.png` IS wired live via
+// babylon-engine.ts's `_loadSdssGalaxyLayer`; regenerating this 47 MB asset is real disk/CPU
+// cost, deferred as a manual follow-up step, NOT covered by `assets:craft`/`assets:verify`).
+// Until this script is re-run, the SHIPPED sdss18.png still carries the OLD byte (60), which the
+// now-updated shared decode formula reinterprets as mag ~14.47 instead of the intended ~9.21 —
+// a real, live, undocumented dimming of the SDSS galaxy layer. Flagged, not silently left.
+const UNIFORM_MAG_BYTE = 112; // moderate brightness (~mag 9.21, unchanged intent — see note above)
 const UNIFORM_COLOUR_BYTE = 140; // warm-neutral, mid-ramp
 
 function parseArgs(argv) {
